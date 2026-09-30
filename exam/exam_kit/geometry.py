@@ -57,23 +57,78 @@ def glyphs(page) -> list:
             and not (windows and all(abs(a - b) < 0.01 for a, b in zip(d["fill"], _형광펜)))] + type3_glyphs(page)
 
 
+def hancom_windows_pdf(pdf: Path) -> bool:
+    """pdf가 Windows 한컴이 저장한 PDF인가(생성기 'Hancom PDF')."""
+    with pymupdf.open(str(pdf)) as doc:
+        return (doc.metadata or {}).get("producer", "").startswith("Hancom PDF")
+
+
+_잉크 = bytes(1 if v < 128 else 0 for v in range(256))  # 회색 픽셀 → 잉크(1)·바탕(0). 노란 형광펜(밝기 약 226)은 바탕
+_잉크_배율 = 4.0  # 288dpi — 잉크 상자의 눈금 0.25pt
+_type3_캐시: dict[tuple, list] = {}
+
+
 def type3_glyphs(page) -> list:
     """Windows 한컴 PDF(생성기 'Hancom PDF')의 Type3 글꼴 글자 상자 — macOS 한컴이 곡선으로 내보내는 본문 글자다.
 
     macOS 한컴 PDF는 본문 글꼴을 채움 도형(곡선)으로 쓰고 〈보기〉 ㄱ·ㄴ·ㄷ·∼는 텍스트 층에 둔다. Windows 한컴 PDF는 이 글자들을
-    모두 Type3 글꼴 글자로 쓴다 — 도형이 아니라 get_drawings()에 안 잡힌다. 글자마다 정확한 글리프 상자(TEXT_ACCURATE_BBOXES)로
-    잰다: 세로는 잉크에 붙고, 가로는 글자 폭 상자(펜 자리)다. 문항 번호는 Windows에서도 곡선으로 그리고 그 위에 안 보이는
-    Type3 글자(불투명도 0)를 겹쳐 두므로, 안 보이는 글자는 뺀다. 다른 생성기의 PDF(macOS)에는 아무것도 더하지 않는다.
+    모두 Type3 글꼴 글자로 쓴다 — 도형이 아니라 get_drawings()에 안 잡힌다. 문항 번호는 Windows에서도 곡선으로 그리고 그 위에
+    안 보이는 Type3 글자(불투명도 0)를 겹쳐 두므로, 안 보이는 글자는 뺀다. 상자는 곡선의 도형 상자처럼 잉크에 붙인다: 글자마다
+    정확한 글리프 상자(TEXT_ACCURATE_BBOXES — 세로는 잉크에 가깝고 가로는 글자 폭) 안에서 쪽을 래스터로 그린 잉크를 잰다(_잉크_상자).
+    다른 생성기의 PDF(macOS)에는 아무것도 더하지 않는다. 같은 파일·쪽은 한 번만 잰다.
     """
     if not _hancom_windows_pdf(page):
         return []
     type3 = {f[3] for f in page.get_fonts() if f[2] == "Type3"}
     if not type3:
         return []
+    key = None
+    if page.parent.name:
+        try:
+            st = Path(page.parent.name).stat()
+            key = (page.parent.name, st.st_mtime_ns, st.st_size, page.number)
+        except OSError:
+            key = None
+    if key is not None and key in _type3_캐시:
+        return list(_type3_캐시[key])
     flags = pymupdf.TEXTFLAGS_RAWDICT | pymupdf.TEXT_ACCURATE_BBOXES
-    return [pymupdf.Rect(ch["bbox"]) for b in page.get_text("rawdict", flags=flags)["blocks"]
-            for ln in b.get("lines", []) for sp in ln["spans"] if sp["font"] in type3 and sp.get("alpha", 255) > 0
-            for ch in sp["chars"] if ch["c"].strip()]
+    boxes = [pymupdf.Rect(ch["bbox"]) for b in page.get_text("rawdict", flags=flags)["blocks"]
+             for ln in b.get("lines", []) for sp in ln["spans"] if sp["font"] in type3 and sp.get("alpha", 255) > 0
+             for ch in sp["chars"] if ch["c"].strip()]
+    boxes = _잉크_상자(page, boxes) if boxes else boxes
+    if key is not None:
+        _type3_캐시[key] = boxes
+    return list(boxes)
+
+
+def _잉크_상자(page, boxes: list) -> list:
+    """글자 폭 상자마다 그 안의 잉크 상자(쪽을 _잉크_배율로 한 번 그려 잰다). 잉크가 없으면 원래 상자.
+
+    창은 글자 폭 상자 그대로다 — 옆 글자의 잉크가 섞이지 않게. 글자 폭 밖으로 삐져나온 잉크는 잘린다(드물다).
+    """
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(_잉크_배율, _잉크_배율), colorspace=pymupdf.csGRAY, alpha=False)
+    w, h, z = pix.width, pix.height, _잉크_배율
+    ink = pix.samples.translate(_잉크)
+    out = []
+    for r in boxes:
+        x0, x1 = max(0, int(r.x0 * z)), min(w, int(-(-r.x1 * z // 1)))
+        y0, y1 = max(0, int(r.y0 * z)), min(h, int(-(-r.y1 * z // 1)))
+        top = bottom = left = right = None
+        for y in range(y0, y1):
+            row = ink[y * w + x0:y * w + x1]
+            i = row.find(1)
+            if i < 0:
+                continue
+            j = row.rfind(1)
+            top = y if top is None else top
+            bottom = y
+            left = i if left is None else min(left, i)
+            right = j if right is None else max(right, j)
+        if top is None:
+            out.append(r)
+        else:
+            out.append(pymupdf.Rect((x0 + left) / z, top / z, (x0 + right + 1) / z, (bottom + 1) / z))
+    return out
 
 
 def separator_x(kit: Kit) -> float:

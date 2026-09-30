@@ -334,3 +334,19 @@ def test_보고서의_파일_열기_명령은_OS에_맞다(tmp_path, monkeypatch
     assert B._reveal(p) == f'open -R "{p.resolve()}"' and B._open(p) == f'open "{p.resolve()}"'
     monkeypatch.setattr(B.sys, "platform", "win32")
     assert B._reveal(p) == f'explorer /select,"{p.resolve()}"' and B._open(p) == f'explorer "{p.resolve()}"'
+
+
+def test_두_판_배치_대조는_Windows_형광펜_밀림만_봐준다():
+    """drift > 0(Windows 한/글 PDF): 답 표시본 머리가 그 단에서 앞선 머리 수 × drift + tol까지 아래로 밀려도 같다.
+    위로 밀리거나, 단이 바뀌거나, 허용보다 더 밀리면 다르다."""
+    def 판(*ys, col=1):
+        return [PageLayout(1, (ColumnLayout(1, col, 60.0, 900.0, ys, True),), None)]
+
+    plain = 판(100.0, 300.0, 500.0)
+    key = 판(100.0, 300.6, 501.0)  # 앞선 정답 줄 1·2개만큼 밀림(0.6·1.0)
+    assert len(same_layout(plain, key)) == 2  # macOS 기준(±0.5)으로는 다르다
+    assert same_layout(plain, key, drift=0.4) == []  # 허용: 0.9 · 1.3
+    assert len(same_layout(plain, 판(100.0, 300.0, 501.4), drift=0.4)) == 1  # 1.4 > 1.3
+    assert len(same_layout(plain, 판(100.0, 299.3, 500.0), drift=0.4)) == 1  # 위로 0.7
+    assert len(same_layout(plain, 판(100.0, 300.0, 500.0, col=2), drift=0.4)) == 3  # 단이 다르다
+

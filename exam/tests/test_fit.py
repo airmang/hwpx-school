@@ -406,7 +406,7 @@ def test_가짜_그대로_둔_접힘이_자간으로_풀리면_note를_고친다
 def test_렌더_보기_항목_자리는_제출본_다수_기하(양식_hwpx, 오라클, tmp_path):
     """〈보기〉 항목 = 제출본 교사 다수 기하(Task 29 판정): 기호 ㄱ·ㄴ(텍스트 층) x = 단 왼끝 + 7.13pt(앞 공백 판 12.41에서
     공백 한 칸만큼 왼쪽), 둘째 줄 첫 글리프 = 단 왼끝 + 26.9~27.6pt(내어쓰기 1950 — 앞 판 2500보다 5.5pt 왼쪽). G3d 렌더 실측 ±0.5pt."""
-    from exam_kit.geometry import boxes, column_lefts
+    from exam_kit.geometry import boxes, column_lefts, hancom_windows_pdf
     from exam_kit.render import render
 
     kit, doc = _마무리(양식_hwpx, 보기_md)
@@ -417,8 +417,18 @@ def test_렌더_보기_항목_자리는_제출본_다수_기하(양식_hwpx, 오
 
     cl = column_lefts(kit)[0]
     with pymupdf.open(str(pdf)) as d:
-        xs = [ch["bbox"][0] - cl for b in d[0].get_text("rawdict")["blocks"] for ln in b.get("lines", [])
-              for sp in ln["spans"] if sp["font"].startswith("HCRBatang") for ch in sp["chars"] if ch["c"] in "ㄱㄴ"
+        page = d[0]
+        if hancom_windows_pdf(pdf):  # Windows 한컴 PDF는 ㄱ·ㄴ도 보이는 Type3 글자다(macOS는 HCRBatang 텍스트 층) — 같은 펜 자리 x0
+            type3 = {f[3] for f in page.get_fonts() if f[2] == "Type3"}
+
+            def 기호_글꼴(sp) -> bool:
+                return sp["font"] in type3 and sp.get("alpha", 255) > 0
+        else:
+
+            def 기호_글꼴(sp) -> bool:
+                return sp["font"].startswith("HCRBatang")
+        xs = [ch["bbox"][0] - cl for b in page.get_text("rawdict")["blocks"] for ln in b.get("lines", [])
+              for sp in ln["spans"] if 기호_글꼴(sp) for ch in sp["chars"] if ch["c"] in "ㄱㄴ"
               and ch["bbox"][0] < cl + 20]
     assert len(xs) >= 2 and all(abs(x - 7.13) <= 0.5 for x in xs), xs
     [box] = [b for b in boxes(pdf, kit) if b.titled]

@@ -29,7 +29,7 @@ from hwpx.document import HwpxDocument
 from . import q
 from .compose import add_answer_marks, choice_paragraphs, compose
 from .fit import summary as spacing_summary
-from .geometry import PageLayout, measure
+from .geometry import PageLayout, hancom_windows_pdf, measure
 from .kit import Kit, load_kit, style_ids
 from .layout import GAPS, PACKS, head_places, settle
 from .lint import Violation, lint
@@ -44,6 +44,7 @@ from .verify import Finding, _f, errors, question_heads, verify_document, verify
 STAGE = ("엔진 산출물 — 사용자 검수 전에는 제출·인쇄에 쓰지 않는다. "
          "한글에서 고친 나눔·간격은 남는다: 수정은 원고(md)에서 하고 다시 뽑는다.")
 HEAD_TOL = 0.5  # 두 판 문항 머리 y 허용 차(pt)
+MARKPEN_DRIFT = 0.4  # Windows 한/글: 형광펜 칠한 줄 하나가 아래 문항 머리를 미는 양의 상한(pt, 실측 약 0.3)
 판 = ("문항지", "답표시본")
 
 
@@ -79,17 +80,23 @@ class BuildResult:
 
 # ---- 두 판 대조 ----------------------------------------------------------------
 
-def same_layout(a: list[PageLayout], b: list[PageLayout], *, tol: float = HEAD_TOL) -> list[str]:
-    """두 렌더의 쪽 수·문항 머리 자리(쪽, 단, y ±tol)가 같은지 — 다른 점 목록(같으면 [])."""
+def same_layout(a: list[PageLayout], b: list[PageLayout], *, tol: float = HEAD_TOL, drift: float = 0.0) -> list[str]:
+    """두 렌더의 쪽 수·문항 머리 자리(쪽, 단, y ±tol)가 같은지 — 다른 점 목록(같으면 []).
+
+    drift > 0이면 b의 머리가 아래로 tol + drift × (그 단에서 앞선 머리 수)까지 밀려도 같은 자리로 본다. Windows 한/글은 형광펜을
+    칠한 줄을 조금 높게 그려, 답 표시본에서 앞선 문항의 정답 줄 수만큼 아래 머리가 밀린다(macOS 한/글은 밀지 않는다).
+    쪽·단은 그대로 같아야 하고, 위로 밀리는 것은 tol까지다.
+    """
     out = []
     if len(a) != len(b):
         out.append(f"쪽 수 {len(a)} ≠ {len(b)}")
-    ha = [(c.page, c.col, y) for p in a for c in p.columns for y in c.heads]
+    ha = [(c.page, c.col, y, i) for p in a for c in p.columns for i, y in enumerate(c.heads)]
     hb = [(c.page, c.col, y) for p in b for c in p.columns for y in c.heads]
     if len(ha) != len(hb):
         out.append(f"문항 머리 수 {len(ha)} ≠ {len(hb)}")
     for k, (x, y) in enumerate(zip(ha, hb), 1):
-        if x[:2] != y[:2] or abs(x[2] - y[2]) > tol:
+        d = y[2] - x[2]
+        if x[:2] != y[:2] or d < -tol or d > tol + drift * x[3]:
             out.append(f"{k}번 머리 {x[0]}쪽 {x[1]}단 y {x[2]:.1f} ≠ {y[0]}쪽 {y[1]}단 y {y[2]:.1f}")
     return out
 
@@ -227,7 +234,8 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
     fs = (verify_document(key, kit, expect_answers=res.answers, answer_key=True, draft=r.draft)
           + verify_render(key_rr, key, kit, expected_pages=s.render.page_count))
     fs += [_f("M8", f"두 판이 형광펜 말고도 다르다: {d}") for d in same_package(plain_path, key_path)]
-    fs += [_f("M8", f"두 판 배치가 다르다: {d}") for d in same_layout(s.layout, measure(key_rr.pdf, kit))]
+    drift = MARKPEN_DRIFT if hancom_windows_pdf(key_rr.pdf) else 0.0  # Windows 한/글은 형광펜 줄이 머리를 조금 민다
+    fs += [_f("M8", f"두 판 배치가 다르다: {d}") for d in same_layout(s.layout, measure(key_rr.pdf, kit), drift=drift)]
     r.findings["답표시본"] = fs
 
     r.pngs = {"문항지": _copy_pages(s.render.pages, out_dir / "렌더", f"{stem}_문항지"),
@@ -307,8 +315,9 @@ def write_report(r: BuildResult, *, md_path: Path, gap: str = "distribute", comp
         L.append(f"- {ed}: 기계 잔존 {r.residue(ed)}" + (f" · 경고 {len(warn)}" if warn else ""))
         L += [f"  - {f.code} [{f.level}] {f.msg}" for f in fs]
     L += ["- 두 판 대조는 답표시본 줄의 M8에 든다: hwpx는 절 XML에서 형광펜 태그를 빼면 바이트가 같고 나머지 zip 부분도 "
-          "바이트가 같아야 하며, 렌더는 쪽 수와 문항 머리 자리(쪽·단·y ±0.5pt)가 같아야 한다.",
-          "- 형광펜은 한컴 PDF에 그려지지 않는다 — 답 표시본의 정답은 hwpx에서 뽑아 대조했다(M11).", ""]
+          "바이트가 같아야 하며, 렌더는 쪽 수와 문항 머리 자리(쪽·단·y ±0.5pt)가 같아야 한다. Windows 한/글 PDF는 형광펜 줄이 "
+          "머리를 조금 밀어, 그 단에서 앞선 정답 줄마다 아래로 0.4pt씩 더 둔다.",
+          "- 형광펜은 macOS 한컴 PDF에 그려지지 않는다(Windows는 그린다) — 답 표시본의 정답은 hwpx에서 뽑아 대조했다(M11).", ""]
 
     L += ["## 배치", f"- 쪽수 {r.page_count}" + (f"(첫 렌더 {r.pages[0]}쪽)" if r.pages else "") + f" · 단 나눔 {pack} · 간격 {gap} · 렌더 "
           + " · ".join(f"{k} {n}회" for k, n in r.renders.items() if n)]
