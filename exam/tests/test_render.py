@@ -89,6 +89,7 @@ def test_한컴_띄우기는_멈춘_호출에_막히지_않는다(monkeypatch):
         호출.append(kw.get("timeout"))
         raise subprocess.TimeoutExpired(args, kw.get("timeout") or 0)
 
+    monkeypatch.setattr(R.sys, "platform", "darwin")  # 한컴 앱을 띄우는 것은 macOS뿐 — Windows는 COM이 띄운다
     monkeypatch.setattr(R.subprocess, "run", 멈춤)
     monkeypatch.setattr(R.time, "sleep", lambda s: None)
     assert R.launch_hancom(wait=0.05) is False
@@ -126,22 +127,31 @@ def test_side_by_side_쪽_수가_다르면_없는_쪽은_빈_칸(tmp_path):
 
 
 def _쥐기(path, hold: float, ready):
-    import fcntl
     import time
 
+    import exam_kit.render as r
+
     with open(path, "a") as h:
-        fcntl.flock(h, fcntl.LOCK_EX)
+        while not r._try_lock(h):
+            time.sleep(0.01)
         ready.set()
         time.sleep(hold)
-        fcntl.flock(h, fcntl.LOCK_UN)
+        r._unlock(h)
 
 
 @pytest.mark.real_lock
 def test_잠금_경로는_upstream_공용_잠금():
-    """경로는 hwpx_automation 렌더 워커와 같은 파일(mac_session._gui_lock_path) — 스스로 만들지 않는다."""
-    from hwpx_automation.office.rendering.mac_session import _gui_lock_path
+    """macOS: hwpx_automation 렌더 워커와 같은 파일(mac_session._gui_lock_path) — 스스로 만들지 않는다.
+    Windows: upstream에 잠금이 없어(COM은 렌더마다 한컴을 따로 띄운다) 사용자 임시 폴더의 엔진 잠금 파일."""
+    import sys
+    import tempfile
 
     import exam_kit.render as r
+
+    if sys.platform == "win32":
+        assert r._lock_path() == Path(tempfile.gettempdir()) / "hwpx-school-hancom.lock"
+        return
+    from hwpx_automation.office.rendering.mac_session import _gui_lock_path
 
     assert r._lock_path() == _gui_lock_path()
 
@@ -196,8 +206,6 @@ def test_기한을_넘기면_HancomBusy(tmp_path, monkeypatch):
 def test_렌더와_줄_캐시_저장은_잠금_안에서(tmp_path, monkeypatch):
     """render()의 render_pdf, fit.hancom_lines의 refresh_document는 잠금을 쥔 채로 부른다 — 부르는 동안 다른 쪽은 못 잡는다.
     중첩(이미 쥔 스레드가 다시)은 스스로를 막지 않는다."""
-    import fcntl
-
     import exam_kit.render as r
     from exam_kit.fit import hancom_lines
 
@@ -206,11 +214,9 @@ def test_렌더와_줄_캐시_저장은_잠금_안에서(tmp_path, monkeypatch):
 
     def 잠겼나() -> bool:
         with open(lock, "a") as h:
-            try:
-                fcntl.flock(h, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            if not r._try_lock(h):
                 return True
-            fcntl.flock(h, fcntl.LOCK_UN)
+            r._unlock(h)
             return False
 
     seen = []
@@ -237,3 +243,46 @@ def test_렌더와_줄_캐시_저장은_잠금_안에서(tmp_path, monkeypatch):
     with r.hancom_lock(wait=1):
         with r.hancom_lock(wait=0.1):  # 중첩은 바로 들어간다
             pass
+
+
+# ---- 렌더 오라클 고르기(Windows COM · macOS 한글 앱) ----------------------------------------------
+
+
+def test_오라클은_닿는_실한컴을_고른다(monkeypatch):
+    """Windows COM이 닿으면 그것, 아니면 macOS 한글 앱 — 둘 다 없으면 RenderUnavailable."""
+    from hwpx_automation.office.rendering import oracle as O
+
+    import exam_kit.render as r
+
+    닿음 = {"win": True, "mac": True}
+    monkeypatch.setattr(O.WindowsComOracle, "available", lambda self: 닿음["win"])
+    monkeypatch.setattr(O.MacHancomOracle, "available", lambda self: 닿음["mac"])
+    o = r._oracle()
+    assert isinstance(o, O.WindowsComOracle) and o.timeout == 300.0
+    닿음["win"] = False
+    assert isinstance(r._oracle(), O.MacHancomOracle)
+    닿음["mac"] = False
+    with pytest.raises(r.RenderUnavailable, match="Windows: 한글 COM"):
+        r._oracle()
+    넘김 = object()
+    assert r._oracle(넘김) is 넘김  # 넘겨받은 오라클은 그대로
+
+
+def test_윈도우에서는_한컴을_띄우지_않는다(monkeypatch):
+    from exam_kit import render as R
+
+    monkeypatch.setattr(R.sys, "platform", "win32")
+    monkeypatch.setattr(R.subprocess, "run", lambda *a, **k: pytest.fail("COM이 한컴을 띄운다 — open·osascript를 부르지 않는다"))
+    assert R.launch_hancom(wait=0.05) is True
+
+
+def test_저장을_못_하는_오라클이면_줄_캐시를_재지_않는다(tmp_path):
+    from exam_kit.fit import hancom_lines
+    from exam_kit.render import RenderUnavailable
+
+    class 렌더만:
+        def render_pdf(self, s, out):
+            return None
+
+    with pytest.raises(RenderUnavailable, match="refresh_document"):
+        hancom_lines(_합성_hwpx(tmp_path), tmp_path / "줄", oracle=렌더만())

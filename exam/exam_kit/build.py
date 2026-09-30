@@ -249,6 +249,16 @@ def _q(p: Path) -> str:
     return f'"{Path(p).resolve()}"'
 
 
+def _reveal(p: Path) -> str:
+    """파일 자리를 여는 명령 — macOS는 Finder(open -R), Windows는 탐색기에서 그 파일을 골라 둔다(explorer /select,)."""
+    return f"explorer /select,{_q(p)}" if sys.platform == "win32" else f"open -R {_q(p)}"
+
+
+def _open(p: Path) -> str:
+    """파일을 기본 앱으로 여는 명령 — macOS open, Windows explorer."""
+    return f"explorer {_q(p)}" if sys.platform == "win32" else f"open {_q(p)}"
+
+
 def headlines(r: BuildResult) -> list[str]:
     """'확인 필요' 맨 앞에 굵게 둘 줄 — 글귀가 아니라 상태로 정한다(규칙 오류를 넘겼는가, 쪽수가 늘었는가)."""
     out = []
@@ -269,13 +279,13 @@ def write_report(r: BuildResult, *, md_path: Path, gap: str = "distribute", comp
          "> 기계 검사 결과는 '기계 잔존 N'으로만 적는다. 판정은 사용자 검수 몫이다.",
          *([f"> 교사 습관값: {r.habits}"] if r.habits else []),
          *([f"> 학교 규칙: {r.school_rules}"] if r.school_rules else []), ""]
-    L += ["## 파일", f"- 원고: `open -R {_q(md_path)}`"]
+    L += ["## 파일", f"- 원고: `{_reveal(md_path)}`"]
     if r.blocked:
         L += ["- 규칙 오류가 있어 **조판하지 않았다**(`--lint-warn`이면 경고로 두고 조판한다).", ""]
     else:
         for name, p in (("문항지", r.문항지), ("답 표시본", r.답표시본)):
-            L.append(f"- {name}: `open -R {_q(p)}`")
-        L += [f"- 보고서: `open -R {_q(r.보고)}`", ""]
+            L.append(f"- {name}: `{_reveal(p)}`")
+        L += [f"- 보고서: `{_reveal(r.보고)}`", ""]
 
     items = [f"**{h}**" for h in headlines(r)] + list(r.notes)
     L += [f"## 확인 필요 ({len(items)})"]
@@ -314,13 +324,13 @@ def write_report(r: BuildResult, *, md_path: Path, gap: str = "distribute", comp
     L += ["## 렌더 PNG"]
     for ed in 판:
         for p in r.pngs.get(ed, []):
-            L.append(f"- `open {_q(p)}`")
+            L.append(f"- `{_open(p)}`")
     L.append("")
     if compare is not None or r.compare:
         L += ["## 제출본 대조(왼쪽 = 엔진 문항지, 오른쪽 = 제출본)"]
         if compare is not None:
-            L.append(f"- 제출본: `open -R {_q(compare)}`")
-        L += [f"- `open {_q(p)}`" for p in r.compare]
+            L.append(f"- 제출본: `{_reveal(compare)}`")
+        L += [f"- `{_open(p)}`" for p in r.compare]
         L.append("")
     r.보고.write_text("\n".join(L), encoding="utf-8")
     return r.보고

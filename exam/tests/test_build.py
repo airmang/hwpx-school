@@ -14,6 +14,7 @@ from lxml import etree as ET
 from exam_kit.build import (
     BuildResult,
     _clean,
+    _reveal,
     add_answer_marks,
     build,
     git_ignored,
@@ -132,7 +133,7 @@ def test_보고서는_확인_필요와_쪽_추가를_드러낸다(tmp_path):
     assert "## 확인 필요 (3)" in text and "9번 {답항=3행}" in text
     assert "- **[쪽 추가] 최종 쪽수가 첫 렌더 본문 기준보다 늘었다: 2쪽 → 3쪽" in text  # note 글귀가 아니라 쪽수로
     for p in ("a_문항지.hwpx", "a.md", "제출본.hwpx"):
-        assert f'open -R "{(tmp_path / p).resolve()}"' in text
+        assert f'`{_reveal(tmp_path / p)}`' in text
     assert "검증 완료" not in text
 
 
@@ -322,3 +323,14 @@ def test_단_나눔_pack은_settle의_balance로(양식_hwpx, tmp_path, monkeypa
     with pytest.raises(ValueError, match="pack"):
         build(md, load_kit(킷_디렉터리), tmp_path / "x", form_path=양식_hwpx, lint_block=False,
               render_fn=_렌더_금지, pack="first-fit")
+
+
+def test_보고서의_파일_열기_명령은_OS에_맞다(tmp_path, monkeypatch):
+    """macOS는 open(-R), Windows는 explorer(/select,) — 선생님이 보고서의 명령을 그대로 붙여 쓴다."""
+    import exam_kit.build as B
+
+    p = tmp_path / "a_문항지.hwpx"
+    monkeypatch.setattr(B.sys, "platform", "darwin")
+    assert B._reveal(p) == f'open -R "{p.resolve()}"' and B._open(p) == f'open "{p.resolve()}"'
+    monkeypatch.setattr(B.sys, "platform", "win32")
+    assert B._reveal(p) == f'explorer /select,"{p.resolve()}"' and B._open(p) == f'explorer "{p.resolve()}"'
