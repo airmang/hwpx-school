@@ -257,7 +257,7 @@ def _figure_line(src: str, w: str | None, number: int, figures: Path | None, out
         raise ValueError(f"{number}번 그림: {figures}에 '{tag}…_print.png'가 {len(found)}개다(하나여야 한다)")
     with Image.open(found[0]) as im:
         cm = natural_width_cm(im.width)
-    rel = os.path.relpath(found[0], out_dir)
+    rel = Path(os.path.relpath(found[0], out_dir)).as_posix()  # 원고 md의 그림 경로는 어느 OS에서나 /
     return f"![]({rel}){{width={cm:.1f}cm}}"
 
 
