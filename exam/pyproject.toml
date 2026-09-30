@@ -1,0 +1,25 @@
+[project]
+name = "exam-kit"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "python-hwpx-automation[oracle]>=7.2,<8",
+  "packaging>=23",
+  "pillow>=10",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["exam_kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["render: 실한컴 렌더가 필요한 테스트(오라클 픽스처를 쓰면 conftest가 붙인다) — 빼려면 -m \"not render\"",
+           "real_lock: 공용 한컴 잠금 경로를 테스트 잠금으로 바꾸지 않는다(경로만 보고 잠그지 않는 테스트)"]

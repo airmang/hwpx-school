@@ -1,0 +1,33 @@
+{
+  "source": "첫 등록 학교의 1학기 제출본 실측(2026-09) — 학교 제출본이 없을 때 쓰는 기본값",
+  "question_gap": 1760,
+  "question_gap_min": 880,
+  "gap_extra_max": null,
+  "letter_spacing_min": -17,
+  "letter_spacing_tail": 0.25,
+  "letter_spacing_role_min": {
+    "발문": -17,
+    "기타": -7
+  },
+  "letter_spacing_safety": 1,
+  "word_pull_min": -4,
+  "word_pull_gap": 2.0,
+  "gap_mode": "distribute",
+  "pack": "balanced",
+  "bogi_hanging_indent": -1950,
+  "grid": {
+    "in_margin": {
+      "left": 510,
+      "right": 510,
+      "top": 141,
+      "bottom": 141
+    },
+    "out_margin": {
+      "left": 0,
+      "right": 0,
+      "top": 284,
+      "bottom": 284
+    },
+    "min_col": 4000
+  }
+}

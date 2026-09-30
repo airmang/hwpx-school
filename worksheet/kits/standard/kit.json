@@ -1,0 +1,123 @@
+{
+  "kit": "standard",
+  "slots": {
+    "school": "",
+    "teacher": "",
+    "subject": "",
+    "grade": ""
+  },
+  "styles": {
+    "borderFill": {
+      "plain": 3,
+      "shade": 7,
+      "grid": 8,
+      "answer": 9,
+      "rule_head": 4,
+      "rule_line": 5,
+      "rule_last": 6
+    },
+    "charPr": {
+      "headline": 13,
+      "circle_num": 7,
+      "stamp": 11,
+      "body": 0,
+      "band_left": 8,
+      "band_teacher": 9,
+      "band_title": 10,
+      "band_name": 9,
+      "cell": 9,
+      "label": 9,
+      "heading_ref": 14,
+      "keyword_head": 10,
+      "prompt": 12
+    },
+    "paraPr": {
+      "body": 22,
+      "prompt": 23,
+      "center": 20,
+      "band_title": 20,
+      "band_name": 21,
+      "cell": 21,
+      "label": 20
+    }
+  },
+  "furniture": {
+    "rowHeight": {
+      "label": 2048,
+      "cell": 2131,
+      "answer": 2614
+    },
+    "heading": {
+      "textbookFormat": ": 교과서 {textbook}"
+    },
+    "band": {
+      "width": 41984,
+      "height": 5354,
+      "cols": [
+        4929,
+        8420,
+        15265,
+        13370
+      ],
+      "teacherLines": [
+        "{school} ",
+        "{subject} {teacher}"
+      ],
+      "nameLines": [
+        " {grade}   반     번",
+        " 이름 :          "
+      ]
+    },
+    "stamp": {
+      "curSz": [
+        8503,
+        5446
+      ],
+      "fill": null,
+      "line": "#000000",
+      "lineWidth": "33",
+      "text": "확인도장",
+      "pos": {
+        "horzOffset": 46774,
+        "vertOffset": 5961
+      }
+    },
+    "circle": {
+      "curSz": [
+        1713,
+        1712
+      ],
+      "fill": "#3B5B8A",
+      "line": "#FFFFFF",
+      "lineWidth": "0"
+    },
+    "keywordPage": {
+      "rows": 36,
+      "width": 50460,
+      "height": 64152,
+      "head": "오늘의 키워드 : "
+    },
+    "labelWidth": 4041
+  },
+  "bodyWidth": 50460,
+  "fonts": [
+    "함초롬돋움",
+    "함초롬바탕"
+  ],
+  "docx": {
+    "font": "맑은 고딕"
+  },
+  "fontMap": {},
+  "blocks": [
+    "정의빈칸",
+    "라벨설명",
+    "용어카드",
+    "비교표",
+    "답칸",
+    "그림칸",
+    "데이터표",
+    "발문",
+    "강조박스",
+    "나란히"
+  ]
+}

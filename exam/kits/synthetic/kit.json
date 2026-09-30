@@ -1,0 +1,287 @@
+{
+  "kit": "synthetic",
+  "version": "0.1.0",
+  "schema": 2,
+  "note": "합성 킷 — 학교와 무관한 합성 서식(synthetic_form.hwpx, tools/make_synthetic_form.py로 생성)과 짝. 엔진 테스트가 학교 킷 없이 돌게 한다. 실제 학교는 이 킷을 쓰지 않는다 — 학교 등록으로 자기 킷을 만든다.",
+  "form": {
+    "basename": "synthetic_form.hwpx",
+    "sha256": "496df9cb66ef7e8f036abf0a2f82922acc5ac0b32031f1638c78ee55d42eaa4a",
+    "note": "서식을 다시 만들면(문단 id가 매번 달라진다) 이 sha를 갱신한다"
+  },
+  "page": {
+    "width": 72852,
+    "height": 103180,
+    "margin": {
+      "top": 5669,
+      "bottom": 4000,
+      "left": 5000,
+      "right": 5000,
+      "header": 0,
+      "footer": 2000
+    }
+  },
+  "columns": {
+    "count": 2,
+    "gap": 1400,
+    "width": 30726,
+    "body_table_width": 29400
+  },
+  "styles": {
+    "normal": "바탕글",
+    "number": "문항",
+    "choice1": "1행답항",
+    "choice2": "2행답항",
+    "choice3": "3행답항",
+    "choice5": "5행답항",
+    "box_guide": "보기안",
+    "box": "자료안"
+  },
+  "number": {
+    "mode": "literal",
+    "format": "{n}. ",
+    "sample_pattern": "^\\d{1,3}\\.\\s?$"
+  },
+  "slots": {},
+  "slots_removed": [],
+  "placeholders": {},
+  "teacher_cell": null,
+  "text_slots": [
+    {
+      "name": "학년도·학기·차",
+      "where": {
+        "admin_table_with": "결  재",
+        "cell": [
+          0,
+          0
+        ],
+        "para": 0
+      },
+      "find": "\\d{4}학년도 \\d학기 \\d차",
+      "fill": "{학년도}학년도 {학기}학기 {차}차"
+    },
+    {
+      "name": "학년",
+      "where": {
+        "admin_table_with": "결  재",
+        "cell": [
+          0,
+          1
+        ],
+        "para": 0
+      },
+      "find": "\\d학년",
+      "fill": "{학년}학년"
+    },
+    {
+      "name": "과목",
+      "where": {
+        "admin_table_with": "결  재",
+        "cell": [
+          0,
+          1
+        ],
+        "para": 1
+      },
+      "find": "\\S+(?: \\S+)*",
+      "fill": "{과목}"
+    },
+    {
+      "name": "시행",
+      "where": {
+        "admin_table_with": "결  재",
+        "cell": [
+          1,
+          0
+        ]
+      },
+      "find": "\\S+월 \\S+일 \\(.\\) \\S+교시",
+      "fill": "{월}월 {일}일 ({요일}) {교시}교시"
+    },
+    {
+      "name": "출제교사",
+      "where": {
+        "admin_table_with": "결  재",
+        "cell": [
+          1,
+          1
+        ]
+      },
+      "find": "(?<=출제교사 : ).+",
+      "fill": "{출제교사}",
+      "each": "{name}",
+      "join": ", "
+    },
+    {
+      "name": "총점",
+      "where": {
+        "notice": true
+      },
+      "find": "총점 : \\S+점",
+      "fill": "총점 : {만점}점"
+    },
+    {
+      "name": "선택형",
+      "where": {
+        "notice": true
+      },
+      "find": "선택형 : \\S+점\\(\\S+문항\\)",
+      "fill": "선택형 : {선택형_만점}점({문항수}문항)"
+    },
+    {
+      "name": "꼬리말_과목학년",
+      "where": {
+        "footer_with": "쪽 중"
+      },
+      "find": "^.+?학년(?= \\()",
+      "fill": "{과목} {학년}학년"
+    },
+    {
+      "name": "총쪽수",
+      "where": {
+        "footer_with": "쪽 중"
+      },
+      "find": "\\(\\d+쪽 중",
+      "fill": "({총쪽수}쪽 중",
+      "read": "\\((\\d+)쪽 중"
+    }
+  ],
+  "front_matter": {
+    "required": [
+      "양식",
+      "학년도",
+      "학년",
+      "학기",
+      "차",
+      "과목",
+      "시행",
+      "출제교사"
+    ],
+    "optional": [
+      "만점",
+      "논술형",
+      "과목코드",
+      "대상",
+      "인쇄"
+    ]
+  },
+  "admin": {
+    "paragraph": 0,
+    "delete_tables_with": [],
+    "notice_table_with": "유의",
+    "notice_delete_paras_with": [
+      "논술형 :"
+    ],
+    "notice_replace": [],
+    "remove_text": []
+  },
+  "guidance_text": [
+    "합성 논술"
+  ],
+  "sample_text": [
+    "합성 발문",
+    "합성 답지",
+    "합성 자료 글",
+    "합성 항목",
+    "합성 세트 문항",
+    "가나다라마바사아자차"
+  ],
+  "trim": {
+    "rule": "text_prefix",
+    "prefix": "【논술형"
+  },
+  "sample_region": "admin_to_tail",
+  "remove": {
+    "memos": false,
+    "drawings": false
+  },
+  "leftover_prefix": "【논술형",
+  "boxes": {
+    "보기": {
+      "title": "< 보 기 >",
+      "title_match": "보 기",
+      "shape": [
+        2,
+        1
+      ],
+      "cells": 2,
+      "content_cell": [
+        0,
+        1
+      ],
+      "rails": [],
+      "style": "box_guide"
+    },
+    "자료": {
+      "title": null,
+      "title_match": null,
+      "shape": [
+        1,
+        1
+      ],
+      "cells": 1,
+      "content_cell": [
+        0,
+        0
+      ],
+      "rails": [],
+      "style": "box"
+    }
+  },
+  "set_marker": {
+    "pattern": "^\\[\\d+∼\\d+\\]$",
+    "char_height": 1200,
+    "bold": true
+  },
+  "typeset": {
+    "score_suffix": " [{points:.1f}점]",
+    "set_head": "[{a}∼{b}]",
+    "text_replace": [
+      [
+        "~",
+        "∼"
+      ]
+    ],
+    "grayscale_pictures": true,
+    "stem_hanging": "space"
+  },
+  "metrics": {
+    "full": 1068,
+    "half": 650,
+    "space": 552,
+    "upper": 850,
+    "char_height": 1100,
+    "line_pitch": {
+      "160": 1760,
+      "150": 1652
+    },
+    "box_extra": 2021,
+    "mark_col": 1600,
+    "note": "함초롬바탕 11pt 장평 100 자간 0 — 09-30 실한컴 렌더 텍스트 층 글자 간격 실측: 전각 1068, 공백 552, 숫자 600~612·소문자 중앙 624(m 996), 대문자 중앙 756(M 923·W 996). 반각 650·대문자 850은 넉넉히"
+  },
+  "render": {
+    "glyphs": "text",
+    "text_fonts": [
+      "HCRBatang"
+    ],
+    "choice_dx": [
+      9.0,
+      11.5
+    ],
+    "note": "본문 함초롬바탕(HCRBatang, 번호 HCRBatang-Bold)이 텍스트 층으로 나간다. 관리박스·꼬리 박스는 함초롬돋움(HCRDotum)이라 본문 판정에서 빠진다"
+  },
+  "notice_box_height": null,
+  "box_min_height": null,
+  "code_font": "굴림체",
+  "tailbox": {
+    "vertRelTo": "PAPER",
+    "horzRelTo": "PAPER",
+    "horzOffset": 37126,
+    "vertOffset": 93580,
+    "width": 29400,
+    "height": 3400,
+    "outMargin": 0,
+    "room": 980,
+    "match_text": "확인 사항",
+    "note": "오른쪽 단 맨 아래(본문 하단 − 박스 높이 − 2pt)"
+  }
+}

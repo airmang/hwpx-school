@@ -1,0 +1,78 @@
+{
+  "kit": "standard",
+  "styles": {
+    "borderFill": {
+      "box": 3,
+      "underline": 7,
+      "none": 4,
+      "shade": 5,
+      "rule": 6
+    },
+    "paraPr": {
+      "title": 20,
+      "id_line": 21,
+      "body": 22,
+      "passage": 23,
+      "center": 20,
+      "footer_gap": 21,
+      "score_value": 24,
+      "memo": 22,
+      "caption_left": 21
+    },
+    "charPr": {
+      "title": 7,
+      "title_suffix": 8,
+      "score": 9,
+      "note": 10,
+      "body": 11,
+      "answer_label": 12,
+      "hint": 13,
+      "blank": 0
+    },
+    "memoStyle": 17
+  },
+  "furniture": {
+    "titleMarkpen": "#CFE0F3",
+    "idLine": "                         학번 :             이름 :          ",
+    "widths": {
+      "passage": 25795,
+      "answerLine": 25794,
+      "answerGap": 1417,
+      "box": 25229,
+      "gridLabel": 10600,
+      "dataLabel": 7520,
+      "score": [
+        3600,
+        9014,
+        12614
+      ]
+    },
+    "rowHeight": {
+      "auto": 282,
+      "grid": 2514,
+      "rule": 1848,
+      "single": 3263,
+      "labeled": 3546,
+      "score": 5444
+    },
+    "cellInnerMargin": 1020,
+    "tableOutMargin": 141,
+    "footer": {
+      "lines": [
+        "수고하셨습니다. ",
+        "*총 {n}문제 모두 오류 없이 풀었는지*",
+        "반드시 확인하세요."
+      ],
+      "scoreHead": [
+        "득점",
+        "변환점수"
+      ],
+      "signLabel": "학생 확인",
+      "signLines": [
+        "본인은 점수에 이상이 없음을 확인하였습니다.",
+        "서명 : ____________"
+      ]
+    }
+  },
+  "fontMap": {}
+}

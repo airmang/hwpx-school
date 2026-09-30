@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.DS_Store
+# 실문서 코퍼스는 저장소에 넣지 않는다 (개인정보·저작권)
+corpus/
+.pytest_cache/
+.ruff_cache/

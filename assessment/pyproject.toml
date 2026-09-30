@@ -1,0 +1,24 @@
+[project]
+name = "assessment"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = ["python-hwpx[preview]>=6.4,<7", "lxml>=5,<7"]
+
+[dependency-groups]
+dev = [
+    "pillow>=12.3.0",
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["assessment"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["hancom: 한글 GUI를 띄우는 실한컴 렌더 검사 (-m hancom 으로만 실행)"]
+addopts = "-m 'not hancom'"

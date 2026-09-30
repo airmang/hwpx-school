@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+재현/그림/
+재현/_render/
+*.tmp
+시연/*/_render/
