@@ -6,14 +6,13 @@ import io
 
 import lxml.etree as ET
 import pytest
-from hwpx.document import HwpxDocument
-from hwpx.hwp5.errors import Hwp5ConversionReport
-from PIL import Image
-
 from exam_kit import HP
 from exam_kit import source as source_mod
 from exam_kit.reverse import ReverseStop, as_png, page_guess, resolve_front, reverse_body
 from exam_kit.source import SourceError, open_source
+from hwpx.document import HwpxDocument
+from hwpx.hwp5.errors import Hwp5ConversionReport
+from PIL import Image
 
 
 def _p(inner: str = "", vertpos: int | None = None):
@@ -123,7 +122,7 @@ def _읽음(**over):
 def test_머리_값을_읽으면_그대로_쓴다():
     lines = resolve_front(_읽음(), {}, _필수)
     assert lines[0] == "---" and "과목: 수학" in lines and "대상: 1학년 1반~5반" in lines
-    assert not any(x.startswith("과목코드") or x.startswith("대상_반") for x in lines)  # 못 읽은 선택 키·내부 키는 안 쓴다
+    assert not any(x.startswith(("과목코드", "대상_반")) for x in lines)  # 못 읽은 선택 키·내부 키는 안 쓴다
 
 
 def test_못_읽은_필수_머리_값은_무엇을_줄지_알리고_멈춘다():
