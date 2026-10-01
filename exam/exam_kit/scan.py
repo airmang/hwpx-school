@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .equation import split_pipes
 from .frontmatter import FrontMatter, parse_front_matter
 
 _배점 = r"(?:\[(?P<p1>\d+\.\d)점\]|\((?P<p2>\d+)점\)|\[[^\]]*\])?"
@@ -81,7 +82,7 @@ def _attrs(s: str | None) -> dict:
     out: dict = {}
     for k, v1, v2 in _ATTR_RE.findall(s or ""):
         v = v1 if v1 != "" else v2
-        out[k] = v.split("|") if k == "머리" else v
+        out[k] = split_pipes(v) if k == "머리" else v  # 수식 `$…$` 안의 `|`로는 나누지 않는다
     return out
 
 

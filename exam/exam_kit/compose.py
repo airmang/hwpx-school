@@ -11,6 +11,8 @@ md 표는 격자표(제출본 8번 모양), 그림은 회색조 사본, 답항�
 1행은 자동으로 고르지 않는다(G3 판정 09-27 ③) — `{답항=1행}`으로 누를 때만 쓰고, 그때 칸을 고르게(가용 폭 ÷ 5, G2 판정
 09-26) 문단 자체 탭(파생 tabPr·paraPr)을 단다. 양식 스타일은 그대로다.
 원고의 ASCII `~`는 조판 전에 `∼`(U+223C)로 바꾼다(물결).
+인라인 수식 `$…$`(LaTeX)은 한/글 수식(hp:equation, 글자처럼 취급)으로 쓴다(equation) — 그 자리 글자 크기를 수식 기준
+크기로, 그 조각의 charPr run에 넣는다. 폭·줄 수 추정은 수식을 수식 상자 폭으로 센다. 물결·밑줄은 수식 안을 건드리지 않는다.
 """
 
 from __future__ import annotations
@@ -33,9 +35,9 @@ try:  # paragraph.add_picture가 쓰는 pic 생성기(private) — 칸 안에도
 except ImportError:  # 옮겨졌으면 임시 문단의 add_picture로 만든다(_Composer._pic_element)
     _create_picture_element = None
 
-from . import HP, q
+from . import HP, equation, q
 from .kit import Kit, Metrics, style_ids
-from .prepare import _text, _top_tables, is_sample_box
+from .prepare import _top_tables, is_sample_box
 from .scan import IMG_RE, TABLE_ROW_RE, Block, Question, QuestionSet, Scan
 from .verify import question_heads
 
@@ -118,21 +120,60 @@ _개체 = tuple(q("hp", t) for t in ("tbl", "pic", "rect", "ellipse", "line", "a
                                   "container", "equation", "ole", "textart", "video", "chart"))
 
 
+def _가림(text: str, m: Metrics):
+    """원고 글 → (가린 글, 가린 글 조각의 추정 폭 함수, 수식들) — 가린 글은 수식 하나가 글자 하나(equation.mask),
+    수식 폭은 수식 상자 폭 + 바깥 여백(기준 크기 m.char_height)."""
+    masked, maths = equation.mask(text)
+    ws = [equation.width(x, m.char_height) for x in maths]
+
+    def 폭(s: str) -> int:
+        return sum(ws[k] if (k := equation.자리_번호(ch)) is not None else m.char(ch) for ch in s)
+
+    return masked, 폭, maths
+
+
 def _글폭(text: str, m: Metrics) -> int:
-    return m.text(text)
+    """원고 글의 추정 폭 — 수식 `$…$`은 수식 상자 폭으로 센다."""
+    masked, 폭, _ = _가림(text, m)
+    return 폭(masked)
 
 
-def 물결(text: str, pairs=()) -> str:
-    """킷 typeset.text_replace의 (찾을 글, 바꿀 글)을 차례로 바꾼다. 예: ASCII `~` → `∼`(U+223C) — 어떤 양식 글꼴에서는
-    `~`가 위로 뜬 작은 물결 `˜`로 찍힌다(세트 머리 `[7∼8]`은 `∼`)."""
+def _긴_낱말(text: str, m: Metrics) -> int:
+    """띄어쓰기로 나눈 낱말 가운데 가장 넓은 것의 추정 폭 — 수식 `$…$`은 안에 공백이 있어도 한 낱말이다."""
+    masked, 폭, _ = _가림(text, m)
+    return max(폭(t) for t in re.split(r"\s+", masked.strip()))
+
+
+def _글(segs) -> str:
+    """문단 조각들의 글(오류 알림용) — 수식은 원고 표기 `$…$`로."""
+    return "".join(t.source if isinstance(t, equation.Math) else t for t, _ in segs)
+
+
+def _바꾸기(text: str, pairs) -> str:
     for old, new in pairs:
         text = text.replace(old, new)
     return text
 
 
+def 물결(text: str, pairs=()) -> str:
+    """킷 typeset.text_replace의 (찾을 글, 바꿀 글)을 차례로 바꾼다. 예: ASCII `~` → `∼`(U+223C) — 어떤 양식 글꼴에서는
+    `~`가 위로 뜬 작은 물결 `˜`로 찍힌다(세트 머리 `[7∼8]`은 `∼`). 수식 `$…$` 안은 그대로 둔다(LaTeX의 `~`는 띄움이다)."""
+    return equation.outside(text, lambda s: _바꾸기(s, pairs))
+
+
 def _물결_블록(b: Block, pairs) -> Block:
-    """블록 글 줄·답항표 머리 — 그림 줄(경로)은 글이 아니라 그대로 둔다."""
-    lines = tuple(ln if IMG_RE.match(ln.strip()) else 물결(ln, pairs) for ln in b.lines)
+    """블록 글 줄·답항표 머리 — 그림 줄(경로)은 글이 아니라 그대로 둔다. 코드 줄(코드 블록, 자료 안의 ``` 사이)은 수식이
+    없는 글이라 원래대로 모두 바꾼다."""
+    lines, code = [], b.kind == "코드"
+    for ln in b.lines:
+        if b.kind != "코드" and ln.strip().startswith("```"):
+            code = not code
+            lines.append(_바꾸기(ln, pairs))
+        elif IMG_RE.match(ln.strip()):
+            lines.append(ln)
+        else:
+            lines.append(_바꾸기(ln, pairs) if code else 물결(ln, pairs))
+    lines = tuple(lines)
     attrs = dict(b.attrs)
     if isinstance(attrs.get("머리"), list):
         attrs["머리"] = [물결(h, pairs) for h in attrs["머리"]]
@@ -154,24 +195,50 @@ def 물결_원고(scan: Scan, pairs=()) -> Scan:
                    for s in scan.sets))
 
 
-def estimate_lines(text: str, first: int, rest: int, m: Metrics) -> int:
-    """문단이 차지할 줄 수. first/rest = 첫 줄·다음 줄 가용 폭(HWPUNIT).
+def _줄_추정(text: str, first: int, rest: int, m: Metrics) -> list[int]:
+    """문단의 줄마다 수식 때문에 늘어나는 높이(HWPUNIT, 없으면 0) — 목록 길이가 곧 줄 수. first/rest = 첫 줄·다음 줄 가용 폭.
 
     렌더 실측: 한글은 낱말 안에서도 글자 단위로 줄이 바뀐다(`만/큼`). 로마자·숫자 낱말은 통째로 넘어가고,
-    한 줄보다 길면 글자 단위로 끊긴다. 줄 끝 공백은 넘쳐도 된다.
+    한 줄보다 길면 글자 단위로 끊긴다. 줄 끝 공백은 넘쳐도 된다. 수식은 한 덩어리다.
+    한/글은 수식이 든 줄의 높이(lineseg vertsize)를 수식 높이까지 늘리고 줄 사이(spacing)는 그대로 둔다(합성 식 저장본:
+    높이 2500 수식 줄의 vertsize 2500, spacing 600은 다른 줄과 같다) — 늘어나는 높이 = 가장 높은 수식 − 글자 높이로 어림한다.
     """
-    lines, avail, cur = 1, first, 0
-    for tok in re.findall(r"[!-~]+|.", text):
-        w = m.text(tok)
+    masked, 폭, maths = _가림(text, m)
+    extra, avail, cur = [0], first, 0
+    for tok in re.findall(r"[!-~]+|.", masked):
+        w = 폭(tok)
+        k = equation.자리_번호(tok) if len(tok) == 1 else None
+        up = 0 if k is None else max(0, equation.height(maths[k], m.char_height) - m.char_height)
         if tok == " " or cur + w <= avail:
             cur += w
+            extra[-1] = max(extra[-1], up)
             continue
         if cur:
-            lines, avail, cur = lines + 1, rest, 0
+            extra.append(0)
+            avail, cur = rest, 0
         while w > avail:
-            lines, w, avail = lines + 1, w - avail, rest
+            extra.append(0)
+            w, avail = w - avail, rest
         cur = w
-    return lines
+        extra[-1] = max(extra[-1], up)
+    return extra
+
+
+def estimate_lines(text: str, first: int, rest: int, m: Metrics) -> int:
+    """문단이 차지할 줄 수. first/rest = 첫 줄·다음 줄 가용 폭(HWPUNIT) — 나누는 규칙은 _줄_추정."""
+    return len(_줄_추정(text, first, rest, m))
+
+
+def estimate_extra(text: str, first: int, rest: int, m: Metrics) -> int:
+    """수식 때문에 문단이 늘어나는 높이의 합(HWPUNIT) — 줄마다 그 줄의 가장 높은 수식(_줄_추정)."""
+    return sum(_줄_추정(text, first, rest, m))
+
+
+def _칸_글_높이(text: str, avail: int, pitch: int, m: Metrics) -> int:
+    """칸 글(`\\n` = 줄바꿈)의 높이 − 글자 높이 = (줄 수 − 1) × 피치 + 수식 때문에 늘어나는 높이."""
+    pieces = [p.replace("__", "") for p in text.split("\n")]
+    lines = sum(estimate_lines(p, avail, avail, m) for p in pieces)
+    return (lines - 1) * pitch + sum(estimate_extra(p, avail, avail, m) for p in pieces)
 
 
 def fits(widths: list[int], rows: tuple[int, ...], starts: list[int], end: int, gap: int) -> bool:
@@ -189,8 +256,8 @@ def fits(widths: list[int], rows: tuple[int, ...], starts: list[int], end: int, 
 
 
 def md_cells(row: str) -> list[str]:
-    """`| a | b |` → ['a', 'b']."""
-    return [c.strip() for c in row.strip().strip("|").split("|")]
+    """`| a | b |` → ['a', 'b'] — 수식 `$…$` 안의 `|`(절댓값 등)로는 칸을 나누지 않는다."""
+    return equation.split_cells(row)
 
 
 def parse_md_table(lines, where: str) -> tuple[list[str] | None, list[list[str]]]:
@@ -219,8 +286,7 @@ def column_widths(rows: list[list[str]], total: int, minimum: int, pad: int = 0,
     if sum(max(w, minimum) for w in weight) > total:
         # 모든 칸 글이 한 줄에 못 들어간다 — 비례로 나누면 모든 열이 조금씩 모자라 낱말 한가운데서 접힌다(Task 19 렌더:
         # `가나다`가 `가나/다`로). 열마다 가장 긴 낱말(띄어쓰기 단위) + pad를 먼저 주고, 남는 폭을 모자란 만큼에 비례해 나눈다.
-        word = [max(max(_글폭(t, m) for t in re.split(r"\s+", r[c].replace("__", "").strip())) for r in rows) + pad
-                for c in range(n)]
+        word = [max(_긴_낱말(r[c].replace("__", ""), m) for r in rows) + pad for c in range(n)]
         low = [max(minimum, w) for w in word]
         if sum(low) <= total:
             extra = [max(0, weight[c] - low[c]) for c in range(n)]
@@ -298,7 +364,7 @@ class _Para:
     """삽입 전 문단 계획. segs의 charPr가 None이면 그 역할 스타일의 charPr."""
 
     role: str
-    segs: list[tuple[str, str | None]]
+    segs: list[tuple[str | equation.Math, str | None]]
     keep: bool = False
     gap: bool = False
     brk: str | None = None  # 나눔 지시("column"·"page") — 문항 묶음 첫 문단에만(원고 {단나눔}·{쪽나눔})
@@ -556,18 +622,38 @@ class _Composer:
         self._bf[key] = found
         return found
 
-    def _cell_p(self, segs: list[tuple[str, str | None]], role: str, *, pid: str | None = None,
+    def _cell_p(self, segs: list[tuple[str | equation.Math, str | None]], role: str, *, pid: str | None = None,
                 mark: str | None = None) -> ET._Element:
         """칸 안 문단(줄 캐시 없이) — segs의 charPr가 None이면 역할 스타일 charPr. mark는 그 글자에 형광펜."""
         sid, _, cp = self.style[role]
         p = ET.Element(q("hp", "p"), {"id": "2147483648", "paraPrIDRef": pid or self.cell_pr(role), "styleIDRef": sid,
                                       "pageBreak": "0", "columnBreak": "0", "merged": "0"}, nsmap={"hp": HP})
         for text, c in segs:
+            if isinstance(text, equation.Math):
+                p.append(self._수식_run(text, c or cp))
+                continue
             mark = _fill_t(ET.SubElement(ET.SubElement(p, q("hp", "run"), {"charPrIDRef": c or cp}), q("hp", "t")),
                            text, mark)
         if mark:
-            raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {''.join(t for t, _ in segs)!r}")
+            raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
         return p
+
+    def 글자_크기(self, cp: str) -> int:
+        """charPr의 글자 크기(height, HWPUNIT) — 수식 기준 크기(baseUnit)로 쓴다(한/글도 넣는 자리의 글자 크기로 만든다)."""
+        el = self.header.element.find(f".//{q('hh', 'charPr')}[@id='{cp}']")
+        if el is None or not (el.get("height") or "").isdigit():
+            raise ValueError(f"양식이 바뀌었다: charPr {cp}의 글자 크기(height)가 없다")
+        return int(el.get("height"))
+
+    def _수식_run(self, m: equation.Math, cp: str) -> ET._Element:
+        """칸 안 문단에 넣을 수식 run — 임시 문단에 공개 API(add_equation)로 만들고 떼어 낸다(그림 _pic_element와 같은 방식)."""
+        sec = self.doc.sections[0]
+        tmp = sec.add_paragraph("")
+        tmp.add_equation(m.script, base_unit=self.글자_크기(cp), char_pr_id_ref=cp)
+        run = tmp.element.findall(q("hp", "run"))[-1]
+        tmp.element.remove(run)
+        sec.remove_paragraph(tmp)
+        return run
 
     def _table(self, cells: list[list[tuple[ET._Element, str]]], widths: list[int], heights: list[int], *,
                bf: str, in_margin: dict, out_margin: dict) -> ET._Element:
@@ -619,9 +705,8 @@ class _Composer:
                 bf = base
             wrapped = [wrap_words(text, w - pad, self.kit.metrics) for text, w in zip(row, widths)]
             cells.append([(self._cell_p(self._segs(text, "normal"), "normal"), bf) for text in wrapped])
-            n = max(sum(estimate_lines(piece.replace("__", ""), w - pad, w - pad, self.kit.metrics) for piece in text.split("\n"))
-                    for text, w in zip(wrapped, widths))
-            heights.append((n - 1) * pitch + self.kit.metrics.char_height + self.kit.grid["in_margin"]["top"] + self.kit.grid["in_margin"]["bottom"])
+            h = max(_칸_글_높이(text, w - pad, pitch, self.kit.metrics) for text, w in zip(wrapped, widths))
+            heights.append(h + self.kit.metrics.char_height + self.kit.grid["in_margin"]["top"] + self.kit.grid["in_margin"]["bottom"])
         return self._table(cells, widths, heights, bf=base, in_margin=self.kit.grid["in_margin"], out_margin=self.kit.grid["out_margin"])
 
     def answer_table(self, qn: Question, block: Block) -> ET._Element:
@@ -646,7 +731,9 @@ class _Composer:
         v = (pitch - self.kit.metrics.char_height) // 2  # 행 높이 = 5행 답지 줄 피치 — 위아래 여백으로 채운다
         in_m = {"left": 141, "right": 141, "top": v, "bottom": v}
         ul = self.underline(self.style["choice5"][2])
-        cells = [[(self._cell_p([("", None)], "choice5"), none)] + [(self._cell_p([(h, ul)], "choice5"), none) for h in head]]
+        cells = [[(self._cell_p([("", None)], "choice5"), none)]
+                 + [(self._cell_p([(x, ul) for x in equation.pieces(*equation.mask(h))] or [("", ul)], "choice5"), none)
+                    for h in head]]
         for c, row in zip(qn.choices, rows):
             mark = c.mark if (c.correct and self.answer_key) else None
             cells.append([(self._cell_p([(row[0], None)], "choice5", mark=mark), none)]
@@ -654,9 +741,9 @@ class _Composer:
                             for t, w in zip(row[1:], widths[1:])])
         heights = [self.kit.metrics.char_height + 2 * v]  # 머리행
         for row in rows:  # 칸 글이 접히면(wrap_words 줄 수) 그만큼 행이 높아진다 — grid()와 같다
-            n = max(sum(estimate_lines(piece.replace("__", ""), w - 282, w - 282, self.kit.metrics)
-                        for piece in wrap_words(t, w - 282, self.kit.metrics).split("\n")) for t, w in zip(row[1:], widths[1:]))
-            heights.append((n - 1) * pitch + self.kit.metrics.char_height + 2 * v)
+            h = max(_칸_글_높이(wrap_words(t, w - 282, self.kit.metrics), w - 282, pitch, self.kit.metrics)
+                    for t, w in zip(row[1:], widths[1:]))
+            heights.append(h + self.kit.metrics.char_height + 2 * v)
         return self._table(cells, widths, heights, bf=none, in_margin=in_m, out_margin=dict.fromkeys(self.kit.grid["out_margin"], 0))
 
     def picture(self, block: Block, avail: int) -> ET._Element:
@@ -708,17 +795,23 @@ class _Composer:
 
     # ---- 문단 계획 -----------------------------------------------------------
 
-    def _segs(self, text: str, role: str) -> list[tuple[str, str | None]]:
-        """`__x__` → 밑줄 run. 나머지는 역할 스타일 charPr(None)."""
-        out: list[tuple[str, str | None]] = []
+    def _segs(self, text: str, role: str) -> list[tuple[str | equation.Math, str | None]]:
+        """`__x__` → 밑줄 run, `$…$` → 수식(equation.Math — 밑줄 안이면 그 charPr run에). 나머지는 역할 스타일 charPr(None).
+        밑줄은 수식 밖의 `__`로만 찾는다(가린 글)."""
+        masked, maths = equation.mask(text)
+        out: list[tuple[str | equation.Math, str | None]] = []
+
+        def 붙이기(s: str, c: str | None) -> None:
+            out.extend((x, c) for x in equation.pieces(s, maths))
+
         pos = 0
-        for m in _밑줄.finditer(text):
+        for m in _밑줄.finditer(masked):
             if m.start() > pos:
-                out.append((text[pos:m.start()], None))
-            out.append((m.group(1), self.underline(self.style[role][2])))
+                붙이기(masked[pos:m.start()], None)
+            붙이기(m.group(1), self.underline(self.style[role][2]))
             pos = m.end()
-        if pos < len(text):
-            out.append((text[pos:], None))
+        if pos < len(masked):
+            붙이기(masked[pos:], None)
         return out
 
     def _case(self, role: str, child: str) -> ET._Element:
@@ -806,10 +899,10 @@ class _Composer:
                 continue
             if kind == "글":
                 # 〈보기〉 항목은 앞 공백 없이 ㄱ을 x = 0에, 내어쓰기는 self.kit.bogi_hanging_indent(제출본 교사 다수 기하, Task 29)
-                if block.kind in _항목_박스:
-                    h += estimate_lines(part.replace("__", ""), first, first + self.kit.bogi_hanging_indent, self.kit.metrics) * pitch
-                else:
-                    h += estimate_lines(part.replace("__", ""), first, rest, self.kit.metrics) * pitch
+                more = first + self.kit.bogi_hanging_indent if block.kind in _항목_박스 else rest
+                plain = part.replace("__", "")
+                h += (estimate_lines(plain, first, more, self.kit.metrics) * pitch
+                      + estimate_extra(plain, first, more, self.kit.metrics))
                 sub.append(self._cell_p(self._segs(part, role), role, pid=self.item_pr() if block.kind in _항목_박스 else pid))
                 continue
             obj = self.grid(part, first, f"L{block.line_no} :::자료 안의") if kind == "표" else self.picture(part, first)
@@ -882,11 +975,11 @@ class _Composer:
         starts = 칸(kind)[0] if kind != "5행" else []
         out, i = [], 0
         for n in rows:
-            segs: list[tuple[str, str | None]] = []
+            segs: list[tuple[str | equation.Math, str | None]] = []
             for k in range(n):
                 s = self._segs(texts[i + k], role)
-                if k:
-                    s[0] = ("\t" + s[0][0], s[0][1])
+                if k:  # 답지 글은 원문자로 시작한다(첫 조각이 글)
+                    s[0] = ("\t" + str(s[0][0]), s[0][1])
                 segs += s
             tabs = [max(1, starts[k] - starts[k - 1] - widths[i + k - 1]) for k in range(1, n)]
             mark = next((c.mark for c in qn.choices[i:i + n] if c.correct and self.answer_key), None)
@@ -896,7 +989,7 @@ class _Composer:
 
     def _set_head(self, s: QuestionSet) -> list[_Para]:
         a, b = s.rng
-        segs: list[tuple[str, str | None]] = [(self.kit.typeset["set_head"].format(a=a, b=b), self.samples.세트_charpr)]
+        segs: list[tuple[str | equation.Math, str | None]] = [(self.kit.typeset["set_head"].format(a=a, b=b), self.samples.세트_charpr)]
         if s.passage:
             segs += self._segs(" " + s.passage[0], "normal")
         return [_Para("normal", segs, gap=True)] + [_Para("normal", self._segs(line, "normal")) for line in s.passage[1:]]
@@ -960,10 +1053,13 @@ class _Composer:
             p.element.remove(run)
         mark, tabs = spec.mark, iter(spec.tabs)
         for text, c in spec.segs:
+            if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
+                p.add_equation(text.script, base_unit=self.글자_크기(c or cp), char_pr_id_ref=c or cp)
+                continue
             run = ET.SubElement(p.element, q("hp", "run"), {"charPrIDRef": c or cp})
             mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
         if mark:
-            raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {''.join(t for t, _ in spec.segs)!r}")
+            raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
         if spec.obj is not None:
             p.element.find(q("hp", "run")).insert(0, spec.obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
         return p
@@ -976,23 +1072,25 @@ def wrap_words(text: str, avail: int, m: Metrics) -> str:
     """칸 글이 avail(HWPUNIT)에 한 줄로 들어가지 않으면 낱말 사이 공백을 줄바꿈(\\n → hp:lineBreak)으로 바꾼다 — 낱말 단위로
     앞에서부터 채운다(추정 글자 폭). 한글은 표 칸에서 KEEP_WORD여도 낱말 한가운데서 접는다(Task 19 렌더: `가나다`가
     `가나/다`로) — 접을 자리를 조판이 정한다. 밑줄 `__…__`은 안에 공백이 있어도 한 낱말로 다룬다(가운데서 끊으면 밑줄이
-    풀린다). 접지 않는 자리의 공백은 원고 그대로(두 칸이면 두 칸). 한 낱말이 avail보다 길면 그 낱말은 그대로 둔다."""
-    if _글폭(text.replace("__", ""), m) <= avail:
+    풀린다). 접지 않는 자리의 공백은 원고 그대로(두 칸이면 두 칸). 한 낱말이 avail보다 길면 그 낱말은 그대로 둔다.
+    수식 `$…$`은 안에 공백이 있어도 한 덩어리다(가린 글에서 나눈다)."""
+    masked, 폭, maths = _가림(text, m)
+    if 폭(masked.replace("__", "")) <= avail:
         return text
-    parts = [(m.group(1), m.group(2)) for m in _낱말.finditer(text.strip())]
+    parts = [(x.group(1), x.group(2)) for x in _낱말.finditer(masked.strip())]
     if len(parts) < 2:
         return text
     out, cur, sep = [], parts[0][0], parts[0][1]
     for word, nxt in parts[1:]:
         cand = cur + sep + word
-        if _글폭(cand.replace("__", ""), m) > avail:
+        if 폭(cand.replace("__", "")) > avail:
             out.append(cur)
             cur = word
         else:
             cur = cand
         sep = nxt
     out.append(cur)
-    return "\n".join(out)
+    return equation.unmask("\n".join(out), maths)
 
 
 def _fill_t(t: ET._Element, text: str, mark: str | None, tabs=None) -> str | None:
@@ -1097,6 +1195,24 @@ def compose(doc: HwpxDocument, scan: Scan, kit: Kit, *, answer_key: bool, image_
 LOOSER = {"1행": "2행", "2행": "3행", "3행": "5행"}  # 답지가 접히면 한 단계 느슨한 형으로(렌더 루프)
 
 
+def _문단_글(el) -> str:
+    """문단 글(hp:t) — 수식은 그 한/글 수식 문자열로(수식 설명 글 '수식입니다.'는 넣지 않는다)."""
+    out = []
+    for node in el.iter(q("hp", "t"), q("hp", "equation")):
+        if node.tag == q("hp", "equation"):
+            s = node.find(q("hp", "script"))
+            out.append("" if s is None else s.text or "")
+        else:
+            out.append("".join(node.itertext()))
+    return "".join(out)
+
+
+def _원고_글(text: str) -> str:
+    """원고 글 → _문단_글과 견줄 글 — 수식 `$…$`은 한/글 수식 문자열로, `\\$`는 `$`로."""
+    masked, maths = equation.mask(text)
+    return "".join(maths[k].script if (k := equation.자리_번호(ch)) is not None else ch for ch in masked)
+
+
 def choice_paragraphs(doc: HwpxDocument, kit: Kit, number: int) -> list[int]:
     """number번 문항의 답지 줄 문단 인덱스(답항 스타일 4종) — 머리부터 다음 머리(또는 꼬리) 앞까지."""
     ids = style_ids(doc)
@@ -1117,8 +1233,8 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
     sec = doc.sections[0]
     ps = list(sec.paragraphs)
     victims = [ps[i] for i in old]
-    have = re.sub(r"\s", "", "".join(_text(v.element) for v in victims))
-    want = re.sub(r"\s", "", "".join(f"{c.mark}{c.text}".replace("__", "") for c in qn.choices))
+    have = re.sub(r"\s", "", "".join(_문단_글(v.element) for v in victims))
+    want = re.sub(r"\s", "", "".join(_원고_글(f"{c.mark}{c.text}".replace("__", "")) for c in qn.choices))
     if have != want:  # 원고가 이 문서와 다르다 — 다른 문항의 답지로 덮어쓰지 않게 멈춘다
         raise ValueError(f"{qn.number}번 답지가 원고와 다르다: 문서 {have!r} ≠ 원고 {want!r}")
     c = _Composer(doc, kit, Samples(None, None, None), answer_key=answer_key)  # 답지 조판은 견본을 쓰지 않는다
@@ -1185,7 +1301,8 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
     """〈보기〉·자료 박스의 내용 행 높이를 한컴이 잰 실제 줄 수(lines: fit.Lines, 키 = (최상위 문단, 안 문단 차례))로
     다시 맞춘다 — 바뀐 박스 수. 조판은 추정 줄 수로 셀 높이를 잡는데 한글은 셀을 늘리기만 하고 줄이지 않는다. 그래서
     자간 맞춤이 줄을 당긴 항목(또는 추정이 넘친 항목)이 있으면 박스 아래가 한 줄 빈다(Task 29 발견, 아랫여백 20.4 vs 11.6pt).
-    높이 식은 _box와 같다: 글 줄 = 줄 수 × 피치, 개체 줄 = 개체 높이 + 바깥 여백 + (피치 − 글자 높이), 끝에 kit.metrics.box_extra − 피치.
+    높이 식은 _box와 같다: 글 줄 = 줄 수 × 피치(+ 수식이 든 줄은 한컴 줄 높이 − 글자 높이), 개체 줄 = 개체 높이 + 바깥 여백
+    + (피치 − 글자 높이), 끝에 kit.metrics.box_extra − 피치.
     내용 셀 글 문단 가운데 하나라도 lines에 없으면 그 박스는 그대로 둔다. 높이는 kit.box_min_height(양식 견본 내용 셀)
     밑으로 내리지 않는다 — 교사도 양식 박스에서 시작하고 한글은 셀을 늘리기만 해서 제출본 세 줄 박스는 모두 이 높이다.
     """
@@ -1224,7 +1341,7 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
                 if got is None:
                     ok = False
                     break
-                h += got.n * pitch
+                h += got.n * pitch + got.extra(kit.metrics.char_height)  # 수식이 든 줄은 한컴이 잰 만큼 더 높다
             if not ok:
                 continue
             h += kit.metrics.box_extra - pitch

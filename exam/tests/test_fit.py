@@ -207,7 +207,8 @@ def test_줄_캐시_읽기(tmp_path):
     """최상위 문단 (i, −1), 그 안 문단 (i, j) — 줄 수 = lineseg 수, 끝줄 = 마지막 textpos부터."""
     sec = (f'<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="{q("hp", "x")[1:].split("}")[0]}">'
            '<hp:p><hp:run><hp:t>첫 문단 글자</hp:t></hp:run><hp:linesegarray>'
-           '<hp:lineseg textpos="0" horzsize="30000"/><hp:lineseg textpos="2" horzsize="29000"/></hp:linesegarray></hp:p>'
+           '<hp:lineseg textpos="0" horzsize="30000" vertsize="1100"/>'
+           '<hp:lineseg textpos="2" horzsize="29000" vertsize="2500"/></hp:linesegarray></hp:p>'
            '<hp:p><hp:run><hp:tbl><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>칸<hp:tab/>글</hp:t></hp:run>'
            '<hp:linesegarray><hp:lineseg textpos="0" horzsize="100"/></hp:linesegarray></hp:p>'
            '</hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>')
@@ -217,8 +218,9 @@ def test_줄_캐시_읽기(tmp_path):
     path = tmp_path / "x.hwpx"
     path.write_bytes(buf.getvalue())
     got = read_lines(path)
-    assert got[(0, -1)] == Lines(2, "문단 글자", 29000, "첫 문단 글자", (0, 2), (30000, 29000))
-    assert got[(1, 0)] == Lines(1, "칸\t글", 100, "칸\t글", (0,), (100,))
+    assert got[(0, -1)] == Lines(2, "문단 글자", 29000, "첫 문단 글자", (0, 2), (30000, 29000), (1100, 2500))
+    assert got[(0, -1)].extra(1100) == 1400  # 수식이 든 줄처럼 높아진 줄 — 글자 높이를 넘은 만큼
+    assert got[(1, 0)] == Lines(1, "칸\t글", 100, "칸\t글", (0,), (100,), (0,))
     assert (1, -1) not in got  # 줄 캐시가 없는 문단은 뺀다
 
 

@@ -29,7 +29,7 @@ from typing import Callable
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
 
-from . import q
+from . import equation, q
 from .kit import Kit, Metrics, style_ids
 from .verify import question_heads
 
@@ -57,11 +57,16 @@ class Lines:
     text: str
     starts: tuple[int, ...] = ()
     avails: tuple[int, ...] = ()  # 줄마다 가용 폭(lineseg horzsize)
+    heights: tuple[int, ...] = ()  # 줄마다 높이(lineseg vertsize) — 수식이 든 줄은 수식 높이까지 늘어난다
 
     def line(self, i: int) -> str:
         """i번째 줄의 글자(starts로 자른다)."""
         end = self.starts[i + 1] if i + 1 < len(self.starts) else len(self.text)
         return self.text[self.starts[i]:end]
+
+    def extra(self, char_height: int) -> int:
+        """줄 높이가 글자 높이를 넘은 만큼의 합(수식이 든 줄) — 줄 높이를 모르면 0."""
+        return sum(max(0, h - char_height) for h in self.heights)
 
 
 @dataclass
@@ -79,16 +84,32 @@ class FitResult:
 _글자_요소 = {q("hp", "tab"): "\t", q("hp", "lineBreak"): "\n", q("hp", "nbSpace"): "\u00a0", q("hp", "fwSpace"): "\u3000"}
 
 
+def _수식_폭(eq: ET._Element) -> int:
+    """hp:equation이 줄에서 차지하는 폭 — 상자 폭(hp:sz) + 좌우 바깥 여백(hp:outMargin)."""
+    sz, om = eq.find(q("hp", "sz")), eq.find(q("hp", "outMargin"))
+    w = int(sz.get("width", "0")) if sz is not None else 0
+    return w + (0 if om is None else int(om.get("left", "0")) + int(om.get("right", "0")))
+
+
 def para_text(p: ET._Element) -> str:
-    """문단 자신의 글자(run/t — 탭·줄바꿈·묶음 빈칸·고정폭 빈칸은 한 글자) — 안에 든 표·그림의 글자는 넣지 않는다."""
+    """문단 자신의 글자(run/t — 탭·줄바꿈·묶음 빈칸·고정폭 빈칸은 한 글자) — 안에 든 표·그림의 글자는 넣지 않는다.
+    수식은 줄 캐시처럼 8글자 자리다(equation.line_chars — 첫 글자에 폭을 담는다)."""
     out = []
     for r in p.findall(q("hp", "run")):
-        for t in r.findall(q("hp", "t")):
-            out.append(t.text or "")
-            for ch in t:
-                out.append(_글자_요소.get(ch.tag, ""))
-                out.append(ch.tail or "")
+        for x in r:
+            if x.tag == q("hp", "equation"):
+                out.append(equation.line_chars(_수식_폭(x)))
+            elif x.tag == q("hp", "t"):
+                out.append(x.text or "")
+                for ch in x:
+                    out.append(_글자_요소.get(ch.tag, ""))
+                    out.append(ch.tail or "")
     return "".join(out)
+
+
+def _폭(s: str, m: Metrics) -> int:
+    """줄 캐시 글의 추정 폭 — 수식 자리(equation.line_chars)는 담은 폭으로 센다."""
+    return sum(w if (w := equation.line_char_width(ch)) is not None else m.char(ch) for ch in s)
 
 
 def _has_object(p: ET._Element) -> bool:
@@ -167,7 +188,8 @@ def read_lines(hwpx: Path) -> dict[Key, Lines]:
             text = para_text(p)
             last = segs[-1]
             out[(i, j - 1)] = Lines(len(segs), text[int(last.get("textpos")):], int(last.get("horzsize")), text,
-                                    tuple(int(x.get("textpos")) for x in segs), tuple(int(x.get("horzsize")) for x in segs))
+                                    tuple(int(x.get("textpos")) for x in segs), tuple(int(x.get("horzsize")) for x in segs),
+                                    tuple(int(x.get("vertsize", "0")) for x in segs))
     return out
 
 
@@ -295,7 +317,7 @@ def drop_line_cache(doc: HwpxDocument, keys) -> None:
 
 def tail_ratio(ln: Lines, m: Metrics) -> float:
     """끝줄 추정 폭 ÷ 끝줄 가용 폭 — 한 줄짜리는 0."""
-    return 0.0 if ln.n < 2 or ln.avail <= 0 else m.text(ln.tail.strip()) / ln.avail
+    return 0.0 if ln.n < 2 or ln.avail <= 0 else _폭(ln.tail.strip(), m) / ln.avail
 
 
 def floor_for(kit: Kit, role: str) -> int:
@@ -313,7 +335,7 @@ def line_gaps(ln: Lines, m: Metrics) -> list[float]:
         body = raw.strip()
         spaces = body.count(" ")
         out.append(0.0 if not spaces or "\t" in raw or i >= len(ln.avails)
-                   else (ln.avails[i] - m.text(body.strip())) / spaces / m.space)
+                   else (ln.avails[i] - _폭(body.strip(), m)) / spaces / m.space)
     return out
 
 
@@ -416,7 +438,7 @@ def _measure(lines_fn, path: Path, n: int, ts: list[Target]) -> dict[Key, Lines]
     m = lines_fn(path, n)
     for t in ts:  # 한컴 사본의 문단이 문서의 문단과 같은지 — 키가 어긋나면 다른 문단의 자간을 바꾼다
         got = m.get(t.key)
-        if got is None or re.sub(r"\s", "", got.text) != re.sub(r"\s", "", t.text):
+        if got is None or re.sub(r"\s", "", equation.line_key(got.text)) != re.sub(r"\s", "", equation.line_key(t.text)):
             raise ValueError(f"한컴 측정 {n}회차: {t.number}번 {t.role} 문단 {t.key}의 줄 캐시가 없거나 글자가 다르다")
     return m
 
@@ -432,7 +454,7 @@ def summary(done: list[tuple[Target, int]], words=frozenset()) -> dict[int, str]
 # ---- 기준본과 문단별 줄 수 대조(G3 합격 기준) --------------------------------------------
 
 def _norm(text: str) -> str:
-    return re.sub(r"\s", "", text).replace("~", "∼")
+    return re.sub(r"\s", "", equation.line_key(text)).replace("~", "∼")
 
 
 def norm_starts(ln: Lines) -> tuple[int, ...]:

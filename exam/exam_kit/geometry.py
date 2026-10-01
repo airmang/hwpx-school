@@ -65,7 +65,51 @@ def hancom_windows_pdf(pdf: Path) -> bool:
 
 _잉크 = bytes(1 if v < 128 else 0 for v in range(256))  # 회색 픽셀 → 잉크(1)·바탕(0). 노란 형광펜(밝기 약 226)은 바탕
 _잉크_배율 = 4.0  # 288dpi — 잉크 상자의 눈금 0.25pt
-_type3_캐시: dict[tuple, list] = {}
+_글자_캐시: dict[tuple, tuple[list, list]] = {}
+_수식_글꼴 = "hyhwpeq"  # 한/글 수식 글꼴 HyhwpEQ — PDF 텍스트 층 span 글꼴 이름(부분 집합 접두 `ABCDEF+`는 뗀 것)
+
+
+def _수식_글꼴인가(font: str) -> bool:
+    return font.split("+")[-1].lower().startswith(_수식_글꼴)
+
+
+def _글자_상자(page) -> tuple[list, list]:
+    """(Type3 본문 글자 상자, 수식 글자 상자) — 둘 다 잉크에 붙인 상자. 같은 파일·쪽은 한 번만 잰다(래스터 한 번).
+
+    Type3: Windows 한컴 PDF(생성기 'Hancom PDF')만 — type3_glyphs. 수식: 생성기와 무관하게 HyhwpEQ 텍스트 층 글자 —
+    equation_glyphs. 안 보이는 글자(불투명도 0)는 뺀다.
+    """
+    windows = _hancom_windows_pdf(page)
+    fonts = page.get_fonts()
+    type3 = {f[3] for f in fonts if f[2] == "Type3"} if windows else set()
+    if not type3 and not any(_수식_글꼴인가(f[3]) for f in fonts):
+        return [], []
+    key = None
+    if page.parent.name:
+        try:
+            st = Path(page.parent.name).stat()
+            key = (page.parent.name, st.st_mtime_ns, st.st_size, page.number)
+        except OSError:
+            key = None
+    if key is not None and key in _글자_캐시:
+        t3, eq = _글자_캐시[key]
+        return list(t3), list(eq)
+    flags = pymupdf.TEXTFLAGS_RAWDICT | pymupdf.TEXT_ACCURATE_BBOXES
+    t3: list = []
+    eq: list = []
+    for b in page.get_text("rawdict", flags=flags)["blocks"]:
+        for ln in b.get("lines", []):
+            for sp in ln["spans"]:
+                if sp.get("alpha", 255) <= 0:
+                    continue
+                into = t3 if sp["font"] in type3 else eq if _수식_글꼴인가(sp["font"]) else None
+                if into is not None:
+                    into.extend(pymupdf.Rect(ch["bbox"]) for ch in sp["chars"] if ch["c"].strip())
+    ink = _잉크_상자(page, t3 + eq) if t3 or eq else []
+    t3, eq = ink[:len(t3)], ink[len(t3):]
+    if key is not None:
+        _글자_캐시[key] = (t3, eq)
+    return list(t3), list(eq)
 
 
 def type3_glyphs(page) -> list:
@@ -77,28 +121,14 @@ def type3_glyphs(page) -> list:
     정확한 글리프 상자(TEXT_ACCURATE_BBOXES — 세로는 잉크에 가깝고 가로는 글자 폭) 안에서 쪽을 래스터로 그린 잉크를 잰다(_잉크_상자).
     다른 생성기의 PDF(macOS)에는 아무것도 더하지 않는다. 같은 파일·쪽은 한 번만 잰다.
     """
-    if not _hancom_windows_pdf(page):
-        return []
-    type3 = {f[3] for f in page.get_fonts() if f[2] == "Type3"}
-    if not type3:
-        return []
-    key = None
-    if page.parent.name:
-        try:
-            st = Path(page.parent.name).stat()
-            key = (page.parent.name, st.st_mtime_ns, st.st_size, page.number)
-        except OSError:
-            key = None
-    if key is not None and key in _type3_캐시:
-        return list(_type3_캐시[key])
-    flags = pymupdf.TEXTFLAGS_RAWDICT | pymupdf.TEXT_ACCURATE_BBOXES
-    boxes = [pymupdf.Rect(ch["bbox"]) for b in page.get_text("rawdict", flags=flags)["blocks"]
-             for ln in b.get("lines", []) for sp in ln["spans"] if sp["font"] in type3 and sp.get("alpha", 255) > 0
-             for ch in sp["chars"] if ch["c"].strip()]
-    boxes = _잉크_상자(page, boxes) if boxes else boxes
-    if key is not None:
-        _type3_캐시[key] = boxes
-    return list(boxes)
+    return _글자_상자(page)[0]
+
+
+def equation_glyphs(page) -> list:
+    """수식 글자 상자 — 한/글 수식(HyhwpEQ)은 Windows 한컴 PDF에서 텍스트 층(TrueType) 글자로 나온다(합성 식 렌더 실측).
+    곡선도 Type3도 아니라 glyphs()에 안 잡힌다. 잉크에 붙인 상자다(분수 선·근호 윗줄 같은 선은 도형이라 glyphs()에 있다).
+    다른 생성기의 PDF도 같은 글꼴의 텍스트 층 글자면 넣는다."""
+    return _글자_상자(page)[1]
 
 
 def _잉크_상자(page, boxes: list) -> list:
@@ -153,9 +183,23 @@ def page_body_top(page, kit: Kit) -> float:
 
 
 def text_lines(page) -> list:
-    """텍스트 층 글자 줄 bbox — 곡선으로 안 나가는 글꼴(〈보기〉 ㄱ·ㄴ·ㄷ, `∼`, 굴림 등)."""
-    return [pymupdf.Rect(ln["bbox"]) for b in page.get_text("dict")["blocks"] for ln in b.get("lines", [])
-            if "".join(sp["text"] for sp in ln["spans"]).strip()]
+    """텍스트 층 글자 줄 bbox — 곡선으로 안 나가는 글꼴(〈보기〉 ㄱ·ㄴ·ㄷ, `∼`, 굴림 등). 수식 글꼴 글자는 뺀다 — 글꼴 상자가
+    잉크보다 커서(분수의 위아래 글자) 단 아래끝을 부풀린다. 수식은 잉크 상자(equation_glyphs)로 따로 센다."""
+    out = []
+    for b in page.get_text("dict")["blocks"]:
+        for ln in b.get("lines", []):
+            if not "".join(sp["text"] for sp in ln["spans"]).strip():
+                continue
+            if not any(_수식_글꼴인가(sp["font"]) for sp in ln["spans"]):
+                out.append(pymupdf.Rect(ln["bbox"]))
+                continue
+            rest = [pymupdf.Rect(sp["bbox"]) for sp in ln["spans"] if not _수식_글꼴인가(sp["font"]) and sp["text"].strip()]
+            if rest:
+                r = rest[0]
+                for x in rest[1:]:
+                    r |= x
+                out.append(r)
+    return out
 
 
 _위, _아래 = 8.5 / 11.0, 1.5 / 11.0  # 글자 상자: 기준선 위 0.77em ~ 아래 0.14em(11pt 실측 8.5·1.5pt의 비)
@@ -190,22 +234,56 @@ def column_lines(pdf: Path, kit: Kit, *, text: bool = False) -> list[Line]:
                 gs = body_text_chars(page, kit, with_text=True)
             else:
                 gs = [(g, "") for g in glyphs(page) + (body_text_chars(page, kit) if text else [])]
+            eqs = equation_glyphs(page)
             tail = tail_box_rect(page, kit)  # 꼬리 박스 안 글자는 본문 줄이 아니다(학교 B는 꼬리 글도 본문 글꼴)
             if tail is not None:
                 zone = pymupdf.Rect(tail.x0 - 1, tail.y0 - 1, tail.x1 + 1, tail.y1 + 1)
                 gs = [gt for gt in gs if not zone.contains(gt[0])]
+                eqs = [g for g in eqs if not zone.contains(g)]
             for ci, cl in enumerate(lefts, 1):
-                col = sorted((gt for gt in gs if cl - 2 <= gt[0].x0 < cl + w and top <= gt[0].y0 < bottom),
-                             key=lambda gt: gt[0].y0)
-                cur: list = []
-                for gt in col:
-                    if cur and gt[0].y0 >= cur[0][0].y0 + LINE_PT * 0.5:
-                        out.append(_line(pno, ci, cl, cur))
-                        cur = []
-                    cur.append(gt)
-                if cur:
-                    out.append(_line(pno, ci, cl, cur))
+                def 단(g) -> bool:
+                    return cl - 2 <= g.x0 < cl + w and top <= g.y0 < bottom
+
+                groups = _y_묶음(sorted((gt for gt in gs if 단(gt[0])), key=lambda gt: gt[0].y0))
+                for grp in _수식_붙이기(groups, [g for g in eqs if 단(g)]):
+                    out.append(_line(pno, ci, cl, grp))
     return out
+
+
+def _y_묶음(items: list) -> list[list]:
+    """y0 차례의 (상자, 글) → 줄 무리. 같은 줄 = 무리 첫 상자 y0에서 반 줄 이내."""
+    groups: list[list] = []
+    for gt in items:
+        if groups and gt[0].y0 < groups[-1][0][0].y0 + LINE_PT * 0.5:
+            groups[-1].append(gt)
+        else:
+            groups.append([gt])
+    return groups
+
+
+_수식_붙임 = LINE_PT * 0.45  # 수식 글자 가운데가 줄의 세로 범위에서 이만큼 안이면 그 줄의 글자다
+
+
+def _수식_붙이기(groups: list[list], eqs: list) -> list[list]:
+    """줄 무리에 수식 글자 상자를 붙인다 — 가운데가 가장 가까운 줄(그 줄 글리프의 세로 범위 안이면 거리 0)로, 그 거리가
+    _수식_붙임 넘게 떨어진 글자는 수식만의 줄로 따로 묶는다(긴 수식이 줄을 따로 차지한 경우). y0로 묶지 않는 것은 분수·첨자·
+    극한·행렬의 글자가 글 줄보다 위아래로 삐져나와서다 — y0로 묶으면 제 줄을 떠나 따로 줄이 되어 단 첫 줄·머리·답지 줄 판정이
+    흐트러진다. 붙인 뒤 줄은 윗끝(y0) 차례."""
+    if not eqs:
+        return groups
+    bands = [(min(g.y0 for g, _ in grp), max(g.y1 for g, _ in grp)) for grp in groups]
+    groups = [list(grp) for grp in groups]
+    rest = []
+    for e in eqs:
+        cy = (e.y0 + e.y1) / 2
+        dist = [0.0 if y0 <= cy <= y1 else min(abs(cy - y0), abs(cy - y1)) for y0, y1 in bands]
+        i = min(range(len(bands)), key=dist.__getitem__, default=None)
+        if i is not None and dist[i] <= _수식_붙임:
+            groups[i].append((e, ""))
+        else:
+            rest.append((e, ""))
+    groups += _y_묶음(sorted(rest, key=lambda gt: gt[0].y0))
+    return sorted(groups, key=lambda grp: min(g.y0 for g, _ in grp))
 
 
 def _line(pno: int, ci: int, cl: float, items: list) -> Line:
@@ -274,7 +352,7 @@ def boxes(pdf: Path, kit: Kit, *, width: float | None = None) -> list[Box]:
     with pymupdf.open(str(pdf)) as doc:
         for pno, page in enumerate(doc, 1):
             strokes = [d["rect"] for d in page.get_drawings() if d.get("fill") is None]
-            gs = glyphs(page)
+            gs = glyphs(page) + equation_glyphs(page)
             for ci, cl in enumerate(column_lefts(kit), 1):
                 def 세로(x):
                     return {(round(r.y0, 1), round(r.y1, 1)) for r in strokes
@@ -423,7 +501,7 @@ class Extent:
 def group_extents(pdf: Path, kit: Kit, set_first: set[int] = frozenset()) -> list[Extent]:
     """읽는 차례 문항 묶음의 조각. 묶음 윗끝 = 문항 머리 줄 윗끝, 세트 첫 문항(set_first, 0부터)은 그 앞의 세트 머리 줄
     (머리 앞에서 단 왼끝에 붙은 첫 줄 — 문항 안 줄은 번호·원문자·박스 여백만큼 들어가 있다). 아랫끝 = 다음 묶음 윗끝 앞까지
-    그 단에 있는 글리프·텍스트 층 글자·선(박스·표 테두리)·그림의 아래끝 최댓값(꼬리 박스 제외)."""
+    그 단에 있는 글리프·텍스트 층 글자·수식 글자·선(박스·표 테두리)·그림의 아래끝 최댓값(꼬리 박스 제외)."""
     lines = column_lines(pdf, kit, text=True)
     heads = [i for i, ln in enumerate(lines) if is_head(ln)]
     tops: list[tuple[int, int, float]] = []
@@ -446,7 +524,7 @@ def group_extents(pdf: Path, kit: Kit, set_first: set[int] = frozenset()) -> lis
             tail = tail_box_rect(page, kit)
             zone = None if tail is None else pymupdf.Rect(tail.x0 - 1, tail.y0 - 1, tail.x1 + 1, tail.y1 + 1)
             rects = ([d["rect"] for d in page.get_drawings()] + [pymupdf.Rect(i["bbox"]) for i in page.get_image_info()]
-                     + text_lines(page))
+                     + text_lines(page) + equation_glyphs(page))
             for ci, cl in enumerate(lefts, 1):
                 col_top[(pno, ci)] = top
                 items[(pno, ci)] = [(r.y0, r.y1) for r in rects
