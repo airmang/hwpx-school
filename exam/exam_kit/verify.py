@@ -133,8 +133,11 @@ def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, st
             fs.append(_f("M7d", f"금지 문구 잔존: {w!r}"))
     pens = _markpens(doc)
     if answer_key:
-        if len(pens) != len(heads):
-            fs.append(_f("M8", f"형광펜 {len(pens)}개 ≠ 문항 {len(heads)}개"))
+        want = len(heads) if expect_answers is None else len(expect_answers)  # 원고에 정답이 있는 문항 수
+        if len(pens) != want:
+            fs.append(_f("M8", f"형광펜 {len(pens)}개 ≠ 정답 표시 문항 {want}개"))
+        if want < len(heads):  # 정답 표시 없는 문항 — 초안은 경고, 최종판은 오류
+            fs.append(_f("M8", f"정답 표시 없는 문항 {len(heads) - want}개", "W" if draft else "E"))
         if any(c.upper() != "#FFFF00" for c in pens):
             fs.append(_f("M8", f"형광펜 색 이상: {sorted({c.upper() for c in pens})}"))
     elif pens:

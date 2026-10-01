@@ -818,6 +818,9 @@ def main(argv: list[str] | None = None) -> int:
     for n in src.notes:
         print(f"알림: {n}")
     s = scan_markdown(md)
+    unanswered = [q.number for q in s.questions if not any(c.correct for c in q.choices)]
+    if unanswered:  # 한/글 초안은 정답 형광펜이 아직 없는 것이 흔하다 — 멈추지 않고 알린다
+        print(f"알림: 정답 표시(노랑 형광펜) 없음 {len(unanswered)}문항({', '.join(unanswered)}번) — 원고에서 정답 답지 앞에 `*`를 붙인다")
     vs = lint(md, md_dir=out.parent, rules=kit.rules)
     n_err = len(errors(vs))
     print(f"wrote {out} — 문항 {len(s.questions)} · 배점 합 {sum(x.points or 0 for x in s.questions):.1f}"

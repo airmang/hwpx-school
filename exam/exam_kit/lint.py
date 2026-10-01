@@ -58,9 +58,17 @@ def rule_E004(s: Scan) -> list[Violation]:
     return []
 
 
-def rule_E005(s: Scan) -> list[Violation]:
-    return [_v("E005", q.line_no, f"{q.number}번 정답 표기 {sum(c.correct for c in q.choices)}개")
-            for q in s.questions if sum(c.correct for c in q.choices) != 1]
+def rule_E005(s: Scan, draft: bool = False) -> list[Violation]:
+    """정답 표기(`*`)는 문항마다 1개. 초안(머리 자리표시 또는 build --draft)에서 0개는 경고 W005 — 한/글 초안을 되돌린
+    원고는 정답 표시가 아직 없는 것이 흔하다(10-01). 2개 이상은 늘 오류."""
+    out = []
+    for q in s.questions:
+        n = sum(c.correct for c in q.choices)
+        if n == 0 and (draft or s.front.is_draft):
+            out.append(_v("W005", q.line_no, f"{q.number}번 정답 표기 없음 — 초안이라 경고(최종판 전에 `*`를 붙인다)"))
+        elif n != 1:
+            out.append(_v("E005", q.line_no, f"{q.number}번 정답 표기 {n}개"))
+    return out
 
 
 def rule_E006(s: Scan) -> list[Violation]:
@@ -187,12 +195,12 @@ def rule_E012(s: Scan, cfg: dict) -> list[Violation]:
     return out
 
 
-def lint(md: str, *, md_dir: Path | None = None, rules: dict | None = None) -> list[Violation]:
-    """rules = 킷 rules.json 내용({"source", "rules": {코드: 설정}}) — 없으면 엔진 규칙만."""
+def lint(md: str, *, md_dir: Path | None = None, rules: dict | None = None, draft: bool = False) -> list[Violation]:
+    """rules = 킷 rules.json 내용({"source", "rules": {코드: 설정}}) — 없으면 엔진 규칙만. draft = build --draft(초안)."""
     s = scan_markdown(md)
     out: list[Violation] = []
     for r in ENGINE_RULES:
-        out.extend(r(s))
+        out.extend(r(s, draft) if r is rule_E005 else r(s))
     for code, cfg in ((rules or {}).get("rules") or {}).items():
         if code not in SCHOOL_RULES:
             raise ValueError(f"rules.json: 모르는 규칙 {code} — 지원: {sorted(SCHOOL_RULES)}")

@@ -193,7 +193,7 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
                      "(예외). 이 폴더의 산출물을 쓰지 않는다.\n", encoding="utf-8")
     if git_ignored(out_dir) is False:
         r.notes.append(f"출력: 출력 폴더가 git 무시 대상이 아니다 — 실제 문항이 커밋될 수 있다: {out_dir}")
-    r.lint = lint(md, md_dir=md_path.parent, rules=kit.rules)
+    r.lint = lint(md, md_dir=md_path.parent, rules=kit.rules, draft=draft)
     if lint_errors(r.lint) and lint_block:
         r.blocked = True
         write_report(r, md_path=md_path)
@@ -221,7 +221,7 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
 
     # 답 표시본: 굳힌 문항지 파일 + 형광펜만
     key = HwpxDocument.open(str(plain_path))
-    add_answer_marks(key, kit, res.answers)
+    add_answer_marks(key, kit, res.answers, draft=r.draft)
     key.save_to_path(str(key_path))
     key_rr = render_fn(key_path, work / "답표시본")
     r.renders["답표시본"] = 1

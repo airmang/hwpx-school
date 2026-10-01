@@ -45,6 +45,7 @@ class Result:
     original: Counts
     rebuilt: Counts
     diffs: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)  # 견주지 못한 것(예: 정답 표시 없는 문항 — 정답 비교는 빈 것끼리)
 
     @property
     def same(self) -> bool:
@@ -131,7 +132,10 @@ def roundtrip(src: Path | Source, kit: Kit, form: Path, work: Path, *, front: di
     (second / "원고.md").write_text(md2, encoding="utf-8")
     pairs = kit.typeset.get("text_replace") or ()
     ca, cb = counts(src.doc, profile), counts(HwpxDocument.open(str(rebuilt)), profile)
-    return Result(ca, cb, compare(scan_markdown(md1, kit.front_matter), scan_markdown(md2, kit.front_matter), ca, cb, pairs))
+    s1 = scan_markdown(md1, kit.front_matter)
+    unanswered = [q.number for q in s1.questions if not any(c.correct for c in q.choices)]
+    notes = [f"정답 표시 없음 {len(unanswered)}문항({', '.join(unanswered)}번) — 정답은 견주지 못했다(빈 것끼리)"] if unanswered else []
+    return Result(ca, cb, compare(s1, scan_markdown(md2, kit.front_matter), ca, cb, pairs), notes)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -153,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(f"원본: 문항 {r.original.questions} · 수식 {r.original.equations} · 그림 {r.original.pictures}")
     print(f"다시 조판: 문항 {r.rebuilt.questions} · 수식 {r.rebuilt.equations} · 그림 {r.rebuilt.pictures}")
+    for n in r.notes:
+        print(f"알림: {n}")
     if r.same:
         print("왕복 불변: 같다")
         return 0

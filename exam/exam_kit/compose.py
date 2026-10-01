@@ -1031,9 +1031,12 @@ class _Composer:
             if len(qn.choices) != 5:
                 raise ValueError(f"{qn.number}번 답지 {len(qn.choices)}개(5개여야 한다)")
             correct = [c.mark for c in qn.choices if c.correct]
-            if len(correct) != 1:
+            if len(correct) > 1:
                 raise ValueError(f"{qn.number}번 정답 표시 {len(correct)}개(1개여야 한다)")
-            self.answers[qn.number] = correct[0]
+            if correct:
+                self.answers[qn.number] = correct[0]
+            else:  # 정답 표시 없는 초안(최종판은 원고 규칙 E005가 막는다) — 답 표시본에 이 문항 형광펜이 없다
+                self.notes.append(f"{qn.number}번 정답 표시 없음 — 답 표시본에 형광펜이 없다(최종판 전에 원고에 `*`)")
             if tables:
                 self.layouts[qn.number] = "답항표"
                 if qn.override:
@@ -1286,17 +1289,20 @@ def _mark_at(t: ET._Element, anchor, mark: str) -> None:
     begin.tail, end.tail = mark, rest or None
 
 
-def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str]) -> None:
+def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, draft: bool = False) -> None:
     """굳힌 문항지에 정답 형광펜만 더한다(답 표시본) — 조판의 answer_key와 같은 자리·모양, 글자·서식·나눔은 그대로.
 
     자리 = 그 문항 답지 줄 문단(답항표면 그 표의 칸)에서 조각 첫머리가 정답 원문자인 곳(줄 첫머리 또는 탭 뒤).
+    draft(초안)면 정답 표시 없는 문항은 칠하지 않고 넘어간다(한/글 초안을 되돌린 원고 — 10-01). 최종판은 멈춘다.
     """
     ps = list(doc.sections[0].paragraphs)
     n = len(question_heads(doc))
     missing = [k for k in range(1, n + 1) if not answers.get(str(k))]
-    if missing:  # 칠하기 전에 — 반쯤 칠한 문서를 남기지 않게
+    if missing and not draft:  # 칠하기 전에 — 반쯤 칠한 문서를 남기지 않게
         raise ValueError(f"{', '.join(f'{k}번' for k in missing)} 정답이 없다 — answers에 없다(원고의 * 표시를 본다)")
     for k in range(1, n + 1):
+        if k in missing:
+            continue
         mark = answers[str(k)]
         spot = None
         for i in choice_paragraphs(doc, kit, k):

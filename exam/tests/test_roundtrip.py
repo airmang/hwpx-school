@@ -3,6 +3,7 @@
 합성 원고를 합성 서식에 조판한 답 표시본을 '원안지'로 삼아: 원안지 → 원고 → 다시 조판 → 원고. 문항 글·정답·배점·
 그림·수식이 그대로여야 한다(이슈 #8 합격 기준)."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -114,3 +115,33 @@ def test_교사가_나눈_발문_문단은_조판에서도_나뉜다(tmp_path):
     assert r.same, r.diffs
     back = scan_markdown((tmp_path / "rt" / "원고" / "원고.md").read_text(encoding="utf-8"), load_kit(킷).front_matter)
     assert back.questions[0].stem == ("다음 조건을 만족시킨다.", "(가) 합성 조건 하나", stem)
+
+
+def _정답_없는_원고() -> str:
+    return re.sub(r"(?m)^\*([①②③④⑤])", r"\1", (픽스처 / "합성서식_6문항.md").read_text(encoding="utf-8"))
+
+
+def test_정답_표시_없는_초안도_왕복한다(tmp_path):
+    """(10-01) 한/글 초안은 정답 형광펜이 아직 없는 것이 흔하다 — 조판·역변환·왕복이 멈추지 않고, 정답은 빈 것끼리 견주며 알린다."""
+    src = rebuild(_정답_없는_원고(), load_kit(킷), 서식, 픽스처, tmp_path / "초안.hwpx")
+    r = roundtrip(src, load_kit(킷), 서식, tmp_path / "rt")
+    assert r.same, r.diffs
+    assert r.notes and "정답 표시 없음 6문항" in r.notes[0]
+
+
+def test_정답_표기_없음은_초안에서만_경고():
+    from exam_kit.lint import lint
+
+    md = _정답_없는_원고()
+    codes = lambda **k: sorted({v.code for v in lint(md, **k) if v.code in ("E005", "W005")})
+    assert codes() == ["E005"] and codes(draft=True) == ["W005"]
+    two = (픽스처 / "합성서식_6문항.md").read_text(encoding="utf-8").replace("\n② ", "\n*② ", 1)
+    assert "E005" in {v.code for v in lint(two, draft=True)}  # 정답 둘은 초안이어도 오류
+
+
+def test_역변환은_정답_없는_문항을_알린다(tmp_path, capsys):
+    from exam_kit.reverse import main as reverse_main
+
+    src = rebuild(_정답_없는_원고(), load_kit(킷), 서식, 픽스처, tmp_path / "초안.hwpx")
+    reverse_main([str(src), "--kit", str(킷), "--out", str(tmp_path / "md" / "원고.md")])
+    assert "정답 표시(노랑 형광펜) 없음 6문항" in capsys.readouterr().out
