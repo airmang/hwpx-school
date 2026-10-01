@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .frontmatter import 조판
+
 원문자 = "①②③④⑤"
 _머리 = re.compile(r"^\*\*(?P<n>\d+)\.\*\*\s*(?P<stem>.*?)\s*\((?P<p>\d+\.\d)점\)\s*$")
 _보기_표지 = "〈보기〉"
@@ -236,7 +238,7 @@ def front_matter(md: str, given: dict[str, str]) -> dict[str, str]:
     missing = [k for k in 머리_차례 if not out.get(k)]
     if missing:
         raise ValueError(f"머리 값이 없다: {missing} — --front 키=값으로 준다")
-    unknown = set(out) - set(머리_차례) - {"만점"}
+    unknown = set(out) - set(머리_차례) - {"만점", *조판}
     if unknown:
         raise ValueError(f"모르는 머리 키: {sorted(unknown)}")
     return out
@@ -268,7 +270,8 @@ def render_md(items: list[Item], answers: dict[int, str], front: dict[str, str],
             k = sum(1 for kind, _ in it.jaryo if kind == "그림")
             if k > 1:
                 raise ValueError(f"{it.number}번 그림이 {k}장 — --figures는 문항당 한 장만 바꾼다(qNN_ 한 파일). 그림을 합치거나 --figures 없이 옮긴다")
-    out = ["---"] + [f"{k}: {front[k]}" for k in 머리_차례] + ([f"만점: {front['만점']}"] if "만점" in front else []) + ["---", ""]
+    out = (["---"] + [f"{k}: {front[k]}" for k in 머리_차례] + ([f"만점: {front['만점']}"] if "만점" in front else [])
+           + [f"{k}: {front[k]}" for k in 조판 if k in front] + ["---", ""])
     for it in items:
         ans = answers.get(it.number)
         if ans not in 원문자:

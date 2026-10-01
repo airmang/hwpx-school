@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 # 아는 키 전부. 어느 키가 필수인지는 킷 front_matter가 정한다(누름틀 결재란 양식은 과목코드·대상·인쇄까지 필수일 수 있고, 없는 양식은 기본만).
 필수 = ("양식", "학년도", "학년", "학기", "차", "과목", "과목코드", "시행", "대상", "인쇄", "출제교사")
 선택 = ("만점", "논술형")
+# 조판 지시 — 양식 칸에 들어가지 않으므로 킷 front_matter와 상관없이 늘 받는다.
+조판 = ("답항",)
+답항_시작 = ("2행부터", "1행부터")  # 답지 배치형 자동 선택을 어느 형부터 하나(기본 2행부터 — G3 판정 09-27)
 기본_필수 = ("양식", "학년도", "학년", "학기", "차", "과목", "시행", "출제교사")  # 킷 없이 읽을 때(lint 등)
 _시행 = re.compile(r"^(\d{1,2}|__)(?:월|\.)\s*(\d{1,2}|__)(?:일|\.)\s*\((월|화|수|목|금|토|일|_)\)\s*(\d{1,2}|_)교시$")
 _대상 = re.compile(r"^(\d)학년\s*(\d{1,2}|_)반\s*[~∼]\s*(\d{1,2}|_)반$")  # 반 미정은 `_`(초안, Task 19)
@@ -33,6 +36,7 @@ class FrontMatter:
     출제교사: str
     만점: float = 100.0
     논술형: bool = False
+    답항: str = "2행부터"  # 답지 배치형 자동 선택의 시작(답항_시작) — 문항의 {답항=N행}이 우선
     raw: dict = field(default_factory=dict)
 
     def 시행_분해(self) -> dict[str, str | None]:
@@ -67,7 +71,7 @@ class FrontMatter:
 def parse_front_matter(md: str, schema: dict | None = None) -> tuple[FrontMatter, str]:
     """schema = 킷 front_matter {"required": [...], "optional": [...]} — 없으면 기본_필수만 필수, 나머지 아는 키는 선택."""
     required = tuple(schema["required"]) if schema else 기본_필수
-    allowed = set(schema["required"]) | set(schema["optional"]) if schema else set(필수) | set(선택)
+    allowed = (set(schema["required"]) | set(schema["optional"]) if schema else set(필수) | set(선택)) | set(조판)
     lines = md.splitlines()
     if not lines or lines[0].strip() != "---":
         raise ValueError("front-matter가 없다: 첫 줄은 '---'")
@@ -89,6 +93,8 @@ def parse_front_matter(md: str, schema: dict | None = None) -> tuple[FrontMatter
     missing = [k for k in required if k not in d]
     if missing:
         raise ValueError(f"필수 키 누락: {missing}")
+    if d.get("답항", "2행부터") not in 답항_시작:
+        raise ValueError(f"답항 형식 오류: {d['답항']!r} — {' 또는 '.join(답항_시작)}")
     for key, rx in (("시행", _시행), ("대상", _대상), ("인쇄", _인쇄)):
         if key in d and not rx.match(d[key]):
             raise ValueError(f"{key} 형식 오류: {d[key]!r}")
@@ -99,6 +105,7 @@ def parse_front_matter(md: str, schema: dict | None = None) -> tuple[FrontMatter
         양식=d["양식"], 학년도=int(d["학년도"]), 학년=int(d["학년"]), 학기=int(d["학기"]), 차=int(d["차"]),
         과목=d["과목"], 과목코드=d.get("과목코드"), 시행=d["시행"], 대상=d.get("대상"), 인쇄=d.get("인쇄"),
         출제교사=d["출제교사"],
-        만점=float(d.get("만점", "100")), 논술형=d.get("논술형", "false").lower() in ("true", "예", "1"), raw=d,
+        만점=float(d.get("만점", "100")), 논술형=d.get("논술형", "false").lower() in ("true", "예", "1"),
+        답항=d.get("답항", "2행부터"), raw=d,
     )
     return fm, "\n".join(lines[end + 1:])

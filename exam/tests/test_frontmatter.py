@@ -111,3 +111,12 @@ def test_킷_front_matter가_필수_키를_정한다():
     누름틀 = {"required": list(학교B["required"]) + ["과목코드", "대상", "인쇄"], "optional": ["만점", "논술형"]}
     with pytest.raises(ValueError, match="필수 키 누락"):
         parse_front_matter(md, 누름틀)
+
+
+def test_답항_조판_지시는_킷과_상관없이_받는다():
+    assert parse_front_matter(머리)[0].답항 == "2행부터"  # 기본 — 자동 선택은 2행부터(G3 판정)
+    with_key = 머리.replace("출제교사: 김출제\n", "출제교사: 김출제\n답항: 1행부터\n")
+    schema = {"required": ["양식", "학년도", "학년", "학기", "차", "과목", "시행", "출제교사"], "optional": ["과목코드", "대상", "인쇄"]}
+    assert parse_front_matter(with_key, schema)[0].답항 == "1행부터"  # 킷 front_matter에 없어도 된다
+    with pytest.raises(ValueError, match="답항 형식 오류"):
+        parse_front_matter(머리.replace("출제교사: 김출제\n", "출제교사: 김출제\n답항: 3행부터\n"))
