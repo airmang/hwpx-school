@@ -32,6 +32,7 @@ exam_kit/
   prepare.py       양식 hwpx를 조판 직전 상태로(안내물만 걷기, 꼬리 박스 고정, 조판 뒤 세척·검사)
   slots.py         누름틀 20개·출제교사 셀 채움
   compose.py       조판: 샘플 구역 → 문항(자동번호·답지 배치형·〈보기〉/자료 견본 복제·격자표·그림·코드·답항표), 형광펜
+  equation.py      인라인 수식 `$…$`(LaTeX) → 한/글 수식: 나누기·가린 글·폭 어림·줄 캐시 글(수식 = 8글자 자리)
   render.py        실한컴 렌더(직렬) → pdf·쪽 png — 넣기 전 zip 검사(check_package)
   geometry.py      렌더 PDF 기하(글리프 bbox): 문항 머리 자리·단 끝·분할·꼬리 박스·묶음 높이
   fit.py           자간 맞춤·낱말 끌어올림(한컴 줄 캐시로 잰다), 줄 대조 CLI
@@ -49,10 +50,10 @@ tests/             pytest — 픽스처는 합성 문항만(fixtures/*.md, 그�
 
 ## 테스트
 
-    uv run pytest -q                    # 전부(실한컴 렌더 17개 포함 — 한컴이 한 번에 하나씩 돈다)
+    uv run pytest -q                    # 전부(실한컴 렌더 포함 — 한컴이 한 번에 하나씩 돈다)
     uv run pytest -q -m "not render"    # 한컴 없이
 
-- 실한컴 오라클 픽스처(`오라클`)를 쓰는 테스트에는 conftest가 `render` 표지를 붙인다(17개). 오라클이 없으면 skip.
+- 실한컴 오라클 픽스처(`오라클`)를 쓰는 테스트에는 conftest가 `render` 표지를 붙인다. 오라클이 없으면 skip.
 - **합성 킷 `kits/synthetic`**(학교 무관 합성 서식 + 킷, `tools/make_synthetic_form.py`로 생성)으로 도는 `tests/test_synthetic.py`는 환경변수 없이 누구 PC에서든 돈다 — 서식 준비·머리 값·두 판 조판·기계 검사(한컴 없이), 전체 조판 1건(실한컴).
 - 학교 킷·서식은 저장소 밖이라 **환경변수로만** 받는다. 없으면 그 테스트(모듈)는 skip:
   - `EXAM_KIT_PATH`·`EXAM_FORM_PATH`: 누름틀 양식 킷 폴더와 그 서식 hwpx(엔진 회귀의 첫 기준)
