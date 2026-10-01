@@ -8,6 +8,11 @@ dependencies = [
   "pillow>=10",
 ]
 
+# 시험용(windows-trial 브랜치만, 머지하지 않는다): 상류 Windows 렌더 수정(python-hwpx-automation #154·#155·#156)이
+# 릴리스되기 전에 다른 Windows PC에서 시험하려고 그 PR 머리 커밋을 git에서 받는다.
+[tool.uv.sources]
+python-hwpx-automation = { git = "https://github.com/airmang/python-hwpx-automation", rev = "223b982709912c372e0d7de52faf4c4140da9aef" }
+
 [dependency-groups]
 dev = ["pytest>=8"]
 

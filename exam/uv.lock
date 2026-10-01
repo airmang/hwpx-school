@@ -114,7 +114,7 @@ dev = [
 requires-dist = [
     { name = "packaging", specifier = ">=23" },
     { name = "pillow", specifier = ">=10" },
-    { name = "python-hwpx-automation", extras = ["oracle"], specifier = ">=7.2,<8" },
+    { name = "python-hwpx-automation", extras = ["oracle"], git = "https://github.com/airmang/python-hwpx-automation?rev=223b982709912c372e0d7de52faf4c4140da9aef" },
 ]
 
 [package.metadata.requires-dev]
@@ -328,16 +328,12 @@ wheels = [
 [[package]]
 name = "python-hwpx-automation"
 version = "7.3.1"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/airmang/python-hwpx-automation?rev=223b982709912c372e0d7de52faf4c4140da9aef#223b982709912c372e0d7de52faf4c4140da9aef" }
 dependencies = [
     { name = "anyio" },
     { name = "cryptography" },
     { name = "pydantic" },
     { name = "python-hwpx" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f7/cb/c837dfd070bf85c010fe14eba7d275496b839a2be3d05d7b4ddac7e2800e/python_hwpx_automation-7.3.1.tar.gz", hash = "sha256:a7e26276e0eb38658a6113433c60c0fbbffedd176086db74295eafd1294d1bc9", size = 741094, upload-time = "2026-09-28T00:31:03.516Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/60/3cd2248d7645213465d3e7f86408ff69b278cd04275bbc06763d14533f69/python_hwpx_automation-7.3.1-py3-none-any.whl", hash = "sha256:cc14f9f10c0119056ea1d370a3b2b0b88953b365decc7dea104a28144455dc3f", size = 842241, upload-time = "2026-09-28T00:31:01.463Z" },
 ]
 
 [package.optional-dependencies]
