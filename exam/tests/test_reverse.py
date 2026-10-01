@@ -348,6 +348,7 @@ def test_bin_items(tmp_path):
 
 
 def test_main_scan_오류면_0이_아니다(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(reverse_mod, "open_source", lambda p, w: reverse_mod.Source(None, p, p))  # 원안지 열기는 건너뛴다
     monkeypatch.setattr(reverse_mod, "reverse", lambda *a, **k: "---\n양식: x\n학년도: 2026\n학년: 2\n학기: 1\n차: 1\n"
                         "과목: x\n과목코드: 1\n시행: 4.22.(수) 3교시\n대상: 2학년 1반~2반\n인쇄: 1매 * 1묶음\n"
                         "출제교사: x\n---\n떠도는 글\n")
@@ -378,6 +379,7 @@ def test_제출본_역변환(제출본_hwpx, tmp_path):
 
 
 def test_cli_출력_폴더를_만든다(tmp_path, monkeypatch):
+    monkeypatch.setattr(reverse_mod, "open_source", lambda p, w: reverse_mod.Source(None, p, p))  # 원안지 열기는 건너뛴다
     monkeypatch.setattr(reverse_mod, "reverse", lambda *a, **k: "---\n양식: x\n학년도: 2026\n학년: 2\n학기: 1\n차: 1\n"
                         "과목: x\n과목코드: 1\n시행: 4.22.(수) 3교시\n대상: 2학년 1반~2반\n인쇄: 1매 * 1묶음\n"
                         "출제교사: x\n---\n")

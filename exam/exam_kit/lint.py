@@ -86,9 +86,10 @@ def rule_E007(s: Scan, cfg: dict) -> list[Violation]:
 def rule_E008(s: Scan, cfg: dict) -> list[Violation]:
     out = []
     for q in s.questions:
-        ranks = [cfg["order"][b.kind] for b in q.blocks]
+        kinds = [b.kind for b in q.blocks if b.kind != "주"]  # 발문 이음 줄(주)은 바로 위 블록에 딸린다 — 순서를 따지지 않는다
+        ranks = [cfg["order"][k] for k in kinds]
         if ranks != sorted(ranks):
-            out.append(_v("E008", q.line_no, f"{q.number}번 블록 순서 {[b.kind for b in q.blocks]} — {cfg['message']}"))
+            out.append(_v("E008", q.line_no, f"{q.number}번 블록 순서 {kinds} — {cfg['message']}"))
     return out
 
 
@@ -128,6 +129,14 @@ def rule_E010(s: Scan, md_dir: Path | None) -> list[Violation]:
     if md_dir is None:
         return []
     return [_v("E010", line, f"{n}번 그림 없음: {src}") for n, line, src, _ in _images(s) if not (md_dir / src).exists()]
+
+
+def rule_E026(s: Scan, md_dir: Path | None) -> list[Violation]:
+    """보존 블록(`## 보존` 아래 :::보존 src=…)의 원본 구간 hwpx가 원고 옆에 있어야 한다 — 없으면 그 구간이 조판에서 빠진다."""
+    if md_dir is None:
+        return []
+    return [_v("E026", b.line_no, f"보존 블록 파일 없음: {b.attrs.get('src')}") for b in s.preserved
+            if not b.attrs.get("src") or not (md_dir / b.attrs["src"]).is_file()]
 
 
 def rule_W022(s: Scan, md_dir: Path | None) -> list[Violation]:
@@ -189,6 +198,7 @@ def lint(md: str, *, md_dir: Path | None = None, rules: dict | None = None) -> l
             raise ValueError(f"rules.json: 모르는 규칙 {code} — 지원: {sorted(SCHOOL_RULES)}")
         out.extend(SCHOOL_RULES[code](s, cfg))
     out.extend(rule_E010(s, md_dir))
+    out.extend(rule_E026(s, md_dir))
     out.extend(rule_W022(s, md_dir))
     return sorted(out, key=lambda v: (v.line_no, v.code))
 
