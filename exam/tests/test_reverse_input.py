@@ -145,4 +145,16 @@ def test_배점이_발문_뒤_줄_끝에_있으면_머리로_옮긴다():
     paras = [_p(_run("그림과 같이 합성 도형이 있다.")), _p(_run("이때 넓이의 값은? [3.8점]")),
              *[_p(_run(f"{m} {i}")) for i, m in enumerate("①②③④⑤", 1)]]
     md = reverse_body(paras, {0}, set())
-    assert md[0] == "## 1. [3.8점]" and md[1:3] == ["그림과 같이 합성 도형이 있다.", "이때 넓이의 값은?"]
+    assert md[0] == "## 1. [3.8점]" and md[1:4] == ["그림과 같이 합성 도형이 있다.", "", "이때 넓이의 값은?"]  # 나뉜 문단은 빈 줄로
+
+
+def test_발문_문단은_빈_줄로_나누고_이어_쓴_줄은_한_문단():
+    """(10-01 결정) 원고 발문: 빈 줄 = 새 문단(교사가 나눈 줄), 이어 쓴 줄 = 한 문단(지금까지와 같다)."""
+    from exam_kit.scan import scan_markdown
+
+    head = "---\n양식: x\n학년도: 2026\n학년: 1\n학기: 1\n차: 1\n과목: x\n시행: 4.20.(월) 2교시\n출제교사: x\n---\n"
+    choices = "\n*① a\n② b\n③ c\n④ d\n⑤ e\n"
+    one = scan_markdown(head + "## 1. [1.0점]\n다음 조건을\n만족시키는 값은?\n" + choices).questions[0]
+    two = scan_markdown(head + "## 1. [1.0점]\n다음 조건을 만족시킨다.\n\n(가) 합성 조건\n\n그 값은?\n" + choices).questions[0]
+    assert one.stem == ("다음 조건을 만족시키는 값은?",)
+    assert two.stem == ("다음 조건을 만족시킨다.", "(가) 합성 조건", "그 값은?")

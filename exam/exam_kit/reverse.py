@@ -481,11 +481,13 @@ class _Question:
         stem = re.sub(rf"^{k}\.\s*", "", _배점.sub("", head).strip())  # 글자 번호 양식의 `N. `은 번호 — 원고는 머리에 쓴다
         self.lines = [self._head_line(), stem]
         self.text_at: list[int] = [1]  # 글 줄(발문·발문 이음)의 자리 — 배점이 머리 문단이 아니라 뒤 줄 끝에 있을 때 찾는다
+        self.blocked = False  # 블록(박스·표·그림 등)을 지났는가 — 그 전의 글 문단은 발문 문단이다
         self.matching_head: str | None = None
         self.choice_paras: list[str] = []
         self.answer_table: list[str] | None = None  # 조판기 답항표(answer_table) — 답지 대신
 
     def add_block(self, kind: str, lines: list[str]) -> None:
+        self.blocked = True
         if kind == "답항표":
             if self.answer_table is not None or self.choice_paras:
                 raise ValueError(f"{self.k}번: 답항표가 둘이거나 답지 줄과 함께 있다")
@@ -505,6 +507,8 @@ class _Question:
         elif _is_matching_head(t):
             self.matching_head = t  # 짝짓기 머리 줄(ㄱ  ㄴ  ㄷ)
         else:
+            if not self.blocked and self.lines[-1]:  # 발문 문단이 나뉘어 있다 — 빈 줄로 나눠 교사가 나눈 문단을 지킨다
+                self.lines.append("")
             self.text_at.append(len(self.lines))
             self.lines.append(t)
 

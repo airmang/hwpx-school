@@ -951,14 +951,22 @@ class _Composer:
                 raise ValueError(f"L{b.line_no} {where} 모르는 블록 {b.kind}")
         return out
 
-    def _head(self, qn: Question) -> _Para:
+    def _head(self, qn: Question) -> list[_Para]:
+        """머리 문단(번호 + 발문 첫 문단) + 발문 이음 문단들. 원고에서 빈 줄로 나눈 발문 문단은 교사가 나눈 줄 그대로 문단을
+        나눈다(10-01 결정) — 둘째 문단부터는 발문 이음 줄 자리(〈보기〉 참고 줄과 같은 모양). 배점은 마지막 발문 문단 끝에."""
         if qn.points is None:
             raise ValueError(f"{qn.number}번 배점이 없다")
-        stem = " ".join(s for s in qn.stem if s)
-        segs = self._segs(stem + self.kit.typeset["score_suffix"].format(points=qn.points), "number")
+        stems = [s for s in qn.stem if s] or [""]
+        suffix = self.kit.typeset["score_suffix"].format(points=qn.points)
+        segs = self._segs(stems[0] + (suffix if len(stems) == 1 else ""), "number")
         if self.kit.number["mode"] == "literal":  # 스타일에 자동번호가 없다 — 견본 번호 글자 모양으로 `N. `을 쓴다
             segs = [(self.kit.number["format"].format(n=qn.number), self.samples.번호_charpr)] + segs
-        return _Para("number", segs, gap=True)
+        out = [_Para("number", segs, gap=True)]
+        cp = self.style["number"][2]
+        for k, text in enumerate(stems[1:], 2):
+            text += suffix if k == len(stems) else ""
+            out.append(_Para("normal", [(t, c or cp) for t, c in self._segs(text, "number")], left=발문_이음_왼여백))
+        return out
 
     def _choices(self, qn: Question) -> tuple[str, list[_Para]]:
         """답지 → (배치형, 줄 문단들). 들어가는 가장 촘촘한 자동 형(2행부터 — 원고 머리 `답항: 1행부터`면 1행부터),
@@ -1033,7 +1041,7 @@ class _Composer:
                 choices = [_Para("choice5", [("", None)], obj=self.answer_table(qn, tables[0]))]
             else:
                 self.layouts[qn.number], choices = self._choices(qn)
-            group = [self._head(qn)] + boxes + choices
+            group = self._head(qn) + boxes + choices
             if qn.set_rng is not None and qn.set_rng not in done_sets:
                 done_sets.add(qn.set_rng)
                 s = sets[qn.set_rng]

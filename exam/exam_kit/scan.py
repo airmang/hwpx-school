@@ -106,7 +106,8 @@ class _Buf:
                 self.bad.append(opt)
         self.line_no = line_no
         self.set_rng = set_rng
-        self.stem: list[str] = []
+        self.stem: list[str] = []  # 발문 문단들 — 이어 쓴 줄은 한 문단, 빈 줄은 새 문단(10-01 결정)
+        self.stem_open = False     # 마지막 발문 문단에 다음 줄을 이을 수 있는가(빈 줄을 만나면 닫힌다)
         self.blocks: list[Block] = []
         self.choices: list[Choice] = []
 
@@ -214,6 +215,8 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
             continue
         if not line.strip():
             flush_table()
+            if cur is not None:
+                cur.stem_open = False
             continue
         if TABLE_ROW_RE.match(line):
             if table is None:
@@ -294,8 +297,11 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
                     cur.blocks[-1] = Block("주", last.lines + (line.strip(),), {}, last.line_no)
                 else:
                     cur.blocks.append(Block("주", (line.strip(),), {}, i + offset + 1))
+            elif cur.stem_open:
+                cur.stem[-1] += " " + line.strip()  # 이어 쓴 줄 = 같은 문단
             else:
                 cur.stem.append(line.strip())
+                cur.stem_open = True
         elif set_open is not None:
             set_open["passage"].append(line.strip())
         else:

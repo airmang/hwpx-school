@@ -94,3 +94,23 @@ def test_cli(tmp_path, capsys):
     assert main([str(src), "--kit", str(킷), "--form", str(서식), "--work", str(tmp_path / "rt")]) == 0
     out = capsys.readouterr().out
     assert "왕복 불변: 같다" in out and "원본: 문항 6" in out
+
+
+def test_교사가_나눈_발문_문단은_조판에서도_나뉜다(tmp_path):
+    """(10-01 결정) 빈 줄로 나눈 발문 문단 → 머리 문단 + 발문 이음 문단(배점은 마지막 문단 끝) — 왕복해도 문단 그대로."""
+    from hwpx.document import HwpxDocument
+
+
+    md = (픽스처 / "합성서식_6문항.md").read_text(encoding="utf-8")
+    first = scan_markdown(md, load_kit(킷).front_matter).questions[0]
+    stem = first.stem[0]
+    md = md.replace(stem, "다음 조건을 만족시킨다.\n\n(가) 합성 조건 하나\n\n" + stem, 1)
+    src = rebuild(md, load_kit(킷), 서식, 픽스처, tmp_path / "원안지.hwpx")
+    texts = ["".join(t.text or "" for t in p.element.iter("{*}t")) for p in HwpxDocument.open(str(src)).sections[0].paragraphs]
+    i = next(k for k, t in enumerate(texts) if "다음 조건을 만족시킨다." in t)
+    assert texts[i + 1] == "(가) 합성 조건 하나" and texts[i + 2].startswith(stem) and texts[i + 2].endswith("점]")
+    assert "점]" not in texts[i]  # 배점은 마지막 발문 문단 끝에만
+    r = roundtrip(src, load_kit(킷), 서식, tmp_path / "rt")
+    assert r.same, r.diffs
+    back = scan_markdown((tmp_path / "rt" / "원고" / "원고.md").read_text(encoding="utf-8"), load_kit(킷).front_matter)
+    assert back.questions[0].stem == ("다음 조건을 만족시킨다.", "(가) 합성 조건 하나", stem)
