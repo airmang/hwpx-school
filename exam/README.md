@@ -38,6 +38,7 @@ exam_kit/
   layout.py        렌더 루프 settle: 접힌 답지 → 자간 → 균형 배치 → 분할 → 맨 위 간격 → 꼬리 → 간격 나눔 → 총쪽수
   verify.py        조판본 [기계] 검사(M6~M11), 정답 추출
   build.py         파이프라인 CLI와 보고서
+  gate.py          엔진 회귀 게이트: 기준·새 산출물 비교(paraPr는 내용으로, 문단 id·그림 instid는 정규화)
   reverse.py       제출본 hwpx → 원고 md(원본 재현용)
   convert.py       지필 원고(문제지·정답키 형식) → 원고 md + 문항 내용 불변 검사
   _png.py          합성 PNG(세척·픽스처)
@@ -67,7 +68,7 @@ tests/             pytest — 픽스처는 합성 문항만(fixtures/*.md, 그�
 
 1. `uv lock --upgrade-package python-hwpx-automation` → `uv sync`
 2. `uv run pytest -q -m "not render"` 전부 통과 + 렌더 테스트 2~3개(한 번에 하나)
-3. 등록된 학교 킷이 있으면 기준 제출본 재현을 다시 뽑아 (쪽, 단) 대조와 `exam_kit.fit` 줄 대조가 전과 같은지 본다. 다르면 사용자 검수에 올린다.
+3. 등록된 학교 킷이 있으면 기준 산출물을 다시 뽑아 `uv run python -m exam_kit.gate <기준 폴더> <새 폴더>`로 견주고, 기준 제출본 재현의 (쪽, 단) 대조와 `exam_kit.fit` 줄 대조가 전과 같은지 본다. 다르면 사용자 검수에 올린다.
 4. `uv.lock`만 pathspec으로 커밋하고 보고서에 버전을 적는다.
 
 렌더 런타임(플러그인의 oracle 환경)은 프로젝트 환경과 따로 움직인다 — 렌더 문제를 보고할 때 두 버전을 함께 적는다.
