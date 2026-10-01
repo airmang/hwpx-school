@@ -82,6 +82,8 @@ def box_kind(kit: Kit, block: Block) -> str:
 # 답항 배치형 → (역할, 줄마다 답지 수). 5행은 한 줄에 하나(길면 내어쓰기로 접힌다)라 늘 들어간다.
 배치형 = {"1행": ("choice1", (5,)), "2행": ("choice2", (3, 2)), "3행": ("choice3", (2, 2, 1)), "5행": ("choice5", (1,) * 5)}
 자동_배치형 = ("2행", "3행", "5행")  # 1행은 눌러 둘 때만(G3 판정 09-27 — 짧은 답지도 두 줄로)
+# 원고 머리 `답항: 1행부터`면 1행부터 고른다 — 답이 짧은 과목(수학 실물: 1행 배치가 주력, 10-01 오너 결정 3-가)
+자동_배치형_1행부터 = ("1행",) + 자동_배치형
 CM = 72000 / 25.4  # 1 cm = 2834.6 HWPUNIT
 발문_이음_왼여백 = 1680  # 발문 둘째 줄부터의 자리(렌더 실측: 발문 이음 줄 첫 글리프 dx 17.3~17.8pt, 1770이면 참고 줄이 0.9pt 오른쪽) — 〈보기〉 뒤 참고 줄을 여기에 맞춘다
 그림_DPI = 300      # 그림 원래 크기 = 원본 px ÷ 300dpi(인쇄 규격, Task 30) — 원고 폭이 이보다 작으면 줄여 넣는 것
@@ -433,6 +435,7 @@ class _Composer:
         self.answers: dict[str, str] = {}
         self.layouts: dict[str, str] = {}
         self.notes: list[str] = []
+        self.자동 = 자동_배치형  # 답지 배치형 자동 선택 차례 — plan이 원고 머리(답항)로 정한다
 
     # ---- 서식 파생 -----------------------------------------------------------
 
@@ -957,7 +960,8 @@ class _Composer:
         return _Para("number", segs, gap=True)
 
     def _choices(self, qn: Question) -> tuple[str, list[_Para]]:
-        """답지 → (배치형, 줄 문단들). 들어가는 가장 촘촘한 자동 형(2행부터), `{답항=N행}`이면 그 형(넘치면 notes에 남긴다)."""
+        """답지 → (배치형, 줄 문단들). 들어가는 가장 촘촘한 자동 형(2행부터 — 원고 머리 `답항: 1행부터`면 1행부터),
+        `{답항=N행}`이면 그 형(넘치면 notes에 남긴다)."""
         texts = [f"{c.mark} {c.text}" for c in qn.choices]
         widths = [_글폭(t.replace("__", ""), self.kit.metrics) for t in texts]
 
@@ -968,7 +972,7 @@ class _Composer:
         def 들어감(kind: str) -> bool:
             return kind == "5행" or fits(widths, 배치형[kind][1], *칸(kind), self.kit.metrics.full)
 
-        kind = qn.override or next(k for k in 자동_배치형 if 들어감(k))
+        kind = qn.override or next(k for k in self.자동 if 들어감(k))
         if not 들어감(kind):
             self.notes.append(f"{qn.number}번 {{답항={kind}}} — 추정 폭이 칸을 넘는다(렌더에서 칸 어긋남·줄 접힘을 본다)")
         role, rows = 배치형[kind]
@@ -1004,6 +1008,7 @@ class _Composer:
     def plan(self, scan: Scan) -> list[_Para]:
         if scan.errors:
             raise ValueError("스캔 오류: " + "; ".join(f"L{e.line_no} {e.reason}" for e in scan.errors))
+        self.자동 = 자동_배치형_1행부터 if scan.front.답항 == "1행부터" else 자동_배치형
         sets = {s.rng: s for s in scan.sets}
         done_sets: set[tuple[str, str]] = set()
         out: list[_Para] = []

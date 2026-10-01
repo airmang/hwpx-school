@@ -268,3 +268,21 @@ def test_합성_수학_원고_전체_조판_실렌더(오라클, tmp_path):
     r = build(원고, 킷, tmp_path / "out", form_path=서식)
     assert not r.blocked
     assert r.findings and all(fs == [] for fs in r.findings.values()), r.findings  # 두 판 기계 잔존 0
+
+
+@pytest.mark.parametrize("front, want", [
+    ("", {"1": "2행", "2": "2행", "3": "2행", "4": "2행", "5": "2행", "6": "2행", "7": "답항표", "8": "2행", "9": "2행"}),
+    ("답항: 1행부터\n", {"1": "1행", "2": "2행", "3": "1행", "4": "1행", "5": "1행", "6": "1행", "7": "답항표", "8": "1행",
+                       "9": "1행"}),
+])
+def test_원고_머리_답항_1행부터면_짧은_답지는_1행(front, want):
+    """수학은 답이 짧아 1행 배치가 주력이다(실물 구조 통계) — 머리 `답항: 1행부터`면 자동 선택을 1행부터 한다.
+    `ㄱ, ㄴ, ㄷ`처럼 1행 칸을 넘는 답지는 그다음 형(2행)이다."""
+    kit = load_kit(킷)
+    md = 원고.read_text(encoding="utf-8").replace("만점: 45\n", "만점: 45\n" + front)
+    s = scan_markdown(md, kit.front_matter)
+    doc, prep = prepare_document(서식, kit)
+    fill_slots(doc, kit, s.front, question_count=len(s.questions), total_points=45.0)
+    prep.refresh(doc)
+    res = compose(doc, s, kit, answer_key=False, image_root=원고.parent)
+    assert res.layouts == want
