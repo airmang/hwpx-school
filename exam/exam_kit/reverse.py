@@ -27,6 +27,7 @@ from PIL import Image, UnidentifiedImageError
 from . import equation, q
 from .kit import Kit
 from .prepare import _text, _top_tables
+from .slots import read_text_slots
 from .source import Source, SourceError, open_source
 from .verify import _tail_index, question_heads
 
@@ -319,23 +320,52 @@ def _is_box_frame(tbl, spec: dict) -> bool:
             and all(_blank_cell(tc) for tc in tcs if tc is not body))
 
 
+def answer_table(tbl, underlined: set[str]) -> list[str] | None:
+    """조판기의 짝짓기 답항표(compose.answer_table — 무테 6행: 머리행 [빈 칸, 기호…] + ①~⑤ 행) → `:::답항표` 몸 줄
+    [머리 줄, 행 다섯]. 아니면 None. 머리 기호의 밑줄은 조판이 다는 것이라 뺀다."""
+    trs = tbl.findall(q("hp", "tr"))
+    if len(trs) != 6 or any(_span(tc) != (1, 1) for tc in _cells(tbl)):
+        return None
+
+    def 글(tc) -> str:
+        return " ".join(t for p in _cell_paras(tc) if (t := paragraph_text(p, underlined)))
+
+    rows = [[글(tc) for tc in tr.findall(q("hp", "tc"))] for tr in trs]
+    if rows[0][0] or len({len(r) for r in rows}) != 1 or len(rows[0]) < 3:
+        return None
+    if [r[0].lstrip("*") for r in rows[1:]] != list(원문자):
+        return None
+    head = [h.replace("__", "").strip() for h in rows[0][1:]]
+    return [f'머리="{"|".join(head)}"'] + [f"{r[0]} " + " | ".join(r[1:]) for r in rows[1:]]
+
+
 def classify_table(tbl, underlined: set[str], *, boxes: dict | None = None, picture: Picture | None = None,
                    mono: set[str] = frozenset()) -> tuple[str, list[str]]:
     """본문 표 → ("보기", 항목 줄) | ("자료", 내용 줄) | ("표", md 표 줄). 병합 칸 격자표·그림 칸은 오류.
     boxes = 킷 boxes — 없으면 박스를 가리지 않고 모두 격자표로 본다."""
     rows, cols = tbl.get("rowCnt"), tbl.get("colCnt")
     shape = [int(rows), int(cols)]
-    bo = (boxes or {}).get("보기")
-    if bo and shape == bo["shape"] and bo["title_match"] in _text(tbl):
-        cc, cr = bo["content_cell"]
+    specs = {k: v for k, v in (boxes or {}).items() if isinstance(v, dict) and "shape" in v}
+    for kind, spec in specs.items():  # 제목 있는 박스(〈보기〉·〈조건〉): 모양 + 제목 글
+        if not spec.get("title_match") or shape != spec["shape"] or spec["title_match"] not in _text(tbl):
+            continue
+        name = kind.rstrip("◦")
+        cc, cr = spec["content_cell"]
         cell = _cell(tbl, cr, cc)
-        if cell is None or _span(cell) != (1, bo["rails"][-1] - bo["rails"][0] - 1):
-            raise ValueError(f"〈보기〉 박스 모양이 양식과 다르다({cr}행 내용 칸 없음)")
-        return "보기", _join_items(_box_lines(cell, underlined, picture, "〈보기〉", mono, boxes))
-    ja = (boxes or {}).get("자료")
-    if ja and shape == ja["shape"] and _is_box_frame(tbl, ja):
-        cc, cr = ja["content_cell"]
-        return "자료", _box_lines(_cell(tbl, cr, cc), underlined, picture, "자료 박스", mono, boxes)
+        rails = spec.get("rails") or []
+        width = rails[-1] - rails[0] - 1 if rails else shape[1] - cc  # 레일 사이, 레일이 없으면 내용 칸부터 오른쪽 끝까지
+        if cell is None or _span(cell) != (1, width):
+            raise ValueError(f"〈{name}〉 박스 모양이 양식과 다르다({cr}행 {cc}열 내용 칸이 1×{width}가 아니다)")
+        lines = _box_lines(cell, underlined, picture, f"〈{name}〉", mono, boxes)
+        return name, (_join_items(lines) if name == "보기" else lines)
+    for kind, spec in specs.items():  # 제목 없는 박스(자료): 칸 수 + 내용 칸 밖은 모두 빈 칸
+        if spec.get("title_match") or shape != spec["shape"] or not _is_box_frame(tbl, spec):
+            continue
+        cc, cr = spec["content_cell"]
+        return kind.rstrip("◦"), _box_lines(_cell(tbl, cr, cc), underlined, picture, "자료 박스", mono, boxes)
+    table = answer_table(tbl, underlined)
+    if table is not None:
+        return "답항표", table
     md: list[list[str]] = []
     for tr in tbl.findall(q("hp", "tr")):
         row = []
@@ -369,27 +399,33 @@ def _bin_items(hwpx: Path) -> dict[str, tuple[str, bytes]]:
         return out
 
 
+# 누름틀 슬롯 이름 → 같은 뜻의 글자 자리 값 이름(slots.read_text_slots) — 글자 자리 양식은 머리·대상 학년이 한 자리다
+_글자_자리_이름 = {"머리_학년": "학년", "머리_학기": "학기", "머리_차": "차", "머리_과목": "과목"}
 _머리_차례 = ("양식", "학년도", "학년", "학기", "차", "과목", "과목코드", "시행", "대상", "인쇄", "출제교사", "만점")
 
 
 def kit_front(doc: HwpxDocument, kit: Kit) -> dict[str, str | None]:
-    """학교 킷으로 읽은 머리 값 — 읽지 못한 키는 None(누름틀이 없다 — 양식이 바뀌었거나 교사가 누름틀을 지우고 글로 썼다).
-    누름틀은 있는데 비었으면 자리표시를 둘 수 있는 키(시행·대상의 반·인쇄)는 `__`·`_`로 남긴다(초안)."""
+    """학교 킷으로 읽은 머리 값 — 누름틀(kit.slots)에서, 누름틀이 없으면 글자 자리(kit.text_slots, slots.read_text_slots)에서.
+    읽지 못한 키는 None(누름틀이 없다 — 양식이 바뀌었거나 교사가 누름틀을 지우고 글로 썼다). 비었으면 자리표시를 둘 수 있는
+    키(시행·대상의 반·인쇄)는 `__`·`_`로 남긴다(초안). 숫자여야 하는 키(학년도·학년·학기·차)는 숫자가 아니면 모름."""
     v = {f.field_id: f.value for f in doc.list_form_fields()}
+    ts = read_text_slots(doc, kit) if kit.text_slots else {}
 
     def g(slot: str) -> str | None:
-        """누름틀 값 — 누름틀이 없으면 None, 비었거나 양식 자리표시면 ""."""
+        """누름틀 값(없으면 같은 뜻의 글자 자리 값) — 둘 다 없으면 None, 비었거나 자리표시면 ""."""
         fid = kit.slots.get(slot)
-        if fid is None or fid not in v:
-            return None
-        x = v[fid] or ""
-        return "" if x == kit.placeholders.get(slot) else x
+        if fid is not None and fid in v:
+            x = v[fid] or ""
+            return "" if x == kit.placeholders.get(slot) else x
+        x = ts.get(_글자_자리_이름.get(slot, slot))
+        return None if x is None else ("" if re.search(r"_|○", x) else x)
 
     def 칸(slot: str, blank: str) -> str:  # 자리표시를 둘 수 있는 칸 — 없거나 비면 자리표시
         return g(slot) or blank
 
-    def 값(slot: str) -> str | None:  # 자리표시를 둘 수 없는 칸 — 없거나 비면 모름
-        return g(slot) or None
+    def 값(slot: str, digits: bool = False) -> str | None:  # 자리표시를 둘 수 없는 칸 — 없거나 비면 모름
+        x = g(slot) or None
+        return None if x is None or (digits and not x.isdigit()) else x
 
     header = " ".join(_text(h) for h in doc.sections[0].element.iter(q("hp", "header")))
     학년도 = re.search(r"(\d{4})학년도", header)
@@ -397,15 +433,21 @@ def kit_front(doc: HwpxDocument, kit: Kit) -> dict[str, str | None]:
     pre, post = (re.escape(x.strip()) for x in tc["template"].split("{name}"))
     teacher = re.search(rf"{re.escape(tc['label'])}\s*{pre}\s*(\S+?)\s*{post}",
                         _text(doc.sections[0].paragraphs[kit.admin["paragraph"]].element))
-    grade = 값("학년")
+    grade = 값("학년", digits=True)
+    names = set(kit.slots) | {n for t in kit.text_slots for n in re.findall(r"{(\w+)}", t["fill"])}
+
+    def 있음(*slots: str) -> bool:  # 이 양식에 그 머리 값의 자리가 있다(없으면 원고 머리에 쓰지 않는다 — 선택 키)
+        return any(x in names for x in slots)
+
     front: dict[str, str | None] = {
-        "양식": kit.name, "학년도": 학년도.group(1) if 학년도 else None,
-        "학년": 값("머리_학년"), "학기": 값("머리_학기"), "차": 값("머리_차"),
+        "양식": kit.name, "학년도": 학년도.group(1) if 학년도 else 값("학년도", digits=True),
+        "학년": 값("머리_학년", digits=True), "학기": 값("머리_학기", digits=True), "차": 값("머리_차", digits=True),
         "과목": 값("과목"), "과목코드": 값("과목코드"),
         "시행": f"{칸('월', '__')}.{칸('일', '__')}.({칸('요일', '_')}) {칸('교시', '_')}교시",
-        "대상": None if grade is None else f"{grade}학년 {칸('반_시작', '_')}반~{칸('반_끝', '_')}반",
-        "인쇄": f"{칸('인쇄매수', '__')}매 * {칸('묶음', '_')}묶음",
-        "출제교사": teacher.group(1) if teacher and teacher.group(1) != tc["placeholder"] else "미상",
+        "대상": None if grade is None or not 있음("반_시작", "반_끝") else f"{grade}학년 {칸('반_시작', '_')}반~{칸('반_끝', '_')}반",
+        "인쇄": f"{칸('인쇄매수', '__')}매 * {칸('묶음', '_')}묶음" if 있음("인쇄매수", "묶음") else None,
+        "출제교사": (값("출제교사") if kit.teacher_cell is None else None)  # 글자 자리 양식은 칸 글 그대로(슬롯)
+                    or (teacher.group(1) if teacher and teacher.group(1) != tc["placeholder"] else None) or "미상",
         "대상_반": f"{칸('반_시작', '_')}반~{칸('반_끝', '_')}반",  # 학년 누름틀이 없을 때 --front 학년과 다시 짓는다(머리에는 안 쓴다)
     }
     만점 = g("선택형_만점") or ""
@@ -436,11 +478,18 @@ class _Question:
         pm = _배점.search(head)
         points = f" [{float(pm.group(1)):.1f}점]" if pm else ""
         self.k = k
-        self.lines = [f"{'###' if member else '##'} {k}.{points}", _배점.sub("", head).strip()]
+        stem = re.sub(rf"^{k}\.\s*", "", _배점.sub("", head).strip())  # 글자 번호 양식의 `N. `은 번호 — 원고는 머리에 쓴다
+        self.lines = [f"{'###' if member else '##'} {k}.{points}", stem]
         self.matching_head: str | None = None
         self.choice_paras: list[str] = []
+        self.answer_table: list[str] | None = None  # 조판기 답항표(answer_table) — 답지 대신
 
     def add_block(self, kind: str, lines: list[str]) -> None:
+        if kind == "답항표":
+            if self.answer_table is not None or self.choice_paras:
+                raise ValueError(f"{self.k}번: 답항표가 둘이거나 답지 줄과 함께 있다")
+            self.answer_table = lines
+            return
         self.lines += [""] + _block_md(kind, lines)
 
     def add_text(self, t: str, where: str) -> None:
@@ -454,6 +503,11 @@ class _Question:
             self.lines.append(t)
 
     def finish(self) -> list[str]:
+        if self.answer_table is not None:
+            if self.choice_paras or self.matching_head is not None:
+                raise ValueError(f"{self.k}번: 답항표 뒤에 답지 줄이 또 있다")
+            head, *rows = self.answer_table
+            return self.lines + ["", f":::답항표 {head}", *rows, ":::", ""]
         if self.matching_head is not None:
             m = detect_matching([self.matching_head] + self.choice_paras)
             if m is None:
@@ -605,7 +659,7 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
 
     def stop(e: ValueError, i: int | None) -> ReverseStop:
         el = paras[i] if i is not None else None
-        snippet = "" if el is None else re.sub(r"\s+", " ", "".join(el.itertext())).strip()[:20]
+        snippet = "" if el is None else re.sub(r"\s+", " ", "".join("".join(t.itertext()) for t in el.iter(q("hp", "t")))).strip()[:20]
         page = None if not pages else pages[i if i is not None else -1]
         return ReverseStop(str(e), question=k or None, page=page, paragraph=i, snippet=snippet)
 

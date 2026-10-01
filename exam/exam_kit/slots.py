@@ -212,6 +212,42 @@ def fill_text_slots(doc: HwpxDocument, kit: Kit, fm: FrontMatter, values: dict[s
     return out
 
 
+def _fill_regex(fill: str) -> re.Pattern:
+    """슬롯 fill 틀 → 값을 되읽는 정규식 — `{이름}` 자리는 이름 붙은 묶음, 나머지 글은 그대로. 같은 이름이 두 번이면 둘째는 되참조."""
+    seen: set[str] = set()
+    out, pos = [], 0
+    for m in re.finditer(r"{(\w+)}", fill):
+        out.append(re.escape(fill[pos:m.start()]))
+        name = m.group(1)
+        out.append(f"(?P={name})" if name in seen else f"(?P<{name}>.+?)")
+        seen.add(name)
+        pos = m.end()
+    out.append(re.escape(fill[pos:]))
+    return re.compile("".join(out) + "$")
+
+
+def read_text_slots(doc: HwpxDocument, kit: Kit) -> dict[str, str]:
+    """fill_text_slots의 거꾸로 — 위치의 글에서 find로 찾은 글을 fill 틀로 되읽어 값 이름 → 값. 못 찾은 슬롯은 넘어간다
+    (역변환이 그 머리 값을 '읽지 못함'으로 다룬다). 같은 값을 두 슬롯이 가지면 먼저 읽은 것."""
+    out: dict[str, str] = {}
+    for slot in kit.text_slots:
+        rx = re.compile(slot["find"])
+        try:
+            paras = _slot_paragraphs(doc, kit, slot["where"])
+        except (StopIteration, ValueError, IndexError):
+            continue
+        for p in paras:
+            m = rx.search("".join(t.text or "" for t in _ts(p)))
+            if not m:
+                continue
+            got = _fill_regex(slot["fill"]).match(m.group(0))
+            if got:
+                for k, v in got.groupdict().items():
+                    out.setdefault(k, v.strip())
+            break
+    return out
+
+
 def _text_values(fm: FrontMatter, *, question_count: int, total_points: float, page_count: int | None) -> dict:
     시행 = fm.시행_분해()
     return {"학년도": str(fm.학년도), "학년": str(fm.학년), "학기": str(fm.학기), "차": str(fm.차), "과목": fm.과목,
