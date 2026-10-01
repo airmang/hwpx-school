@@ -14,8 +14,9 @@ from pathlib import Path
 
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
+from hwpx.equation import EquationConversionError, eqedit_to_latex
 
-from . import q
+from . import equation, q
 from .kit import Kit
 from .prepare import _text, _top_tables
 from .verify import _tail_index, question_heads
@@ -68,7 +69,7 @@ def underlined_char_prs(doc: HwpxDocument) -> set[str]:
     return out
 
 
-_run_자식 = {q("hp", "t"), q("hp", "tbl"), q("hp", "pic")}  # 표·그림은 부르는 쪽이 따로 옮긴다
+_run_자식 = {q("hp", "t"), q("hp", "tbl"), q("hp", "pic"), q("hp", "equation")}  # 표·그림은 부르는 쪽이 따로 옮긴다
 # 글을 싣지 않는 컨트롤(누름틀 경계·책갈피·단 설정·쪽 번호·감추기) — 건너뛴다. 각주·미주·새 번호 등은 글이 있어 오류.
 _무해_컨트롤 = {q("hp", t) for t in ("fieldBegin", "fieldEnd", "bookmark", "colPr", "pageNum", "pageHiding")}
 _공백_자식 = {q("hp", "lineBreak"), q("hp", "nbSpace"), q("hp", "fwSpace")}
@@ -91,22 +92,45 @@ def _check_run(run) -> None:
             raise ValueError(f"run 안의 모르는 요소 hp:{_tag(ch)} — 역변환하지 않는다")
 
 
-def _run_text(run) -> str:
-    """run 글. 모르는 자식(수식·도형·각주 등)은 조용히 버리지 않고 오류. 노랑 형광펜은 자리표(_펜)로 남긴다."""
+def _수식_원고(eq) -> str:
+    """hp:equation → 원고 수식 `$LaTeX$`(hwpx.equation.eqedit_to_latex). 되돌린 LaTeX가 다시 한/글 수식으로 바뀌지 않으면
+    (조판할 수 없는 원고가 되면) 오류."""
+    s = eq.find(q("hp", "script"))
+    script = "" if s is None else (s.text or "").strip()
+    if not script:
+        raise ValueError("빈 수식(hp:script 없음) — 역변환하지 않는다")
+    try:
+        latex = eqedit_to_latex(script)
+        equation.to_script(latex)
+    except (EquationConversionError, equation.MathError) as e:
+        raise ValueError(f"수식 {script!r}을 원고 LaTeX로 되돌릴 수 없다 — {e}") from e
+    return f"${latex}$"
+
+
+def _run_text(run, *, escape: bool = False) -> str:
+    """run 글. 모르는 자식(도형·각주 등)은 조용히 버리지 않고 오류. 노랑 형광펜은 자리표(_펜)로 남긴다.
+    수식은 원고 표기 `$LaTeX$`로. escape면 글의 달러 글자를 `\\$`로 쓴다(수식 표기와 겹치지 않게 — 코드 줄은 그대로)."""
     _check_run(run)
     buf: list[str] = []
-    for t in run.findall(q("hp", "t")):
-        buf.append(t.text or "")
-        for ch in t:
+    for x in run:
+        if x.tag == q("hp", "equation"):
+            buf.append(_수식_원고(x))
+            continue
+        if x.tag != q("hp", "t"):
+            continue
+        piece = [x.text or ""]
+        for ch in x:
             if ch.tag not in _t_자식:
                 raise ValueError(f"글 안의 모르는 요소 hp:{_tag(ch)} — 역변환하지 않는다")
             if ch.tag == q("hp", "tab"):
-                buf.append("\t")
+                piece.append("\t")
             elif ch.tag == q("hp", "markpenBegin") and (ch.get("color") or "").upper() == 노랑:
-                buf.append(_펜)
+                piece.append(_펜)
             elif ch.tag in _공백_자식:
-                buf.append(" ")
-            buf.append(ch.tail or "")
+                piece.append(" ")
+            piece.append(ch.tail or "")
+        text = "".join(piece)
+        buf.append(text.replace("$", "\\$") if escape else text)
     return "".join(buf)
 
 
@@ -123,7 +147,7 @@ def paragraph_text(p_el, underlined: set[str]) -> str:
     """문단 글: 탭 → `\\t`, 밑줄 run → `__…__`(앞뒤 공백은 밑줄 밖), 노랑 형광펜 → 원문자 앞 `*`."""
     groups: list[list] = []  # [글, 밑줄?] — 이웃한 밑줄 run은 한 덩어리로
     for run in p_el.findall(q("hp", "run")):
-        s = _run_text(run)
+        s = _run_text(run, escape=True)
         ul = run.get("charPrIDRef") in underlined and bool(s.replace(_펜, "").strip())
         if groups and groups[-1][1] == ul:
             groups[-1][0] += s

@@ -9,7 +9,7 @@ import pymupdf
 from hwpx.document import HwpxDocument
 
 from . import q
-from .geometry import measure, tail_box_rect, tail_box_top, text_lines
+from .geometry import equation_glyphs, measure, tail_box_rect, tail_box_top, text_lines
 from .kit import Kit, style_ids
 from .prepare import _is_blank
 from .render import RenderResult
@@ -180,6 +180,7 @@ def _tail_box_findings(page, kit: Kit) -> list[Finding]:
     overlapping = [g for g in glyphs if box.intersects(g)]
     # 텍스트 층 글자(ㄱ·ㄴ·ㄷ·굴림 등): 박스 자신의 글(굴림)은 박스 안에 통째로 든다 — 경계에 걸친 줄만 겹침
     overlapping += [t for t in text_lines(page) if box.intersects(t) and not inside.contains(t)]
+    overlapping += [e for e in equation_glyphs(page) if box.intersects(e)]  # 수식 글자(텍스트 층 HyhwpEQ)
     if overlapping:
         fs.append(_f("M10", f"꼬리 박스({[round(v) for v in box]})가 글자와 겹친다 — {len(overlapping)}개, 예 {[[round(v) for v in g] for g in overlapping[:4]]}"))
     return fs

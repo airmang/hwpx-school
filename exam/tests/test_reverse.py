@@ -221,7 +221,7 @@ def test_paragraph_text_노랑_형광펜이_낱말에_있으면_오류():
 
 
 @pytest.mark.parametrize("inner", [
-    '<hp:run charPrIDRef="8"><hp:equation/></hp:run>',
+    '<hp:run charPrIDRef="8"><hp:rect/></hp:run>',
     '<hp:run charPrIDRef="8"><hp:t>a<hp:hyphen/>b</hp:t></hp:run>',
 ])
 def test_paragraph_text_모르는_요소는_오류(inner):

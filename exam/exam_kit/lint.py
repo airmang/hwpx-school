@@ -1,7 +1,7 @@
 """원고 md의 [기계] 검사. E = 오류(조판 거부), W = 경고(보고만).
 
 두 층이다.
-- 엔진 규칙: 원고 문법·구조(번호 차례·정답 1개·답지 ①~⑤·답항표·그림·세트·나눔 지시·별표). 늘 돈다.
+- 엔진 규칙: 원고 문법·구조(번호 차례·정답 1개·답지 ①~⑤·답항표·그림·세트·나눔 지시·별표·수식). 늘 돈다.
 - 학교 규칙: 학교 문항 제작 연수자료의 [기계] 규칙. 킷 rules.json에 적힌 코드만 켜지고, 설정(정규식·한도)도 거기서 온다.
   킷이 없거나 rules.json이 없으면 엔진 규칙만 돈다.
 """
@@ -14,7 +14,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from .scan import Scan, scan_markdown
+from .equation import MathError, mask, split_pipes, without_math
+from .scan import IMG_RE, Scan, scan_markdown
 
 원문자 = "①②③④⑤"
 
@@ -101,7 +102,7 @@ def rule_E009(s: Scan) -> list[Violation]:
             if not head:
                 out.append(_v("E009", b.line_no, f"{q.number}번 답항표에 머리 속성이 없다"))
                 continue
-            rows = [c.text.split("|") for c in q.choices]
+            rows = [split_pipes(c.text) for c in q.choices]
             if len(rows) != 5 or any(len(r) != len(head) for r in rows):
                 out.append(_v("E009", b.line_no, f"{q.number}번 답항표 행 {len(rows)} / 열 {[len(r) for r in rows]} ≠ {len(head)}"))
     return out
@@ -213,7 +214,8 @@ def rule_E013(s: Scan, cfg: dict) -> list[Violation]:
             if b.kind != "보기":
                 continue
             for ln in b.lines:
-                if not 항목.match(ln.strip()) or 금지.search(ln):
+                t = without_math(ln)  # 수식 안의 `f(1)`은 항목 기호가 아니다
+                if not 항목.match(t.strip()) or 금지.search(t):
                     out.append(_v("E013", b.line_no, f"{q.number}번 〈보기〉 항목 기호: {ln.strip()[:20]!r} — {cfg['message']}"))
     return out
 
@@ -243,7 +245,7 @@ def rule_E016(s: Scan, cfg: dict) -> list[Violation]:
     밑줄부정 = re.compile(r"__[^_]*" + cfg["negation"] + r"[^_]*__")
     out = []
     for q in s.questions:
-        stem = " ".join(q.stem)
+        stem = " ".join(without_math(x) for x in q.stem)
         if "**" in stem:
             out.append(_v("E016", q.line_no, f"{q.number}번 발문에 굵게(**) — 밑줄만 쓴다"))
         if 부정.search(stem) and not 밑줄부정.search(stem):
@@ -309,17 +311,49 @@ def rule_E024(s: Scan) -> list[Violation]:
     for q in s.questions:
         where = [(c.line_no, c.text) for c in q.choices]
         where += [(b.line_no, ln) for b in q.blocks if b.kind in ("자료", "보기", "조건", "주", "답항표") for ln in _글_줄(b.lines)]
+        where = [(n, without_math(t)) for n, t in where]  # 수식 안의 `**`는 LaTeX다
         if any("**" in t for _, t in where):
             line = next(n for n, t in where if "**" in t)
             out.append(_v("E024", line, f"{q.number}번 답지·박스 글에 굵게(**) — 조판에서 별표가 그대로 찍힌다"))
     for st in s.sets:
         texts = list(st.passage) + [ln for b in st.blocks if b.kind in ("자료", "보기") for ln in _글_줄(b.lines)]
-        if any("**" in t for t in texts):
+        if any("**" in without_math(t) for t in texts):
             out.append(_v("E024", st.line_no, f"세트 {st.rng[0]}~{st.rng[1]} 지문·박스 글에 굵게(**)"))
     return out
 
 
-ENGINE_RULES = [rule_E001, rule_E002, rule_E003, rule_E004, rule_E005, rule_E006, rule_E009, rule_E011, rule_E021, rule_E024]
+# 범위: 조판에 들어가는 모든 글(발문·답지·답항표 칸과 머리·〈보기〉·〈조건〉·자료·참고 줄·표 칸·세트 지문) — 코드 블록과 그림 줄은
+# 뺀다. 수식 `$…$`은 한/글 수식으로 바뀌어야 조판된다(equation.mask가 조판 때 하는 것과 같은 검사).
+def rule_E025(s: Scan) -> list[Violation]:
+    def 글(blocks) -> list[tuple[int, str]]:
+        out = []
+        for b in blocks:
+            if b.kind in ("코드", "그림", "답항표"):  # 답항표 줄은 답지로 본다
+                if b.kind == "답항표":
+                    out += [(b.line_no, h) for h in b.attrs.get("머리") or []]
+                continue
+            out += [(b.line_no, ln) for ln in _글_줄(b.lines) if not IMG_RE.match(ln.strip())]
+        return out
+
+    where: list[tuple[str, int, str]] = []
+    for q in s.questions:
+        where += [(f"{q.number}번", q.line_no, ln) for ln in q.stem]
+        where += [(f"{q.number}번", c.line_no, c.text) for c in q.choices]
+        where += [(f"{q.number}번", n, t) for n, t in 글(q.blocks)]
+    for st in s.sets:
+        name = f"세트 {st.rng[0]}~{st.rng[1]}"
+        where += [(name, st.line_no, ln) for ln in st.passage] + [(name, n, t) for n, t in 글(st.blocks)]
+    out = []
+    for name, line, text in where:
+        try:
+            mask(text)
+        except MathError as e:
+            out.append(_v("E025", line, f"{name} 수식: {e}"))
+    return out
+
+
+ENGINE_RULES = [rule_E001, rule_E002, rule_E003, rule_E004, rule_E005, rule_E006, rule_E009, rule_E011, rule_E021, rule_E024,
+                rule_E025]
 SCHOOL_RULES = {"W003": rule_W003, "E007": rule_E007, "E008": rule_E008, "E012": rule_E012, "E013": rule_E013,
                 "E014": rule_E014, "E015": rule_E015, "E016": rule_E016, "E017": rule_E017, "E018": rule_E018,
                 "W019": rule_W019, "W020": rule_W020}

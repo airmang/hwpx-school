@@ -31,7 +31,7 @@ from pathlib import Path
 
 from hwpx.document import HwpxDocument
 
-from . import q
+from . import equation, q
 from .compose import (
     LOOSER,
     case_prev,
@@ -349,7 +349,7 @@ class _Loop:
             shutil.rmtree(work / f"m{n}", ignore_errors=True)
         for t, ln in res.failed:
             self.notes.append(f"{t.number}번 {t.role} 끝줄이 짧은데 자간 {floor_for(self.kit, t.role)}%까지 줄여도 "
-                              f"줄이 줄지 않았다(끝줄 {ln.tail.strip()!r}) — 그대로 둔다")
+                              f"줄이 줄지 않았다(끝줄 {equation.readable(ln.tail.strip())!r}) — 그대로 둔다")
         if not res.done and not resized:
             return rr, lay
         return self.render()
