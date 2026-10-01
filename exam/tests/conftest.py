@@ -39,12 +39,13 @@ def 킷_루트() -> Path:
 
 @pytest.fixture(scope="session")
 def 오라클():
-    from hwpx_automation.office.rendering.oracle import MacHancomOracle
+    """이 PC의 실한컴(Windows COM 또는 macOS 한글 앱) — 엔진이 렌더에 쓰는 것과 같은 것(render._oracle)."""
+    from exam_kit.render import RenderUnavailable, _oracle
 
-    o = MacHancomOracle(timeout=300.0)
-    if not o.available():
+    try:
+        return _oracle()
+    except RenderUnavailable:
         pytest.skip("실한컴 오라클 없음")
-    return o
 
 
 @pytest.fixture

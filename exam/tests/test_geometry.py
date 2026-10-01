@@ -172,3 +172,34 @@ def test_짧은_쪽의_본문_상단과_텍스트_층_글자(tmp_path):
     lay = measure(tmp_path / "t.pdf", kit)
     assert [round(y) for y in lay[0].columns[0].heads] == [120]
     assert lay[0].columns[0].bottom > 280  # 텍스트 층 줄까지가 내용
+
+
+def test_잉크_상자는_글자_폭_상자_안의_잉크에_붙는다():
+    """Windows 한컴 PDF의 Type3 글자 상자(글자 폭)를 잉크에 붙인다 — 노란 형광펜은 잉크가 아니고, 잉크가 없으면 원래 상자."""
+    import pymupdf
+
+    from exam_kit.geometry import _잉크_상자
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=200, height=200)
+    page.draw_rect(pymupdf.Rect(52, 61, 57, 69), color=None, fill=(0, 0, 0))  # 글리프 잉크
+    page.draw_rect(pymupdf.Rect(80, 60, 90, 70), color=None, fill=(1, 1, 0))  # 형광펜
+    boxes = [pymupdf.Rect(50, 58, 60, 72), pymupdf.Rect(78, 58, 92, 72), pymupdf.Rect(100, 58, 110, 72)]
+    a, b, c = _잉크_상자(page, boxes)
+    assert all(abs(u - v) <= 0.3 for u, v in zip(a, (52, 61, 57, 69))), a
+    assert b == boxes[1] and c == boxes[2]
+
+
+def test_Windows_한컴_PDF가_아니면_Type3_글자를_더하지_않는다(tmp_path):
+    import pymupdf
+
+    from exam_kit.geometry import hancom_windows_pdf, type3_glyphs
+
+    p = tmp_path / "mac.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((50, 50), "1. x")
+    doc.set_metadata({"producer": "macOS Quartz PDFContext"})
+    doc.save(str(p))
+    with pymupdf.open(str(p)) as d:
+        assert type3_glyphs(d[0]) == []
+    assert hancom_windows_pdf(p) is False

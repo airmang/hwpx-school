@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -37,21 +39,56 @@ class HancomBusy(RenderUnavailable):
 # 내는 내부 함수) 경로 함수만 가져오고, flock 대기는 cli._shared_desktop과 같은 방식(비차단 시도 + 짧은 간격 재시도 + 기한)이다.
 HANCOM_LOCK_WAIT = 1800.0  # 초 — 다른 세션의 긴 조판(렌더 여러 번)을 기다릴 만큼, 영원히는 아니게
 _LOCK_POLL = 0.25
-_held = threading.local()  # 이 프로세스(스레드)가 이미 쥐었으면 다시 잡지 않는다 — 같은 파일의 두 번째 flock은 스스로를 막는다
+_held = threading.local()  # 이 프로세스(스레드)가 이미 쥐었으면 다시 잡지 않는다 — 같은 파일의 두 번째 잠금은 스스로를 막는다
+# Windows에는 upstream 데스크톱 잠금이 없다 — COM은 렌더마다 한컴을 따로 띄우므로 upstream CLI는 잠그지 않는다. 엔진 렌더끼리
+# 한 번에 하나씩 돌도록 사용자 임시 폴더의 이 파일에 잠금을 건다(계약은 macOS와 같다: 기한을 넘으면 HancomBusy, 같은 스레드는 중첩).
+_WINDOWS_LOCK_NAME = "hwpx-school-hancom.lock"
 
 
 def _lock_path() -> Path:
+    if sys.platform == "win32":
+        return Path(tempfile.gettempdir()) / _WINDOWS_LOCK_NAME
     from hwpx_automation.office.rendering.mac_session import _gui_lock_path
 
     return _gui_lock_path()
+
+
+def _try_lock(handle) -> bool:
+    """잠금을 한 번 시도한다(기다리지 않는다). 잡으면 True — macOS·Linux는 flock, Windows는 첫 바이트 msvcrt 잠금."""
+    if sys.platform == "win32":
+        import msvcrt
+
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    import fcntl
+
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def _unlock(handle) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 @contextmanager
 def hancom_lock(wait: float | None = None):
     """한컴을 여는·저장하는·렌더하는 동안 공용 잠금을 쥔다. 다른 쪽이 쥐고 있으면 wait초(기본 HANCOM_LOCK_WAIT)까지
     기다리고, 넘으면 HancomBusy. 이미 이 스레드가 쥐고 있으면 그대로 지나간다(중첩)."""
-    import fcntl
-
     if getattr(_held, "depth", 0):
         _held.depth += 1
         try:
@@ -63,31 +100,29 @@ def hancom_lock(wait: float | None = None):
     path = _lock_path()
     deadline = time.monotonic() + wait
     with open(path, "a") as handle:
-        while True:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise HancomBusy(f"다른 작업이 한컴 데스크톱 잠금을 {wait:g}초 넘게 쥐고 있다 — 기다렸다 다시 한다: {path}") from None
-                time.sleep(_LOCK_POLL)
+        while not _try_lock(handle):
+            if time.monotonic() >= deadline:
+                raise HancomBusy(f"다른 작업이 한컴 데스크톱 잠금을 {wait:g}초 넘게 쥐고 있다 — 기다렸다 다시 한다: {path}")
+            time.sleep(_LOCK_POLL)
         _held.depth = 1
         try:
             yield
         finally:
             _held.depth = 0
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            _unlock(handle)
 
 
 def _oracle(oracle=None):
+    """렌더 오라클 — 넘겨받은 것, 아니면 이 PC의 실한컴(Windows COM, 그다음 macOS 한글 앱)."""
     if oracle is not None:
         return oracle
-    from hwpx_automation.office.rendering.oracle import MacHancomOracle
+    from hwpx_automation.office.rendering.oracle import MacHancomOracle, WindowsComOracle
 
-    o = MacHancomOracle(timeout=300.0)
-    if not o.available():
-        raise RenderUnavailable("실한컴 오라클을 쓸 수 없다(Hancom Office HWP.app · 자동화 권한 확인)")
-    return o
+    for backend in (WindowsComOracle, MacHancomOracle):
+        o = backend(timeout=300.0)
+        if o.available():
+            return o
+    raise RenderUnavailable("실한컴 오라클을 쓸 수 없다(Windows: 한글 COM 등록 · macOS: Hancom Office HWP.app과 자동화 권한 확인)")
 
 
 _앱 = "Hancom Office HWP"
@@ -95,7 +130,10 @@ _창_수 = f'tell application "System Events" to count windows of process "{_앱
 
 
 def launch_hancom(*, wait: float = 40.0) -> bool:
-    """한컴을 띄우고 창이 뜰 때까지(최대 wait초) 기다린다 — 앱이 안 떠 있으면 render_pdf가 -1700으로 None을 낸다(09-23 실측)."""
+    """macOS: 한컴을 띄우고 창이 뜰 때까지(최대 wait초) 기다린다 — 앱이 안 떠 있으면 render_pdf가 -1700으로 None을 낸다(09-23 실측).
+    Windows: COM이 렌더마다 한컴을 띄우므로 할 일이 없다."""
+    if sys.platform != "darwin":
+        return True
     deadline = time.time() + wait
 
     def 실행(args: list[str]):

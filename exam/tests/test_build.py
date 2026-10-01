@@ -14,6 +14,7 @@ from lxml import etree as ET
 from exam_kit.build import (
     BuildResult,
     _clean,
+    _reveal,
     add_answer_marks,
     build,
     git_ignored,
@@ -132,7 +133,7 @@ def test_보고서는_확인_필요와_쪽_추가를_드러낸다(tmp_path):
     assert "## 확인 필요 (3)" in text and "9번 {답항=3행}" in text
     assert "- **[쪽 추가] 최종 쪽수가 첫 렌더 본문 기준보다 늘었다: 2쪽 → 3쪽" in text  # note 글귀가 아니라 쪽수로
     for p in ("a_문항지.hwpx", "a.md", "제출본.hwpx"):
-        assert f'open -R "{(tmp_path / p).resolve()}"' in text
+        assert f'`{_reveal(tmp_path / p)}`' in text
     assert "검증 완료" not in text
 
 
@@ -322,3 +323,30 @@ def test_단_나눔_pack은_settle의_balance로(양식_hwpx, tmp_path, monkeypa
     with pytest.raises(ValueError, match="pack"):
         build(md, load_kit(킷_디렉터리), tmp_path / "x", form_path=양식_hwpx, lint_block=False,
               render_fn=_렌더_금지, pack="first-fit")
+
+
+def test_보고서의_파일_열기_명령은_OS에_맞다(tmp_path, monkeypatch):
+    """macOS는 open(-R), Windows는 explorer(/select,) — 선생님이 보고서의 명령을 그대로 붙여 쓴다."""
+    import exam_kit.build as B
+
+    p = tmp_path / "a_문항지.hwpx"
+    monkeypatch.setattr(B.sys, "platform", "darwin")
+    assert B._reveal(p) == f'open -R "{p.resolve()}"' and B._open(p) == f'open "{p.resolve()}"'
+    monkeypatch.setattr(B.sys, "platform", "win32")
+    assert B._reveal(p) == f'explorer /select,"{p.resolve()}"' and B._open(p) == f'explorer "{p.resolve()}"'
+
+
+def test_두_판_배치_대조는_Windows_형광펜_밀림만_봐준다():
+    """drift > 0(Windows 한/글 PDF): 답 표시본 머리가 그 단에서 앞선 머리 수 × drift + tol까지 아래로 밀려도 같다.
+    위로 밀리거나, 단이 바뀌거나, 허용보다 더 밀리면 다르다."""
+    def 판(*ys, col=1):
+        return [PageLayout(1, (ColumnLayout(1, col, 60.0, 900.0, ys, True),), None)]
+
+    plain = 판(100.0, 300.0, 500.0)
+    key = 판(100.0, 300.6, 501.0)  # 앞선 정답 줄 1·2개만큼 밀림(0.6·1.0)
+    assert len(same_layout(plain, key)) == 2  # macOS 기준(±0.5)으로는 다르다
+    assert same_layout(plain, key, drift=0.4) == []  # 허용: 0.9 · 1.3
+    assert len(same_layout(plain, 판(100.0, 300.0, 501.4), drift=0.4)) == 1  # 1.4 > 1.3
+    assert len(same_layout(plain, 판(100.0, 299.3, 500.0), drift=0.4)) == 1  # 위로 0.7
+    assert len(same_layout(plain, 판(100.0, 300.0, 500.0, col=2), drift=0.4)) == 3  # 단이 다르다
+

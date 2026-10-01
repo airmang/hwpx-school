@@ -185,12 +185,16 @@ def hancom_lines(hwpx: Path, work: Path, *, oracle=None) -> dict[Key, Lines]:
     work.mkdir(parents=True, exist_ok=True)
     check_package(hwpx)
     o = _oracle(oracle)
+    refresh = getattr(o, "refresh_document", None)
+    if refresh is None:  # Windows COM 오라클은 python-hwpx-automation #152부터 저장(refresh_document)을 한다
+        raise RenderUnavailable(f"이 렌더 오라클({type(o).__name__})은 한컴 저장(refresh_document)을 못 한다 — "
+                                "줄 캐시를 잴 수 없다. python-hwpx-automation을 올린다")
     for _ in range(2):  # 한컴이 막 띄워졌거나 앞 작업이 늦게 끝난 경우 한 번 더
         copy = work / f"줄-{secrets.token_hex(4)}-{Path(hwpx).name}"
         shutil.copyfile(hwpx, copy)
         check_package(copy)
         with hancom_lock():  # 한컴이 사본을 열어 저장하는 동안 — 공용 잠금(render.hancom_lock)
-            saved = o.refresh_document(str(copy.resolve()))
+            saved = refresh(str(copy.resolve()))
         if saved:
             return read_lines(copy)
     raise RenderUnavailable(f"한컴 저장(줄 캐시) 실패(2회): {copy}")
