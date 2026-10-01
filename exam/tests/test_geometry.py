@@ -203,3 +203,24 @@ def test_Windows_한컴_PDF가_아니면_Type3_글자를_더하지_않는다(tmp
     with pymupdf.open(str(p)) as d:
         assert type3_glyphs(d[0]) == []
     assert hancom_windows_pdf(p) is False
+
+
+def test_Windows_한컴_PDF의_형광펜_사각형만_뺀다():
+    """노란 형광펜 사각형(RGB 1, 1, 0)은 글리프가 아니다 — 성분 수가 다른 채움(회색 한 성분 1.0 등)은 앞 성분이 같아도 형광펜이
+    아니다(zip은 짧은 쪽에서 멈춘다)."""
+    from exam_kit.geometry import glyphs
+
+    class _쪽:
+        class parent:
+            metadata = {"producer": "Hancom PDF"}
+            name = ""
+
+        def get_drawings(self):
+            return [{"fill": (1.0, 1.0, 0.0), "rect": pymupdf.Rect(10, 10, 20, 20)},  # 형광펜
+                    {"fill": (1.0,), "rect": pymupdf.Rect(30, 10, 40, 20)},  # 회색 한 성분(흰)
+                    {"fill": (0.0, 0.0, 0.0), "rect": pymupdf.Rect(50, 10, 55, 18)}]  # 글리프
+
+        def get_fonts(self):
+            return []
+
+    assert sorted(round(r.x0) for r in glyphs(_쪽())) == [30, 50]

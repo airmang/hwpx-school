@@ -54,7 +54,8 @@ def glyphs(page) -> list:
     windows = _hancom_windows_pdf(page)
     return [d["rect"] for d in page.get_drawings()
             if d.get("fill") is not None and 0.3 < d["rect"].width < 40 and d["rect"].height < 40
-            and not (windows and all(abs(a - b) < 0.01 for a, b in zip(d["fill"], _형광펜)))] + type3_glyphs(page)
+            and not (windows and len(d["fill"]) == 3 and all(abs(a - b) < 0.01 for a, b in zip(d["fill"], _형광펜)))
+            ] + type3_glyphs(page)
 
 
 def hancom_windows_pdf(pdf: Path) -> bool:
