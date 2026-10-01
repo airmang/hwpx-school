@@ -19,6 +19,8 @@ Python 3.13과 [uv](https://docs.astral.sh/uv/)가 필요합니다. 배치 확�
     uv run python -W ignore -m exam_kit.build tests/fixtures/합성서식_6문항.md \
         --kit kits/synthetic --form kits/synthetic/synthetic_form.hwpx --out ~/hwpx-school-예시   # 한글 렌더까지
 
+한/글에서 이미 만든 원안지(`.hwp`·`.hwpx`)는 원고로 되돌릴 수 있습니다 — `uv run python -m exam_kit.reverse <원안지> --kit <학교 킷> --out <폴더>/원고.md`. 서술형·논술형은 원본 모양 그대로 보존 블록으로 옮겨 심습니다.
+
 학습지·수행평가는 `worksheet/`·`assessment/`에서 `uv run --python 3.13 pytest -q`로 시작합니다. 폴더마다 독립 프로젝트입니다.
 
 ## 학교 양식
@@ -36,7 +38,7 @@ Python 3.13과 [uv](https://docs.astral.sh/uv/)가 필요합니다. 배치 확�
 
 ## 아직 안 되는 것
 
-- 서술형·논술형 블록 조판
+- 서술형·논술형 블록을 원고에서 조판하기(지금은 원본 그대로 옮겨 심는다)
 - 가정통신문·공문(기안) 등 다른 학교 문서
 
 ## 라이선스
