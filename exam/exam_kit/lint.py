@@ -130,6 +130,14 @@ def rule_E010(s: Scan, md_dir: Path | None) -> list[Violation]:
     return [_v("E010", line, f"{n}번 그림 없음: {src}") for n, line, src, _ in _images(s) if not (md_dir / src).exists()]
 
 
+def rule_E026(s: Scan, md_dir: Path | None) -> list[Violation]:
+    """보존 블록(`## 보존` 아래 :::보존 src=…)의 원본 구간 hwpx가 원고 옆에 있어야 한다 — 없으면 그 구간이 조판에서 빠진다."""
+    if md_dir is None:
+        return []
+    return [_v("E026", b.line_no, f"보존 블록 파일 없음: {b.attrs.get('src')}") for b in s.preserved
+            if not b.attrs.get("src") or not (md_dir / b.attrs["src"]).is_file()]
+
+
 def rule_W022(s: Scan, md_dir: Path | None) -> list[Violation]:
     """그림 규격(Task 30): 원고 폭이 원래 크기(원본 px ÷ 300dpi)보다 작으면 줄여 넣는 것 — 그림 속 글자가 작아진다(W022).
     1.02배보다 크면 300dpi 아래로 늘려 넣는 것 — 흐려진다(W023).
@@ -189,6 +197,7 @@ def lint(md: str, *, md_dir: Path | None = None, rules: dict | None = None) -> l
             raise ValueError(f"rules.json: 모르는 규칙 {code} — 지원: {sorted(SCHOOL_RULES)}")
         out.extend(SCHOOL_RULES[code](s, cfg))
     out.extend(rule_E010(s, md_dir))
+    out.extend(rule_E026(s, md_dir))
     out.extend(rule_W022(s, md_dir))
     return sorted(out, key=lambda v: (v.line_no, v.code))
 

@@ -13,6 +13,7 @@ _덮 = r"(?P<opts>(?:\s*\{[^{}]*\})*)"  # 문항 지시: {답항=N행} · {단�
 _지시_답항 = re.compile(r"^답항=(1행|2행|3행|5행)$")
 나눔_지시 = {"단나눔": "column", "쪽나눔": "page"}
 Q_RE = re.compile(r"^##\s+(?P<n>\d+)\.\s*" + _배점 + _덮 + r"\s*$")
+PRESERVE_RE = re.compile(r"^##\s+보존\s*$")  # 서술형·논술형 등 아직 조판하지 않는 구간 — 원본 그대로 옮겨 심는다(:::보존)
 SET_RE = re.compile(r"^##\s+(?P<a>\d+)\s*[~∼]\s*(?P<b>\d+)\.\s*세트\s*$")
 MEMBER_RE = re.compile(r"^###\s+(?P<n>\d+)\.\s*" + _배점 + _덮 + r"\s*$")
 CHOICE_RE = re.compile(r"^(?P<star>\*?)(?P<mark>[①②③④⑤])\s*(?P<t>.*)$")
@@ -22,7 +23,7 @@ CODE_FENCE_RE = re.compile(r"^```(?P<lang>\S*)\s*$")  # 코드 블록(Task 30) �
 IMG_RE = re.compile(r"^!\[\]\((?P<src>[^)]+)\)(?:\{width=(?P<w>[\d.]+)cm\})?\s*$")
 TABLE_ROW_RE = re.compile(r"^\|.*\|\s*$")
 _ATTR_RE = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
-펜스_이름 = ("자료", "보기", "조건", "답항표", "그림")  # 조건: 〈조건〉 박스(학교 B 결정표 29) — 킷에 견본이 있어야 조판된다
+펜스_이름 = ("자료", "보기", "조건", "답항표", "그림", "보존")  # 조건: 〈조건〉 박스(학교 B 결정표 29) — 킷에 견본이 있어야 조판된다
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class Scan:
     questions: tuple[Question, ...]
     sets: tuple[QuestionSet, ...]
     errors: tuple[ScanError, ...]
+    preserved: tuple[Block, ...] = ()  # `## 보존` 아래의 :::보존 블록(src = 원본 구간 hwpx, 줄 = 읽기용 미리보기)
 
 
 def _attrs(s: str | None) -> dict:
@@ -160,6 +162,8 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
             set_open = None
 
     code: dict | None = None  # 문항·세트 블록인 ``` 코드 블록 {"lines","lang","line_no"}
+    preserved: list[Block] = []
+    in_preserve = False  # `## 보존` 아래 — :::보존 블록만 둔다
     for i, raw in enumerate(lines):
         line = raw.rstrip()
         if code is not None:  # 코드 안의 줄은 그대로(앞 공백·빈 줄 포함) — 다른 문법으로 읽지 않는다
@@ -190,9 +194,12 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
                         m = CHOICE_RE.match(ln.strip())
                         if m and cur is not None:
                             cur.choices.append(Choice(m.group("mark"), m.group("t").strip(), m.group("star") == "*", lno))
-                tb = target_blocks()
-                if tb is not None:
-                    tb.append(Block(kind, tuple(fence["lines"]), fence["attrs"], fence["line_no"]))
+                if kind == "보존":
+                    preserved.append(Block(kind, tuple(fence["lines"]), fence["attrs"], fence["line_no"]))
+                else:
+                    tb = target_blocks()
+                    if tb is not None:
+                        tb.append(Block(kind, tuple(fence["lines"]), fence["attrs"], fence["line_no"]))
                 fence = None
             elif line.strip():
                 fence["lines"].append(line)
@@ -214,6 +221,20 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
             table.append(line)
             continue
         flush_table()
+        if PRESERVE_RE.match(line):
+            flush_q(); flush_set()
+            in_preserve = True
+            continue
+        if in_preserve:
+            m = FENCE_OPEN_RE.match(line)
+            if m and m.group("name") == "보존":
+                attrs = _attrs(m.group("attrs"))
+                if not attrs.get("src"):
+                    err(i, line, ":::보존에 src(원본 구간 hwpx)가 없다")
+                fence = {"kind": "보존", "attrs": attrs, "lines": [], "line_nos": [], "line_no": i + offset + 1}
+            else:
+                err(i, line, "`## 보존` 아래에는 :::보존 블록만 둔다(문항은 그 앞에)")
+            continue
         m = SET_RE.match(line)
         if m:
             flush_q(); flush_set()
@@ -241,6 +262,8 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
             name = m.group("name")
             if name not in 펜스_이름:
                 err(i, line, f"모르는 펜스 이름: {name}")
+            elif name == "보존":
+                err(i, line, ":::보존은 `## 보존` 아래에만 둔다")
             if cur is None and set_open is None:
                 err(i, line, "문항 앞에 펜스가 있다")
             fence = {"kind": name, "attrs": _attrs(m.group("attrs")), "lines": [], "line_nos": [], "line_no": i + offset + 1}
@@ -283,4 +306,4 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
     if code is not None:
         err(code["line_no"] - offset - 1, "```", "닫히지 않은 코드 블록")
     flush_table(); flush_q(); flush_set()
-    return Scan(front, tuple(questions), tuple(sets), tuple(errors))
+    return Scan(front, tuple(questions), tuple(sets), tuple(errors), tuple(preserved))

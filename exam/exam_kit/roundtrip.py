@@ -20,7 +20,7 @@ from pathlib import Path
 
 from hwpx.document import HwpxDocument
 
-from . import q
+from . import preserve, q
 from .compose import compose, 물결
 from .kit import Kit, load_kit
 from .prepare import finalize_form, prepare_document
@@ -53,9 +53,13 @@ class Result:
 
 def counts(doc: HwpxDocument, profile: FormProfile) -> Counts:
     """본문(첫 문항 머리 ~ 꼬리 박스 앞)의 문항·수식·그림 수 — 역변환과 무관하게 XML에서 센다."""
-    heads = question_heads(doc)
+    heads = question_heads(doc)  # 책갈피로 표시한 보존 구간의 머리는 이미 빠진다
     ps = list(doc.sections[0].paragraphs)
-    body = [p.element for p in ps[heads[0]:_tail_index(doc, profile.tail_marker)]] if heads else []
+    tail = _tail_index(doc, profile.tail_marker)
+    if heads and not preserve.ranges(doc):  # 원안지: 보존 구간(서술형·논술형 머리 글부터)의 머리를 뺀다 — 역변환과 같은 규칙
+        keep = preserve.find_start([p.element for p in ps], heads[0] + 1, tail)
+        heads = [h for h in heads if keep is None or h < keep]
+    body = [p.element for p in ps[heads[0]:tail]] if heads else []
     return Counts(len(heads), sum(1 for p in body for _ in p.iter(q("hp", "equation"))),
                   sum(1 for p in body for _ in p.iter(q("hp", "pic"))))
 
@@ -80,6 +84,7 @@ def _items(s: Scan, pairs) -> dict[str, tuple]:
         out[f"{n}번 박스·표·그림"] = tuple((b.kind, tuple(_norm(t, pairs) for t in b.lines),
                                          tuple(_norm(h, pairs) for h in b.attrs.get("머리") or ())) for b in x.blocks)
         out[f"{n}번 답지"] = tuple(_norm(f"{c.mark}{c.text}", pairs) for c in x.choices)
+    out["보존 블록"] = tuple(tuple(_norm(t, ()) for t in b.lines) for b in s.preserved)  # 미리보기 글 = 원본 구간의 글
     return out
 
 

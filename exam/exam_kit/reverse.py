@@ -24,7 +24,7 @@ from hwpx.document import HwpxDocument
 from hwpx.equation import EquationConversionError, eqedit_to_latex
 from PIL import Image, UnidentifiedImageError
 
-from . import equation, q
+from . import equation, preserve, q
 from .kit import Kit
 from .prepare import _text, _top_tables
 from .slots import read_text_slots
@@ -719,11 +719,27 @@ def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | Non
         raise ReverseStop("문항 머리(자동번호 문단 또는 글자 번호 `N.`)를 찾지 못했다 — 원안지가 아닌가?")
     tail = _tail_index(doc, profile.tail_marker)
     pages = page_guess(ps, _columns(doc))
-    body = reverse_body(ps[1:tail], {i - 1 for i in heads}, underlined_char_prs(doc),
+    # 보존 구간(서술형·논술형 등 — 아직 조판하지 않는다): 다시 조판한 문서는 책갈피로, 원안지는 머리 글로 찾는다
+    spans = preserve.ranges(doc)
+    keep = spans[0][0] if spans else preserve.find_start(ps, heads[0] + 1, tail)
+    end = tail if keep is None else keep
+    body = reverse_body(ps[1:end], {i - 1 for i in heads if i < end}, underlined_char_prs(doc),
                         bins=_bin_items(src.hwpx), image_dir=image_dir, mono=mono_char_prs(doc),
-                        skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[1:tail])
+                        skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[1:end])
+    if keep is not None:
+        body += _preserved(src, ps, keep, tail, image_dir, pages[keep])
     head = resolve_front(profile.front(doc), front or {}, profile.required)
     return "\n".join(head + body).rstrip() + "\n"
+
+
+def _preserved(src: Source, ps: list, start: int, end: int, image_dir: Path | None, page: int | None) -> list[str]:
+    """보존 구간 [start, end) → `보존_01.hwpx`(image_dir) + 원고 줄(`## 보존` · :::보존 · 미리보기)."""
+    if image_dir is None:
+        raise ReverseStop("보존 구간(서술형·논술형 등)이 있는데 그 파일을 둘 자리(image_dir)가 없다", page=page, paragraph=start)
+    name = "보존_01.hwpx"
+    preserve.write_region(src.hwpx, start, end, Path(image_dir) / name)
+    lines = [re.sub(r"^\s*(```|:::)+", "", x) for x in preserve.preview(ps[start:end])]  # 미리보기가 원고 문법을 깨지 않게
+    return ["", "## 보존", f':::보존 src="{name}"', *[x for x in lines if x.strip()], ":::"]
 
 
 def _given(pairs: list[str]) -> dict[str, str]:

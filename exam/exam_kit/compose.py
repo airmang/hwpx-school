@@ -36,7 +36,7 @@ try:  # paragraph.add_picture가 쓰는 pic 생성기(private) — 칸 안에도
 except ImportError:  # 옮겨졌으면 임시 문단의 add_picture로 만든다(_Composer._pic_element)
     _create_picture_element = None
 
-from . import HP, equation, q
+from . import HP, equation, preserve, q
 from .kit import Kit, Metrics, style_ids
 from .prepare import _top_tables, is_sample_box
 from .scan import IMG_RE, TABLE_ROW_RE, Block, Question, QuestionSet, Scan
@@ -1194,6 +1194,10 @@ def compose(doc: HwpxDocument, scan: Scan, kit: Kit, *, answer_key: bool, image_
     for w in reversed(old):
         sec.remove_paragraph(w)
     _renumber(doc, [p.element for p in new])
+    after = start + len(new) - 1  # 보존 블록(서술형·논술형 등)은 문항 뒤·꼬리 박스 앞에 원본 모양 그대로(preserve)
+    for k, b in enumerate(scan.preserved, 1):
+        after = preserve.insert_region(doc, (Path(image_root) if image_root else Path(".")) / b.attrs["src"], after,
+                                       f"보존_{k:02d}")
     sec.mark_dirty()
     return ComposeResult(answers=dict(c.answers), layouts=dict(c.layouts), notes=list(c.notes))
 

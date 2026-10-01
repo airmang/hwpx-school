@@ -52,10 +52,14 @@ def _literal_head(p_el) -> bool:
 
 
 def question_heads(doc: HwpxDocument) -> list[int]:
-    """문항 머리 문단 — 자동번호 paraPr 또는 글자 번호 run으로 시작하는 문단."""
+    """문항 머리 문단 — 자동번호 paraPr 또는 글자 번호 run으로 시작하는 문단. 보존 구간(책갈피 보존_NN — 원본 그대로 심은
+    서술형·논술형 등)의 머리는 엔진이 조판한 문항이 아니라 뺀다."""
+    from .preserve import inside, ranges
+
     nums = _numbered_para_prs(doc)
+    spans = ranges(doc)
     return [i for i, p in enumerate(doc.sections[0].paragraphs)
-            if str(p.element.get("paraPrIDRef")) in nums or (i > 0 and _literal_head(p.element))]
+            if (str(p.element.get("paraPrIDRef")) in nums or (i > 0 and _literal_head(p.element))) and not inside(i, spans)]
 
 
 def _tail_index(doc: HwpxDocument, marker: str | None = None) -> int:
@@ -101,13 +105,18 @@ def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, st
     ps = list(doc.sections[0].paragraphs)
     heads = question_heads(doc)
     tail = _tail_index(doc, kit.tailbox["match_text"])
+    from .preserve import inside, ranges
+
+    kept = ranges(doc)  # 보존 구간(원본 모양 그대로 심은 서술형 등)은 양식 모양 검사(M7a·M7b)에서 뺀다 — 원본 그대로가 목적이다
     if heads:
         for i in range(heads[0], tail):
-            if _is_blank(ps[i].element):
+            if _is_blank(ps[i].element) and not inside(i, kept):
                 fs.append(_f("M7a", f"빈 최상위 문단 (index {i})"))
     ids = style_ids(doc)
     allowed = {ids[n][0] for n in kit.styles.values() if n in ids}  # 킷 스타일 8종의 id
     for i in range(1, tail):
+        if inside(i, kept):
+            continue
         sid = str(ps[i].style_id_ref or "0")
         if sid not in allowed:
             fs.append(_f("M7b", f"양식 스타일 밖의 문단 (index {i}, style {sid})"))
