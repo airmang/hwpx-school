@@ -1,24 +1,33 @@
-"""제출본 hwpx → md v2. 원본 재현(게이트 G3)의 입력 원고를 만든다. 실문항 출력은 미추적 폴더에만.
+"""원안지(.hwp·.hwpx) → md v2. 교사가 한/글에서 만든 원안지를 원고로 되돌린다. 실문항 출력은 미추적 폴더에만.
 
 읽는 구조(설계 §1): 자동번호 머리 문단(문항) · 〈보기〉 4×5 · 자료 3×3 · 격자표 · 탭으로 이은 답지 ·
 노랑 형광펜 정답(흰색은 손편집 잔재라 무시) · 밑줄 run → `__…__` · 공백으로 열을 맞춘 짝짓기 답지 → `:::답항표`.
-그림은 BinData를 md 옆 파일로 꺼내고 원래 폭(cm)으로 참조한다. 규칙 밖 구조는 조용히 버리지 않고 오류를 낸다.
+그림은 BinData를 md 옆 PNG 파일로 꺼내고(BMP·JPG 등도 PNG로 — 회색조는 조판이 한다) 문서의 폭(cm)으로 참조한다.
+규칙 밖 구조는 조용히 버리지 않고 멈춘다(ReverseStop — 문항·쪽 어림·문단·까닭).
+
+양식에서 알아야 하는 것(본문 범위·박스·머리 값)은 FormProfile이 준다. 지금은 학교 킷 프로필(kit_profile)뿐이고,
+킷 없는 양식의 일반 규칙 프로필은 같은 틀로 더한다(이슈 #8). 입력 열기는 source.open_source.
 """
 
 from __future__ import annotations
 
+import io
 import re
+import tempfile
 import zipfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
 from hwpx.equation import EquationConversionError, eqedit_to_latex
+from PIL import Image, UnidentifiedImageError
 
 from . import equation, q
 from .kit import Kit
 from .prepare import _text, _top_tables
+from .source import Source, SourceError, open_source
 from .verify import _tail_index, question_heads
 
 원문자 = "①②③④⑤"
@@ -33,6 +42,17 @@ _열맞춤_답지 = re.compile(r"^\*?[①②③④⑤]\s{3,}")  # 원문자 뒤 
 _OPF = {"opf": "http://www.idpf.org/2007/opf/"}
 
 Picture = Callable[[ET._Element], str]  # hp:pic → md 그림 줄
+
+
+class ReverseStop(ValueError):
+    """역변환이 모르는 구조를 만나 멈췄다 — 어디서(문항·쪽 어림·문단)와 까닭. 조용히 넘기지 않는다."""
+
+    def __init__(self, reason: str, *, question: int | None = None, page: int | None = None,
+                 paragraph: int | None = None, snippet: str = ""):
+        self.reason, self.question, self.page, self.paragraph, self.snippet = reason, question, page, paragraph, snippet
+        where = [x for x in (f"약 {page}쪽" if page else "", f"{question}번 문항" if question else "문항 앞",
+                             f"문단 {paragraph}" if paragraph is not None else "") if x]
+        super().__init__(f"{' · '.join(where)}: {reason}" + (f" — 글 {snippet!r}" if snippet else ""))
 
 
 def mono_char_prs(doc: HwpxDocument) -> set[str]:
@@ -349,12 +369,27 @@ def _bin_items(hwpx: Path) -> dict[str, tuple[str, bytes]]:
         return out
 
 
-def _front(doc: HwpxDocument, kit: Kit) -> list[str]:
+_머리_차례 = ("양식", "학년도", "학년", "학기", "차", "과목", "과목코드", "시행", "대상", "인쇄", "출제교사", "만점")
+
+
+def kit_front(doc: HwpxDocument, kit: Kit) -> dict[str, str | None]:
+    """학교 킷으로 읽은 머리 값 — 읽지 못한 키는 None(누름틀이 없다 — 양식이 바뀌었거나 교사가 누름틀을 지우고 글로 썼다).
+    누름틀은 있는데 비었으면 자리표시를 둘 수 있는 키(시행·대상의 반·인쇄)는 `__`·`_`로 남긴다(초안)."""
     v = {f.field_id: f.value for f in doc.list_form_fields()}
 
-    def g(slot: str, blank: str = "") -> str:
-        x = v.get(kit.slots[slot], "")
-        return blank if (not x or x == kit.placeholders.get(slot)) and blank else x
+    def g(slot: str) -> str | None:
+        """누름틀 값 — 누름틀이 없으면 None, 비었거나 양식 자리표시면 ""."""
+        fid = kit.slots.get(slot)
+        if fid is None or fid not in v:
+            return None
+        x = v[fid] or ""
+        return "" if x == kit.placeholders.get(slot) else x
+
+    def 칸(slot: str, blank: str) -> str:  # 자리표시를 둘 수 있는 칸 — 없거나 비면 자리표시
+        return g(slot) or blank
+
+    def 값(slot: str) -> str | None:  # 자리표시를 둘 수 없는 칸 — 없거나 비면 모름
+        return g(slot) or None
 
     header = " ".join(_text(h) for h in doc.sections[0].element.iter(q("hp", "header")))
     학년도 = re.search(r"(\d{4})학년도", header)
@@ -362,20 +397,38 @@ def _front(doc: HwpxDocument, kit: Kit) -> list[str]:
     pre, post = (re.escape(x.strip()) for x in tc["template"].split("{name}"))
     teacher = re.search(rf"{re.escape(tc['label'])}\s*{pre}\s*(\S+?)\s*{post}",
                         _text(doc.sections[0].paragraphs[kit.admin["paragraph"]].element))
-    name = teacher.group(1) if teacher and teacher.group(1) != tc["placeholder"] else "미상"
-    front = {
-        "양식": kit.name, "학년도": 학년도.group(1) if 학년도 else "",
-        "학년": g("머리_학년"), "학기": g("머리_학기"), "차": g("머리_차"),
-        "과목": g("과목"), "과목코드": g("과목코드"),
-        "시행": f"{g('월', '__')}.{g('일', '__')}.({g('요일', '_')}) {g('교시', '_')}교시",
-        "대상": f"{g('학년')}학년 {g('반_시작')}반~{g('반_끝')}반",
-        "인쇄": f"{g('인쇄매수', '__')}매 * {g('묶음', '_')}묶음",
-        "출제교사": name,
+    grade = 값("학년")
+    front: dict[str, str | None] = {
+        "양식": kit.name, "학년도": 학년도.group(1) if 학년도 else None,
+        "학년": 값("머리_학년"), "학기": 값("머리_학기"), "차": 값("머리_차"),
+        "과목": 값("과목"), "과목코드": 값("과목코드"),
+        "시행": f"{칸('월', '__')}.{칸('일', '__')}.({칸('요일', '_')}) {칸('교시', '_')}교시",
+        "대상": None if grade is None else f"{grade}학년 {칸('반_시작', '_')}반~{칸('반_끝', '_')}반",
+        "인쇄": f"{칸('인쇄매수', '__')}매 * {칸('묶음', '_')}묶음",
+        "출제교사": teacher.group(1) if teacher and teacher.group(1) != tc["placeholder"] else "미상",
+        "대상_반": f"{칸('반_시작', '_')}반~{칸('반_끝', '_')}반",  # 학년 누름틀이 없을 때 --front 학년과 다시 짓는다(머리에는 안 쓴다)
     }
-    만점 = g("선택형_만점")
+    만점 = g("선택형_만점") or ""
     if re.fullmatch(r"\d+(?:\.\d+)?", 만점) and float(만점) != 100:
         front["만점"] = 만점
-    return ["---"] + [f"{k}: {x}" for k, x in front.items()] + ["---", ""]
+    return front
+
+
+def resolve_front(read: dict[str, str | None], given: dict[str, str], required) -> list[str]:
+    """읽은 머리 값 + 사용자가 준 값(given, `--front 키=값`) → 머리 줄. given이 이긴다. 학년을 주었고 대상을 못 읽었으면
+    대상은 그 학년과 읽은 반으로 다시 짓는다. 필수 키가 하나라도 비면 멈춘다 — 무엇을 어떻게 주는지 알린다."""
+    unknown = sorted(set(given) - set(_머리_차례))
+    if unknown:
+        raise ReverseStop(f"모르는 머리 키 {unknown} — 아는 키: {', '.join(_머리_차례)}")
+    front = dict(read)
+    front.update(given)
+    if front.get("대상") is None and "학년" in given and read.get("대상_반"):
+        front["대상"] = f"{given['학년']}학년 {read['대상_반']}"
+    missing = [k for k in required if not front.get(k)]
+    if missing:
+        raise ReverseStop(f"머리 값을 문서에서 읽지 못했다: {', '.join(missing)} — 누름틀이 없거나 비었다. "
+                          f"`--front {' '.join(f'{k}=…' for k in missing)}`로 준다")
+    return ["---"] + [f"{k}: {front[k]}" for k in _머리_차례 if front.get(k)] + ["---", ""]
 
 
 class _Question:
@@ -422,6 +475,37 @@ def _block_md(kind: str, lines: list[str]) -> list[str]:
     return lines if kind in ("표", "그림") else [f":::{kind}", *lines, ":::"]
 
 
+def as_png(data: bytes, ext: str) -> bytes:
+    """그림 바이트 → PNG(무손실). PNG는 그대로, BMP·JPG·GIF 등은 PNG로 다시 쓴다 — 원고 그림은 PNG로 통일한다
+    (조판이 회색조 사본을 만든다). 열 수 없는 형식(WMF·EMF 같은 벡터 등)은 멈춘다."""
+    if ext.lower() == ".png":
+        return data
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            buf = io.BytesIO()
+            im.save(buf, "PNG")
+            return buf.getvalue()
+    except (UnidentifiedImageError, OSError) as e:
+        raise ValueError(f"그림 형식 {ext}을 PNG로 바꿀 수 없다 — 한/글에서 그림을 PNG·BMP·JPG로 바꿔 넣는다") from e
+
+
+def page_guess(paras: list, columns: int) -> list[int | None]:
+    """문단마다 쪽 어림 — 저장된 줄 배치(hp:lineseg vertpos)가 줄어드는 곳을 새 단으로 센다. 한/글이 저장할 때 잰 배치라
+    렌더 없이 알 수 있지만, 줄 캐시가 없는 문단(새로 만든 문서)은 앞 문단의 쪽을 이어 쓴다. 오류 위치 알림용."""
+    out: list[int | None] = []
+    col, prev, page = 0, None, None
+    for el in paras:
+        seg = el.find(f"{q('hp', 'linesegarray')}/{q('hp', 'lineseg')}")
+        if seg is not None and seg.get("vertpos") is not None:
+            y = int(seg.get("vertpos"))
+            if prev is not None and y < prev:
+                col += 1
+            prev = y
+            page = col // max(1, columns) + 1
+        out.append(page)
+    return out
+
+
 def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
     """그림 저장기 — 이름표(문항 번호·세트)를 바꿔 가며 hp:pic을 파일로 쓰고 md 그림 줄을 돌려준다."""
     owner = {"label": "", "n": 0}
@@ -435,9 +519,9 @@ def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
             raise ValueError("그림이 있는데 image_dir가 없다")
         owner["n"] += 1
         ext, data = bins[rid]
-        name = f"그림_{owner['label']}_{owner['n']}{ext}"
+        name = f"그림_{owner['label']}_{owner['n']}.png"
         Path(image_dir).mkdir(parents=True, exist_ok=True)
-        (Path(image_dir) / name).write_bytes(data)
+        (Path(image_dir) / name).write_bytes(as_png(data, ext))
         return picture_line(pic, name)
 
     def relabel(label: str) -> None:
@@ -449,10 +533,10 @@ def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
 def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
                  bins: dict[str, tuple[str, bytes]] | None = None, image_dir: Path | None = None,
                  mono: set[str] = frozenset(), skip_prefix: str | None = None,
-                 boxes: dict | None = None) -> list[str]:
+                 boxes: dict | None = None, pages: list[int | None] | None = None) -> list[str]:
     """본문 문단(관리박스·꼬리 박스 뺀 것) → md 줄. heads = 자동번호 머리 문단의 index(paras 기준).
     mono = 고정폭 charPr — 이어진 고정폭 문단은 ``` 코드 블록 하나로. skip_prefix(킷 leftover_prefix)를 품은
-    문단은 서식 안내 줄이라 건너뛴다."""
+    문단은 서식 안내 줄이라 건너뛴다. 모르는 구조는 ReverseStop — 문항 번호·쪽 어림(pages, paras 기준)·문단을 붙인다."""
     picture, relabel = _saver(bins or {}, image_dir)
     out: list[str] = []
     cur: _Question | None = None
@@ -472,16 +556,17 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
             raise ValueError("문항 앞에 코드 블록이 있다")
         code = []
 
-    for i, el in enumerate(paras):
+    def step(i: int, el) -> None:
+        nonlocal cur, set_rng, k
         where = f"문단 {i}"
         if i not in heads and is_code(el, mono):
             code.append(code_text(el))
-            continue
+            return
         flush_code()
         t = paragraph_text(el, underlined)
         if i in heads:
             if cur is not None:
-                out += cur.finish()
+                out.extend(cur.finish())
             k += 1
             if set_rng and k > set_rng[1]:
                 set_rng = None
@@ -490,51 +575,111 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
             t = ""  # 머리 글은 이미 썼다 — 머리 문단 안의 표·그림만 아래에서
         elif (m := _세트.match(t)) and not _top_tables(el):
             if cur is not None:
-                out += cur.finish()
+                out.extend(cur.finish())
                 cur = None
             set_rng = (int(m.group(1)), int(m.group(2)))
             relabel(f"세트{m.group(1)}")
-            out += [f"## {m.group(1)}~{m.group(2)}. 세트"]
+            out.append(f"## {m.group(1)}~{m.group(2)}. 세트")
             t = t[m.end():].strip()
             if t:
                 out.append(t)
-            continue
+            return
         if skip_prefix and skip_prefix in t:
-            continue
+            return
         blocks = [classify_table(tb, underlined, boxes=boxes, picture=picture, mono=mono) for tb in _top_tables(el)]
         blocks += [("그림", [picture(pic)]) for pic in _pics(el)]
         if cur is None:
             if set_rng is None:
                 if t or blocks:
                     raise ValueError(f"{where}: 문항 앞에 내용이 있다 {t[:20]!r}")
-                continue
+                return
             for kind, lines in blocks:  # 세트 지문
-                out += [""] + _block_md(kind, lines)
+                out.extend([""] + _block_md(kind, lines))
             if t:
                 out.append(t)
-            continue
+            return
         for kind, lines in blocks:
             cur.add_block(kind, lines)
         if t:
             cur.add_text(t, f"{k}번 {where}")
-    flush_code()
-    if cur is not None:
-        out += cur.finish()
+
+    def stop(e: ValueError, i: int | None) -> ReverseStop:
+        el = paras[i] if i is not None else None
+        snippet = "" if el is None else re.sub(r"\s+", " ", "".join(el.itertext())).strip()[:20]
+        page = None if not pages else pages[i if i is not None else -1]
+        return ReverseStop(str(e), question=k or None, page=page, paragraph=i, snippet=snippet)
+
+    for i, el in enumerate(paras):
+        try:
+            step(i, el)
+        except ReverseStop:
+            raise
+        except ValueError as e:
+            raise stop(e, i) from e
+    try:
+        flush_code()
+        if cur is not None:
+            out.extend(cur.finish())
+    except ReverseStop:
+        raise
+    except ValueError as e:
+        raise stop(e, None) from e
     return out
 
 
-def reverse(hwpx: Path, kit: Kit, *, image_dir: Path | None = None) -> str:
-    """제출본 hwpx → md v2 전문. front-matter는 누름틀 값에서, 그림은 image_dir에 파일로."""
-    doc = HwpxDocument.open(str(hwpx))
+@dataclass(frozen=True)
+class FormProfile:
+    """역변환이 양식에서 알아야 하는 것 — 학교 킷이 있으면 kit_profile이 짓는다. 킷 없는 양식은 일반 규칙 프로필이
+    같은 틀로 짓는다(이슈 #8)."""
+
+    name: str
+    tail_marker: str | None             # 꼬리 박스를 가리키는 글(None이면 용지 기준 고정 표로 찾는다)
+    skip_prefix: str | None             # 이 글을 품은 문단은 서식 안내 줄 — 건너뛴다
+    boxes: dict | None                  # 〈보기〉·자료 박스 모양(None이면 박스를 가리지 않고 격자표로)
+    required: tuple[str, ...]           # 원고 머리 필수 키
+    front: Callable[[HwpxDocument], dict[str, str | None]]  # 문서에서 읽은 머리 값(못 읽으면 None)
+
+
+def kit_profile(kit: Kit) -> FormProfile:
+    return FormProfile(kit.name, kit.tailbox["match_text"], kit.leftover_prefix, kit.boxes,
+                       tuple(kit.front_matter["required"]), lambda doc: kit_front(doc, kit))
+
+
+def _columns(doc: HwpxDocument) -> int:
+    c = next(doc.sections[0].element.iter(q("hp", "colPr")), None)
+    return int(c.get("colCount") or 1) if c is not None else 1
+
+
+def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | None = None,
+            front: dict[str, str] | None = None) -> str:
+    """원안지(.hwp·.hwpx 경로 또는 열어 둔 Source) → md v2 전문. 머리 값은 누름틀에서 읽고 front(`--front`)가 이긴다.
+    그림은 image_dir에 PNG로. 모르는 구조·읽지 못한 필수 머리 값은 ReverseStop."""
+    profile = kit if isinstance(kit, FormProfile) else kit_profile(kit)
+    if not isinstance(src, Source):
+        with tempfile.TemporaryDirectory() as tmp:  # .hwp 변환 사본 자리 — 그림을 다 꺼낸 뒤 지운다
+            return reverse(open_source(Path(src), Path(tmp)), profile, image_dir=image_dir, front=front)
+    doc = src.doc
     ps = [p.element for p in doc.sections[0].paragraphs]
     heads = question_heads(doc)
     if not heads:
-        raise ValueError("자동번호 문항 머리가 없다 — 제출본이 아닌가?")
-    tail = _tail_index(doc, kit.tailbox["match_text"])
+        raise ReverseStop("문항 머리(자동번호 문단 또는 글자 번호 `N.`)를 찾지 못했다 — 원안지가 아닌가?")
+    tail = _tail_index(doc, profile.tail_marker)
+    pages = page_guess(ps, _columns(doc))
     body = reverse_body(ps[1:tail], {i - 1 for i in heads}, underlined_char_prs(doc),
-                        bins=_bin_items(Path(hwpx)), image_dir=image_dir, mono=mono_char_prs(doc),
-                        skip_prefix=kit.leftover_prefix, boxes=kit.boxes)
-    return "\n".join(_front(doc, kit) + body).rstrip() + "\n"
+                        bins=_bin_items(src.hwpx), image_dir=image_dir, mono=mono_char_prs(doc),
+                        skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[1:tail])
+    head = resolve_front(profile.front(doc), front or {}, profile.required)
+    return "\n".join(head + body).rstrip() + "\n"
+
+
+def _given(pairs: list[str]) -> dict[str, str]:
+    out = {}
+    for x in pairs:
+        if "=" not in x:
+            raise SystemExit(f"--front 값은 키=값이다: {x!r}")
+        k, v = x.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -544,16 +689,25 @@ def main(argv: list[str] | None = None) -> int:
     from .lint import errors, lint
     from .scan import scan_markdown
 
-    ap = argparse.ArgumentParser(description="제출본 hwpx → md v2 (그림은 md 옆에)")
-    ap.add_argument("hwpx")
+    ap = argparse.ArgumentParser(description="원안지(.hwp·.hwpx) → md v2 (그림은 md 옆에 PNG로). 끝 코드: 0 · 1 원고 문법 오류 · 2 멈춤")
+    ap.add_argument("원안지", help=".hwp 또는 .hwpx")
     ap.add_argument("--kit", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--front", nargs="*", default=[], metavar="키=값", help="문서에서 읽지 못한 머리 값(예: 학년=3 과목=기하)")
     a = ap.parse_args(argv)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     kit = load_kit(Path(a.kit))
-    md = reverse(Path(a.hwpx), kit, image_dir=out.parent)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = open_source(Path(a.원안지), Path(tmp))
+            md = reverse(src, kit, image_dir=out.parent, front=_given(a.front))
+    except (ReverseStop, SourceError) as e:
+        print(f"역변환 멈춤 — {e}")
+        return 2
     out.write_text(md, encoding="utf-8")
+    for n in src.notes:
+        print(f"알림: {n}")
     s = scan_markdown(md)
     vs = lint(md, md_dir=out.parent, rules=kit.rules)
     n_err = len(errors(vs))
