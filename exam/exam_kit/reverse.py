@@ -476,10 +476,11 @@ def resolve_front(read: dict[str, str | None], given: dict[str, str], required) 
 class _Question:
     def __init__(self, k: int, head: str, member: bool):
         pm = _배점.search(head)
-        points = f" [{float(pm.group(1)):.1f}점]" if pm else ""
-        self.k = k
+        self.k, self.member = k, member
+        self.points = float(pm.group(1)) if pm else None
         stem = re.sub(rf"^{k}\.\s*", "", _배점.sub("", head).strip())  # 글자 번호 양식의 `N. `은 번호 — 원고는 머리에 쓴다
-        self.lines = [f"{'###' if member else '##'} {k}.{points}", stem]
+        self.lines = [self._head_line(), stem]
+        self.text_at: list[int] = [1]  # 글 줄(발문·발문 이음)의 자리 — 배점이 머리 문단이 아니라 뒤 줄 끝에 있을 때 찾는다
         self.matching_head: str | None = None
         self.choice_paras: list[str] = []
         self.answer_table: list[str] | None = None  # 조판기 답항표(answer_table) — 답지 대신
@@ -492,6 +493,10 @@ class _Question:
             return
         self.lines += [""] + _block_md(kind, lines)
 
+    def _head_line(self) -> str:
+        points = f" [{self.points:.1f}점]" if self.points is not None else ""
+        return f"{'###' if self.member else '##'} {self.k}.{points}"
+
     def add_text(self, t: str, where: str) -> None:
         if t.lstrip("*")[:1] in 원문자:
             self.choice_paras.append(t)
@@ -500,9 +505,23 @@ class _Question:
         elif _is_matching_head(t):
             self.matching_head = t  # 짝짓기 머리 줄(ㄱ  ㄴ  ㄷ)
         else:
+            self.text_at.append(len(self.lines))
             self.lines.append(t)
 
+    def _points_from_text(self) -> None:
+        """머리 문단에 배점이 없으면 발문이 이어진 뒤 줄(그림 뒤 발문 등) 끝의 `[N점]`을 머리로 옮긴다 — 마지막 것 하나."""
+        if self.points is not None:
+            return
+        for i in reversed(self.text_at):
+            m = _배점.search(self.lines[i])
+            if m:
+                self.points = float(m.group(1))
+                self.lines[i] = _배점.sub("", self.lines[i]).rstrip()
+                self.lines[0] = self._head_line()
+                return
+
     def finish(self) -> list[str]:
+        self._points_from_text()
         if self.answer_table is not None:
             if self.choice_paras or self.matching_head is not None:
                 raise ValueError(f"{self.k}번: 답항표 뒤에 답지 줄이 또 있다")
@@ -729,7 +748,23 @@ def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | Non
     if keep is not None:
         body += _preserved(src, ps, keep, tail, image_dir, pages[keep])
     head = resolve_front(profile.front(doc), front or {}, profile.required)
-    return "\n".join(head + body).rstrip() + "\n"
+    md = "\n".join(head + body).rstrip() + "\n"
+    _check_md(md, len(head))
+    return md
+
+
+def _check_md(md: str, head_lines: int) -> None:
+    """되돌린 원고가 원고 문법에 맞는지 — 아니면 그 줄이 든 문항 번호를 대고 멈춘다(조판 단계까지 가서 줄 번호로 알게 두지 않는다)."""
+    from .scan import scan_markdown
+
+    errs = scan_markdown(md).errors
+    if not errs:
+        return
+    lines = md.splitlines()
+    e = errs[0]
+    number = next((m.group(1) for ln in reversed(lines[:e.line_no]) if (m := re.match(r"^##+\s+(\d+)\.", ln))), None)
+    raise ReverseStop(f"되돌린 원고가 원고 문법에 맞지 않는다(원고 {e.line_no}줄): {e.reason}",
+                      question=int(number) if number else None, snippet=e.text.strip()[:20])
 
 
 def _preserved(src: Source, ps: list, start: int, end: int, image_dir: Path | None, page: int | None) -> list[str]:

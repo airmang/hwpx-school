@@ -286,15 +286,14 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
         if cur is not None:
             if cur.choices:
                 err(i, line, "답지 뒤에 본문 줄이 있다")
-            elif cur.blocks and cur.blocks[-1].kind in ("보기", "주"):
-                # 〈보기〉 뒤 참고 줄(09-29 결정, "※ 단, …") — 〈보기〉 박스 바로 아래·답지 앞의 본문 문단. 줄마다 한 문단
+            elif cur.blocks:
+                # 블록 뒤 본문 줄 = 발문 이음 줄(Block '주') — 〈보기〉 뒤 참고 줄("※ 단, …", 09-29 결정)과, 그림·표·자료 뒤에
+                # 이어지는 발문(10-01 결정, 수학 "그림과 같이 … → 그림 → …의 값은?"). 블록 바로 아래·답지 앞, 줄마다 한 문단
                 last = cur.blocks[-1]
                 if last.kind == "주":
                     cur.blocks[-1] = Block("주", last.lines + (line.strip(),), {}, last.line_no)
                 else:
                     cur.blocks.append(Block("주", (line.strip(),), {}, i + offset + 1))
-            elif cur.blocks:
-                err(i, line, "박스·표·그림 뒤의 본문 줄 — 발문은 박스 앞에 쓴다(〈보기〉 바로 뒤의 참고 줄만 된다)")
             else:
                 cur.stem.append(line.strip())
         elif set_open is not None:

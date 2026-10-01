@@ -80,7 +80,7 @@ def _items(s: Scan, pairs) -> dict[str, tuple]:
         n = x.number
         out[f"{n}번 배점"] = (x.points,)
         out[f"{n}번 정답"] = tuple(c.mark for c in x.choices if c.correct)
-        out[f"{n}번 발문"] = tuple(_norm(t, pairs) for t in x.stem)
+        out[f"{n}번 발문"] = (_norm(" ".join(x.stem), pairs),)  # 여러 줄 발문은 조판이 한 문단으로 잇는다 — 글과 차례를 견준다
         out[f"{n}번 박스·표·그림"] = tuple((b.kind, tuple(_norm(t, pairs) for t in b.lines),
                                          tuple(_norm(h, pairs) for h in b.attrs.get("머리") or ())) for b in x.blocks)
         out[f"{n}번 답지"] = tuple(_norm(f"{c.mark}{c.text}", pairs) for c in x.choices)

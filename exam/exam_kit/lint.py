@@ -86,9 +86,10 @@ def rule_E007(s: Scan, cfg: dict) -> list[Violation]:
 def rule_E008(s: Scan, cfg: dict) -> list[Violation]:
     out = []
     for q in s.questions:
-        ranks = [cfg["order"][b.kind] for b in q.blocks]
+        kinds = [b.kind for b in q.blocks if b.kind != "주"]  # 발문 이음 줄(주)은 바로 위 블록에 딸린다 — 순서를 따지지 않는다
+        ranks = [cfg["order"][k] for k in kinds]
         if ranks != sorted(ranks):
-            out.append(_v("E008", q.line_no, f"{q.number}번 블록 순서 {[b.kind for b in q.blocks]} — {cfg['message']}"))
+            out.append(_v("E008", q.line_no, f"{q.number}번 블록 순서 {kinds} — {cfg['message']}"))
     return out
 
 

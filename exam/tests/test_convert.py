@@ -218,12 +218,18 @@ def test_참고_줄은_스캔_규칙_조판까지(양식_hwpx):
     assert pp.find(".//{*}case//{*}left").get("value") == str(발문_이음_왼여백)
 
 
-def test_참고_줄_아닌_박스_뒤_본문_줄은_스캔_오류():
-    """:::자료 뒤의 본문 줄은 발문에 몰래 붙지 않고 오류다(참고 줄은 〈보기〉 뒤만)."""
+def test_박스_뒤_본문_줄은_발문_이음_줄이다():
+    """(10-01 결정) :::자료·그림·표 뒤의 본문 줄도 〈보기〉 참고 줄처럼 발문 이음 줄(Block '주') — 발문에 몰래 붙지 않고,
+    블록 바로 아래·답지 앞 자리 그대로."""
     from exam_kit.scan import scan_markdown
 
-    md = 기대.replace("※ 크기는 반올림했다.\n:::\n", "※ 크기는 반올림했다.\n:::\n떠도는 줄\n")
-    assert [e.reason for e in scan_markdown(md).errors if "박스·표·그림 뒤의 본문 줄" in e.reason]
+    md = 기대.replace("※ 크기는 반올림했다.\n:::\n", "※ 크기는 반올림했다.\n:::\n이어지는 줄\n")
+    s = scan_markdown(md)
+    assert s.errors == ()
+    q = next(x for x in s.questions if any(b.lines == ("이어지는 줄",) for b in x.blocks))
+    i = next(k for k, b in enumerate(q.blocks) if b.lines == ("이어지는 줄",))
+    assert q.blocks[i].kind == "주" and q.blocks[i - 1].kind == "자료"
+    assert "이어지는 줄" not in " ".join(q.stem)
 
 
 def test_참고_줄은_역변환에서도_보기_아래로(양식_hwpx, tmp_path):
