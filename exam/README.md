@@ -17,6 +17,7 @@
         [--draft] [--lint-warn] [--gap distribute|fixed] [--pack balanced|greedy] [--compare <제출본.hwpx>] [--stage "<문구>"]
     uv run python -W ignore -m exam_kit.fit <엔진 문항지.hwpx> <기준본.hwpx> --kit <학교 킷 폴더>   # 줄 대조(실한컴 2회)
     uv run python -m exam_kit.reverse <원안지.hwp|.hwpx> --kit <학교 킷 폴더> --out <미추적 폴더>/원고.md [--front 키=값 …]  # 역변환
+    uv run python -W ignore -m exam_kit.patch <고친 원고.md> --prev <기존 산출 폴더> --kit <학교 킷 폴더> --form <서식.hwpx> --out <새 폴더>  # 작은 수정
     uv run python -m exam_kit.roundtrip <원안지.hwp|.hwpx> --kit <학교 킷 폴더> --form <서식.hwpx> --work <미추적 폴더>  # 왕복 불변 검사
     uv run python -m exam_kit.convert <지필 원고.md> --out <미추적 폴더>/원고.md [--figures <인쇄 규격 그림 폴더>] --front 과목코드=… 출제교사=…  # 원고 변환 + 불변 검사
 
@@ -44,6 +45,7 @@ exam_kit/
   source.py        역변환 입력: .hwp·.hwpx를 python-hwpx로 연다(바꾸지 못한 내용이 있으면 멈춤)
   reverse.py       원안지 → 원고 md(그림은 PNG로, 모르는 구조는 자리·까닭을 대고 멈춤, 양식 프로필 FormProfile)
   preserve.py      보존 블록: 서술형·논술형 등 아직 조판하지 않는 구간을 원본 모양 그대로 떼어 두고 다시 심는다(책갈피 표시)
+  patch.py         작은 수정: 고친 글만 기존 산출물에 갈아 끼우고 배치는 그대로(움직이면 다시 조판으로 멈춤)
   roundtrip.py     역변환 왕복 불변 검사: 원안지 → 원고 → 조판 → 견줌(문항 글·정답·배점·그림·수식·보존 블록)
   convert.py       지필 원고(문제지·정답키 형식) → 원고 md + 문항 내용 불변 검사
   _png.py          합성 PNG(세척·픽스처)
