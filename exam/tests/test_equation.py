@@ -57,11 +57,23 @@ def test_달러_글자는_역슬래시로_쓴다():
     ("$$x$$", "블록 수식"),
     ("빈 $ $ 수식", "빈 수식"),
     (r"$\notacommand{x}$", "바꿀 수 없다"),
-    ("$a~b$", "바꿀 수 없다"),  # LaTeX `~`(띄움)은 변환표에 없다 — 물결(∼)로 바꾸지 않고 오류로 알린다
+    (r"$\begin{tikzpicture}\end{tikzpicture}$", "바꿀 수 없다"),  # 모르는 환경
 ])
 def test_수식_표기_오류(text, why):
     with pytest.raises(eq.MathError, match=why):
         eq.mask(text)
+
+
+@pytest.mark.parametrize("latex, script", [
+    (r"\overrightarrow{AB}", "vec {AB}"),        # 기하 벡터(python-hwpx 6.7.0)
+    (r"\overleftrightarrow{AB}", "dyad {AB}"),
+    (r"a\,b", "a ` b"),                           # 4분의 1 칸 띄움 ↔ 한/글 `
+    ("a~b", "a ~ b"),                              # LaTeX `~` 띄움 — 물결(∼)이 아니다
+    (r"\therefore x", "therefore x"),
+    (r"\binom{n}{k}", "{n} choose {k}"),
+])
+def test_기하_수식_표기(latex, script):
+    assert eq.to_script(latex) == script
 
 
 def test_물결은_수식_밖에만():
