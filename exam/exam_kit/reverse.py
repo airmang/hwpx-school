@@ -878,7 +878,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("원안지", help=".hwp 또는 .hwpx")
     ap.add_argument("--kit", help="학교 킷 폴더 — 없으면 일반 규칙으로 읽는다(등록하지 않은 학교·교과, 이슈 #8)")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--front", nargs="*", default=[], metavar="키=값", help="문서에서 읽지 못한 머리 값(예: 학년=3 과목=기하)")
+    ap.add_argument("--front", nargs="*", default=[], metavar="키=값", help="문서에서 읽지 못한 머리 값(예: 학년=1 과목=합성과학)")
     a = ap.parse_args(argv)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
