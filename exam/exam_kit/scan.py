@@ -20,7 +20,16 @@ CHOICE_RE = re.compile(r"^(?P<star>\*?)(?P<mark>[①②③④⑤])\s*(?P<t>.*)$"
 FENCE_OPEN_RE = re.compile(r"^:::(?P<name>\S+)(?:\s+(?P<attrs>.*))?$")
 FENCE_CLOSE_RE = re.compile(r"^:::\s*$")
 CODE_FENCE_RE = re.compile(r"^```(?P<lang>\S*)\s*$")  # 코드 블록(Task 30) — 문항·세트 블록으로, 또는 :::자료 안에서
-IMG_RE = re.compile(r"^!\[\]\((?P<src>[^)]+)\)(?:\{width=(?P<w>[\d.]+)cm\})?\s*$")
+# 그림 줄: `![](경로){width=Ncm}` — 단 왼쪽에 둘 때는 `{width=Ncm align=left indent=Ncm}`(indent는 단 왼쪽에서 띄울 거리, 선택).
+# 속성 차례는 width → align → indent로 고정(역변환이 이 차례로 쓴다). align을 안 쓰면 가운데.
+IMG_RE = re.compile(r"^!\[\]\((?P<src>[^)]+)\)(?:\{width=(?P<w>[\d.]+)cm(?:\s+align=(?P<align>left|center))?"
+                    r"(?:\s+indent=(?P<indent>[\d.]+)cm)?\})?\s*$")
+
+
+def img_attrs(m: re.Match) -> dict:
+    """그림 줄 매치 → Block attrs(src·width_cm·align·indent_cm)."""
+    return {"src": m.group("src"), "width_cm": float(m.group("w")) if m.group("w") else None,
+            "align": m.group("align") or "center", "indent_cm": float(m.group("indent")) if m.group("indent") else 0.0}
 TABLE_ROW_RE = re.compile(r"^\|.*\|\s*$")
 _ATTR_RE = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
 펜스_이름 = ("자료", "보기", "조건", "답항표", "그림", "보존")  # 조건: 〈조건〉 박스(학교 B 결정표 29) — 킷에 견본이 있어야 조판된다
@@ -277,7 +286,7 @@ def scan_markdown(md: str, front_schema: dict | None = None) -> Scan:
             if tb is None:
                 err(i, line, "문항 앞에 그림이 있다")
             else:
-                tb.append(Block("그림", (line,), {"src": m.group("src"), "width_cm": float(m.group("w")) if m.group("w") else None}, i + offset + 1))
+                tb.append(Block("그림", (line,), img_attrs(m), i + offset + 1))
             continue
         m = CHOICE_RE.match(line)
         if m:

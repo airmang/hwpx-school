@@ -381,10 +381,51 @@ def classify_table(tbl, underlined: set[str], *, boxes: dict | None = None, pict
     return "표", lines
 
 
-def picture_line(pic, name: str) -> str:
-    """hp:pic → `![](name){width=Ncm}` — 폭은 문서의 현재 폭(hp:sz) 그대로."""
+def _cm(v: float) -> str:
+    return f"{v:.2f}".rstrip("0").rstrip(".")
+
+
+def picture_line(pic, name: str, place: tuple[str, int] = ("center", 0)) -> str:
+    """hp:pic → `![](name){width=Ncm}` — 폭은 문서의 현재 폭(hp:sz) 그대로. 단 왼쪽 그림은 `align=left`(+ `indent=Ncm`)."""
     cm = int(pic.find(q("hp", "sz")).get("width")) / CM
-    return f"![]({name}){{width={f'{cm:.2f}'.rstrip('0').rstrip('.')}cm}}"
+    align, indent = place
+    extra = "" if align != "left" else " align=left" + (f" indent={_cm(indent / CM)}cm" if indent / CM >= 0.05 else "")
+    return f"![]({name}){{width={_cm(cm)}cm{extra}}}"
+
+
+def para_info(doc: HwpxDocument) -> dict[str, tuple[str, int]]:
+    """paraPr id → (가로 정렬, 왼여백 HWPUNIT) — 글자처럼 취급한 그림의 자리를 그 문단 모양으로 읽는다."""
+    out = {}
+    for pp in doc.oxml.headers[0].element.iter(q("hh", "paraPr")):
+        al = pp.find(q("hh", "align"))
+        left = pp.find(f".//{q('hp', 'case')}//{q('hc', 'left')}")
+        if left is None:
+            left = pp.find(f".//{q('hc', 'left')}")
+        out[pp.get("id")] = ((al.get("horizontal") if al is not None else "JUSTIFY"),
+                             int(left.get("value", "0")) if left is not None else 0)
+    return out
+
+
+def picture_place(pic, para_el, info: dict[str, tuple[str, int]]) -> tuple[str, int]:
+    """그림의 자리 → ("center"|"left", 단 왼쪽에서 띄운 거리 HWPUNIT). 떠 있는 그림(글자처럼 취급 아님)은 hp:pos의
+    가로 정렬·띄움, 글자처럼 취급한 그림은 그 문단의 정렬·왼여백. 오른쪽 정렬 등 모르는 자리는 멈춘다."""
+    pos = pic.find(q("hp", "pos"))
+    if pos is not None and pos.get("treatAsChar") == "0":
+        h = pos.get("horzAlign") or "LEFT"
+        if h == "LEFT":
+            return "left", max(0, int(pos.get("horzOffset") or 0))
+        if h == "CENTER":
+            return "center", 0
+        raise ValueError(f"그림 가로 정렬 {h} — 단 왼쪽·가운데만 되돌린다")
+    pid = str(para_el.get("paraPrIDRef"))
+    if pid not in info:  # 문단 모양을 모르면 지금까지처럼 가운데
+        return "center", 0
+    align, left = info[pid]
+    if align == "CENTER":
+        return "center", 0
+    if align in ("LEFT", "JUSTIFY", "DISTRIBUTE"):
+        return "left", max(0, left)
+    raise ValueError(f"그림 문단 정렬 {align} — 단 왼쪽·가운데만 되돌린다")
 
 
 def _bin_items(hwpx: Path) -> dict[str, tuple[str, bytes]]:
@@ -587,7 +628,7 @@ def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
     """그림 저장기 — 이름표(문항 번호·세트)를 바꿔 가며 hp:pic을 파일로 쓰고 md 그림 줄을 돌려준다."""
     owner = {"label": "", "n": 0}
 
-    def picture(pic) -> str:
+    def picture(pic, place: tuple[str, int] = ("center", 0)) -> str:
         ref = pic.find(f".//{q('hc', 'img')}")
         rid = None if ref is None else ref.get("binaryItemIDRef")
         if rid not in bins:
@@ -599,7 +640,7 @@ def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
         name = f"그림_{owner['label']}_{owner['n']}.png"
         Path(image_dir).mkdir(parents=True, exist_ok=True)
         (Path(image_dir) / name).write_bytes(as_png(data, ext))
-        return picture_line(pic, name)
+        return picture_line(pic, name, place)
 
     def relabel(label: str) -> None:
         owner.update(label=label, n=0)
@@ -610,7 +651,8 @@ def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
 def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
                  bins: dict[str, tuple[str, bytes]] | None = None, image_dir: Path | None = None,
                  mono: set[str] = frozenset(), skip_prefix: str | None = None,
-                 boxes: dict | None = None, pages: list[int | None] | None = None) -> list[str]:
+                 boxes: dict | None = None, pages: list[int | None] | None = None,
+                 para_prs: dict[str, tuple[str, int]] | None = None) -> list[str]:
     """본문 문단(관리박스·꼬리 박스 뺀 것) → md 줄. heads = 자동번호 머리 문단의 index(paras 기준).
     mono = 고정폭 charPr — 이어진 고정폭 문단은 ``` 코드 블록 하나로. skip_prefix(킷 leftover_prefix)를 품은
     문단은 서식 안내 줄이라 건너뛴다. 모르는 구조는 ReverseStop — 문항 번호·쪽 어림(pages, paras 기준)·문단을 붙인다."""
@@ -664,7 +706,7 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
         if skip_prefix and skip_prefix in t:
             return
         blocks = [classify_table(tb, underlined, boxes=boxes, picture=picture, mono=mono) for tb in _top_tables(el)]
-        blocks += [("그림", [picture(pic)]) for pic in _pics(el)]
+        blocks += [("그림", [picture(pic, picture_place(pic, el, para_prs or {}))]) for pic in _pics(el)]
         if cur is None:
             if set_rng is None:
                 if t or blocks:
@@ -748,7 +790,7 @@ def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | Non
     end = tail if keep is None else keep
     body = reverse_body(ps[1:end], {i - 1 for i in heads if i < end}, underlined_char_prs(doc),
                         bins=_bin_items(src.hwpx), image_dir=image_dir, mono=mono_char_prs(doc),
-                        skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[1:end])
+                        skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[1:end], para_prs=para_info(doc))
     if keep is not None:
         body += _preserved(src, ps, keep, tail, image_dir, pages[keep])
     head = resolve_front(profile.front(doc), front or {}, profile.required)

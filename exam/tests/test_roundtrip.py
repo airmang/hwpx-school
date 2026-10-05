@@ -4,6 +4,7 @@
 그림·수식이 그대로여야 한다(이슈 #8 합격 기준)."""
 
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -145,3 +146,64 @@ def test_역변환은_정답_없는_문항을_알린다(tmp_path, capsys):
     src = rebuild(_정답_없는_원고(), load_kit(킷), 서식, 픽스처, tmp_path / "초안.hwpx")
     reverse_main([str(src), "--kit", str(킷), "--out", str(tmp_path / "md" / "원고.md")])
     assert "정답 표시(노랑 형광펜) 없음 6문항" in capsys.readouterr().out
+
+
+def test_그림_단_왼쪽_정렬도_왕복한다(tmp_path):
+    """(#7-3) `{width=… align=left indent=…}` — 조판은 단 왼쪽(+ 띄움), 역변환은 그 자리를 되살린다. 정렬도 왕복 불변에 든다."""
+    from hwpx.document import HwpxDocument
+
+    md = (픽스처 / "견본_전유형.md").read_text(encoding="utf-8")
+    line = next(ln for ln in md.splitlines() if ln.startswith("![](그림.png)"))
+    md = md.replace(line, line.replace("cm}", "cm align=left indent=1.5cm}"), 1)
+    s = scan_markdown(md, load_kit(킷).front_matter)
+    pic = next(b for x in s.questions for b in x.blocks if b.kind == "그림")
+    assert (pic.attrs["align"], pic.attrs["indent_cm"]) == ("left", 1.5)
+    src = rebuild(md, load_kit(킷), 서식, 픽스처, tmp_path / "원안지.hwpx")
+    doc = HwpxDocument.open(str(src))
+    para = next(p.element for p in doc.sections[0].paragraphs if p.element.find(".//{*}pic") is not None)
+    pp = next(e for e in doc.oxml.headers[0].element.iter("{*}paraPr") if e.get("id") == para.get("paraPrIDRef"))
+    assert pp.find("{*}align").get("horizontal") == "LEFT"
+    r = roundtrip(src, load_kit(킷), 서식, tmp_path / "rt")
+    assert r.same, r.diffs
+    back = (tmp_path / "rt" / "원고" / "원고.md").read_text(encoding="utf-8")
+    assert "align=left indent=1.5cm}" in back
+
+
+def test_떠_있는_그림의_자리를_읽는다():
+    """원안지 실물: 떠 있는 그림(treatAsChar=0)은 hp:pos의 가로 정렬·띄움으로, 글자처럼 취급한 그림은 문단 모양으로."""
+    import lxml.etree as ET
+    from exam_kit import HP
+    from exam_kit.reverse import picture_line, picture_place
+
+    def pic(tac: str, h: str = "LEFT", off: int = 9046):
+        return ET.fromstring(f'<hp:pic xmlns:hp="{HP}"><hp:pos treatAsChar="{tac}" horzRelTo="COLUMN" horzAlign="{h}" '
+                             f'horzOffset="{off}"/><hp:sz width="11386"/></hp:pic>')
+
+    para = ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="7"/>')
+    assert picture_place(pic("0"), para, {}) == ("left", 9046)
+    assert picture_place(pic("0", "CENTER"), para, {}) == ("center", 0)
+    assert picture_place(pic("1"), para, {"7": ("CENTER", 0)}) == ("center", 0)
+    assert picture_place(pic("1"), para, {"7": ("JUSTIFY", 1417)}) == ("left", 1417)
+    assert picture_line(pic("0"), "a.png", ("left", 9046)) == "![](a.png){width=4.02cm align=left indent=3.19cm}"
+    with pytest.raises(ValueError, match="RIGHT"):
+        picture_place(pic("0", "RIGHT"), para, {})
+
+
+def test_BMP_그림은_회색조_PNG로_들어간다(tmp_path):
+    """(#7-3) 원고 그림이 BMP(실제 원안지에서 꺼낸 그림 등)여도 조판은 회색조 PNG 사본을 넣는다."""
+    import io
+    import zipfile
+
+    from PIL import Image
+
+    root = tmp_path / "원고"
+    shutil.copytree(픽스처, root)
+    with Image.open(root / "그림.png") as im:
+        im.convert("RGB").save(root / "그림.bmp")
+    md = (root / "견본_전유형.md").read_text(encoding="utf-8").replace("](그림.png)", "](그림.bmp)")
+    src = rebuild(md, load_kit(킷), 서식, root, tmp_path / "원안지.hwpx")
+    with zipfile.ZipFile(src) as z:
+        bins = [n for n in z.namelist() if n.startswith("BinData/")]
+        assert bins and all(n.endswith(".png") for n in bins)
+        with Image.open(io.BytesIO(z.read(bins[0]))) as im:
+            assert im.mode == "L"
