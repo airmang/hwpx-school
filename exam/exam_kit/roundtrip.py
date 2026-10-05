@@ -54,9 +54,9 @@ class Result:
 
 def counts(doc: HwpxDocument, profile: FormProfile) -> Counts:
     """본문(첫 문항 머리 ~ 꼬리 박스 앞)의 문항·수식·그림 수 — 역변환과 무관하게 XML에서 센다."""
-    heads = question_heads(doc)  # 책갈피로 표시한 보존 구간의 머리는 이미 빠진다
+    heads = profile.heads(doc)  # 책갈피로 표시한 보존 구간의 머리는 이미 빠진다
     ps = list(doc.sections[0].paragraphs)
-    tail = _tail_index(doc, profile.tail_marker)
+    tail = profile.tail(doc) if profile.tail is not None else _tail_index(doc, profile.tail_marker)
     if heads and not preserve.ranges(doc):  # 원안지: 보존 구간(서술형·논술형 머리 글부터)의 머리를 뺀다 — 역변환과 같은 규칙
         keep = preserve.find_start([p.element for p in ps], heads[0] + 1, tail)
         heads = [h for h in heads if keep is None or h < keep]
@@ -116,22 +116,25 @@ def rebuild(md: str, kit: Kit, form: Path, image_root: Path, out: Path) -> Path:
     return out
 
 
-def roundtrip(src: Path | Source, kit: Kit, form: Path, work: Path, *, front: dict[str, str] | None = None) -> Result:
-    """원안지 → (역변환) 원고 → (조판) 답 표시본 → (역변환) 원고 — 두 원고와 두 문서의 수를 견준다. 산출물은 work에."""
+def roundtrip(src: Path | Source, kit: Kit, form: Path, work: Path, *, front: dict[str, str] | None = None,
+              source: FormProfile | None = None) -> Result:
+    """원안지 → (역변환) 원고 → (조판) 답 표시본 → (역변환) 원고 — 두 원고와 두 문서의 수를 견준다. 산출물은 work에.
+    source = 원안지를 읽을 프로필(없으면 kit의 프로필). 킷 없는 원안지는 generic_profile()로 읽고 합성 킷 위에 다시 조판한다."""
     work = Path(work)
     profile = kit_profile(kit)
+    source = source or profile
     if not isinstance(src, Source):
         src = open_source(Path(src), work / "입력")
     first, second = work / "원고", work / "다시_원고"
     first.mkdir(parents=True, exist_ok=True)
     second.mkdir(parents=True, exist_ok=True)
-    md1 = reverse(src, profile, image_dir=first, front=front)
+    md1 = reverse(src, source, image_dir=first, front=front)
     (first / "원고.md").write_text(md1, encoding="utf-8")
     rebuilt = rebuild(md1, kit, form, first, work / "다시_조판.hwpx")
     md2 = reverse(rebuilt, profile, image_dir=second, front=front)
     (second / "원고.md").write_text(md2, encoding="utf-8")
     pairs = kit.typeset.get("text_replace") or ()
-    ca, cb = counts(src.doc, profile), counts(HwpxDocument.open(str(rebuilt)), profile)
+    ca, cb = counts(src.doc, source), counts(HwpxDocument.open(str(rebuilt)), profile)
     s1 = scan_markdown(md1, kit.front_matter)
     unanswered = [q.number for q in s1.questions if not any(c.correct for c in q.choices)]
     notes = [f"정답 표시 없음 {len(unanswered)}문항({', '.join(unanswered)}번) — 정답은 견주지 못했다(빈 것끼리)"] if unanswered else []
@@ -145,13 +148,17 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description="역변환 왕복 불변 검사(원안지 → 원고 → 조판 → 견줌). 끝 코드 0 같다 · 1 다르다 · 2 멈춤")
     ap.add_argument("원안지", help=".hwp 또는 .hwpx")
-    ap.add_argument("--kit", required=True)
-    ap.add_argument("--form", required=True, help="그 학교 서식 hwpx(다시 조판할 바탕)")
+    ap.add_argument("--kit", required=True, help="다시 조판할 킷(킷 없는 원안지는 합성 킷 exam/kits/synthetic)")
+    ap.add_argument("--form", required=True, help="그 킷의 서식 hwpx(다시 조판할 바탕)")
+    ap.add_argument("--generic", action="store_true", help="원안지를 킷 없이 일반 규칙으로 읽는다(등록하지 않은 학교·교과)")
     ap.add_argument("--work", required=True, help="산출물 폴더(git 미추적 자리)")
     ap.add_argument("--front", nargs="*", default=[], metavar="키=값")
     a = ap.parse_args(argv)
     try:
-        r = roundtrip(Path(a.원안지), load_kit(Path(a.kit)), Path(a.form), Path(a.work), front=_given(a.front))
+        from .generic import generic_profile
+
+        r = roundtrip(Path(a.원안지), load_kit(Path(a.kit)), Path(a.form), Path(a.work), front=_given(a.front),
+                      source=generic_profile() if a.generic else None)
     except (ReverseStop, SourceError, ValueError) as e:
         print(f"왕복 멈춤 — {e}")
         return 2

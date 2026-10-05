@@ -42,6 +42,7 @@ exam_kit/
   build.py         파이프라인 CLI와 보고서
   gate.py          엔진 회귀 게이트: 기준·새 산출물 비교(paraPr는 내용으로, 문단 id·그림 instid는 정규화)
   source.py        역변환 입력: .hwp·.hwpx를 python-hwpx로 연다(바꾸지 못한 내용이 있으면 멈춤)
+  generic.py       킷 없는 양식의 역변환 일반 규칙(문항 번호·제목 박스·꼬리·머리 값)
   reverse.py       원안지 → 원고 md(그림은 PNG로, 모르는 구조는 자리·까닭을 대고 멈춤, 양식 프로필 FormProfile)
   preserve.py      보존 블록: 서술형·논술형 등 아직 조판하지 않는 구간을 원본 모양 그대로 떼어 두고 다시 심는다(책갈피 표시)
   roundtrip.py     역변환 왕복 불변 검사: 원안지 → 원고 → 조판 → 견줌(문항 글·정답·배점·그림·수식·보존 블록)
