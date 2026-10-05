@@ -19,7 +19,7 @@ def test_픽스처_전체():
     assert [q.choices[[c.correct for c in q.choices].index(True)].mark for q in s.questions] == list("②④①⑤③②④①④③")
     assert s.questions[1].blocks[0].kind == "보기" and len(s.questions[1].blocks[0].lines) == 4
     assert s.questions[3].blocks[0].kind == "표" and len(s.questions[3].blocks[0].lines) == 4
-    assert s.questions[4].blocks[0].kind == "그림" and s.questions[4].blocks[0].attrs == {"src": "그림.png", "width_cm": 6.0}
+    assert s.questions[4].blocks[0].kind == "그림" and s.questions[4].blocks[0].attrs == {"src": "그림.png", "width_cm": 6.0, "align": "center", "indent_cm": 0.0}
     assert s.questions[5].blocks[1].kind == "답항표" and s.questions[5].blocks[1].attrs["머리"] == ["(가)", "(나)", "(다)"]
     assert s.questions[5].choices[1].text == "지도 | 강화 | 비지도" and s.questions[5].choices[1].correct
     assert s.sets[0].rng == ("7", "8") and s.sets[0].blocks[0].kind == "자료"

@@ -39,7 +39,7 @@ except ImportError:  # 옮겨졌으면 임시 문단의 add_picture로 만든다
 from . import HP, equation, preserve, q
 from .kit import Kit, Metrics, style_ids
 from .prepare import _top_tables, is_sample_box
-from .scan import IMG_RE, TABLE_ROW_RE, Block, Question, QuestionSet, Scan
+from .scan import IMG_RE, TABLE_ROW_RE, Block, Question, QuestionSet, Scan, img_attrs
 from .verify import question_heads
 
 형광 = "#FFFF00"
@@ -112,6 +112,16 @@ def code_font_ids(header, face: str) -> dict[str, str]:
     if "hangul" not in out:
         raise ValueError("양식이 바뀌었다: hh:fontface lang=HANGUL 없음")
     return out
+
+
+def _picture_attrs(block: Block) -> dict:
+    """그림 블록의 그림 줄 속성(src·width_cm·align·indent_cm) — `:::그림` 펜스면 안의 그림 줄에서."""
+    if block.attrs.get("src") is not None:
+        return {"align": "center", "indent_cm": 0.0, **block.attrs}
+    m = next((IMG_RE.match(ln.strip()) for ln in block.lines if IMG_RE.match(ln.strip())), None)
+    if m is None:
+        raise ValueError(f"L{block.line_no} :::그림 안에 그림 줄이 없다")
+    return img_attrs(m)
 
 
 def natural_width_cm(px: int) -> float:
@@ -752,12 +762,9 @@ class _Composer:
 
     def picture(self, block: Block, avail: int) -> ET._Element:
         """`![](경로){width=Ncm}` → 회색조 사본을 문서에 넣고 글자처럼 취급하는 그림(높이는 원본 비율)."""
-        src, cm = block.attrs.get("src"), block.attrs.get("width_cm")
-        if src is None:  # :::그림 펜스 — 안의 그림 줄을 쓴다
-            m = next((IMG_RE.match(ln.strip()) for ln in block.lines if IMG_RE.match(ln.strip())), None)
-            if m is None:
-                raise ValueError(f"L{block.line_no} :::그림 안에 그림 줄이 없다")
-            src, cm = m.group("src"), float(m.group("w")) if m.group("w") else None
+        at = _picture_attrs(block)
+        src, cm = at["src"], at["width_cm"]
+        avail -= round(at["indent_cm"] * CM)  # 단 왼쪽에서 띄운 만큼 좁다
         if cm is None:
             raise ValueError(f"L{block.line_no} 그림 폭이 없다 — `![]({src}){{width=Ncm}}`")
         if self.image_root is None:
@@ -939,7 +946,12 @@ class _Composer:
                 out.append(_Para("normal", [("", None)],
                                  obj=self.grid(b.lines, self.kit.columns["body_table_width"], f"L{b.line_no} {where}")))
             elif b.kind == "그림":
-                out.append(_Para("normal", [("", None)], obj=self.picture(b, self.kit.columns["width"]), align="CENTER"))
+                at = _picture_attrs(b)
+                pic = self.picture(b, self.kit.columns["width"])
+                if at["align"] == "left":  # 단 왼쪽(+ 띄움) — 글자처럼 취급한 그림을 왼쪽 정렬 문단에, 띄움은 문단 왼여백
+                    out.append(_Para("normal", [("", None)], obj=pic, align="LEFT", left=round(at["indent_cm"] * CM)))
+                else:
+                    out.append(_Para("normal", [("", None)], obj=pic, align="CENTER"))
             elif b.kind == "코드":  # 문항·세트의 코드 블록 — 줄마다 고정폭·왼쪽 정렬 문단(Task 30)
                 cp = self.code_char_pr("normal")
                 out += [_Para("normal", [(ln.replace("\t", "    "), cp)], align="LEFT") for ln in b.lines]
@@ -1157,9 +1169,9 @@ def _box_parts(block: Block) -> list[tuple[str, object]]:
             else:
                 out.append(("표", [ln]))
         elif m:
-            out.append(("그림", Block("그림", (ln,), {"src": m.group("src"),
-                                                    "width_cm": float(m.group("w")) if m.group("w") else None},
-                                    block.line_no)))
+            if m.group("align") or m.group("indent"):  # 박스 안 그림은 칸 가운데 — 단 왼쪽 정렬은 문항 블록 그림만
+                raise ValueError(f"L{block.line_no} 박스 안 그림 {m.group('src')}에 align·indent를 쓸 수 없다(칸 가운데)")
+            out.append(("그림", Block("그림", (ln,), img_attrs(m), block.line_no)))
         elif ln:
             out.append(("글", ln))
     if code is not None:
