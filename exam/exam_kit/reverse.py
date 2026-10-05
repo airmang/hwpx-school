@@ -34,7 +34,7 @@ from .verify import _tail_index, question_heads
 원문자 = "①②③④⑤"
 노랑 = "#FFFF00"
 CM = 72000 / 25.4  # 1 cm = 2834.6 HWPUNIT (compose.CM과 같은 값)
-_배점 = re.compile(r"\s*\[(\d+(?:\.\d+)?)점\]\s*$")
+_배점 = re.compile(r"\s*[\[(]\s*(\d+(?:\.\d+)?)\s*점\s*[\])]\s*$")  # [3.5점] · (4점) · [ 3.5 점 ]
 _세트 = re.compile(r"^\[(\d+)\s*[∼~]\s*(\d+)\]\s*")
 _머리기호 = re.compile(r"^(?:[ㄱㄴㄷㄹㅁ]|[㉠㉡㉢㉣㉤]|\((?:[가나다라마]|[ㄱㄴㄷㄹㅁ]|[A-E])\)|[A-E])$")
 _보기_항목 = re.compile(r"^(?:[ㄱㄴㄷㄹㅁ]\.|∘)\s")
@@ -320,6 +320,31 @@ def _is_box_frame(tbl, spec: dict) -> bool:
             and all(_blank_cell(tc) for tc in tcs if tc is not body))
 
 
+class _GenericBoxes(dict):
+    """킷 없는 양식의 박스 규칙 표지(generic.generic_profile) — classify_table이 모양 대신 제목 글·빈 칸으로 가린다."""
+
+
+GENERIC_BOXES = _GenericBoxes()
+_박스_제목 = {"보기": re.compile(r"^\s*[<〈《\[(]?\s*보\s*기\s*[>〉》\])]?\s*$"),
+             "조건": re.compile(r"^\s*[<〈《\[(]?\s*조\s*건\s*[>〉》\])]?\s*$")}
+
+
+def generic_box(tbl, underlined: set[str], *, picture: Picture | None = None,
+                mono: set[str] = frozenset()) -> tuple[str, list[str]] | None:
+    """킷 없는 양식의 박스(이슈 #8 일반 규칙) — 표의 첫 글 줄이 제목(〈보기〉·<보 기>·[조건] 등)이면 그 박스, 나머지 칸 글이
+    내용. 제목 없이 글이 든 칸이 하나뿐인 표(1칸 표·레일 틀 표)는 자료. 아니면 None(답항표·격자표로)."""
+    cells = _cells(tbl)
+    filled = [tc for tc in cells if not _blank_cell(tc)]
+    lines = [ln for tc in filled for ln in _box_lines(tc, underlined, picture, "박스", mono, GENERIC_BOXES)]
+    for kind, rx in _박스_제목.items():
+        if lines and rx.match(lines[0]):
+            return kind, (_join_items(lines[1:]) if kind == "보기" else lines[1:])
+    if len(filled) == 1 and any(_span(tc) != (1, 1) for tc in cells) or len(cells) == 1:
+        if len(filled) == 1:
+            return "자료", lines
+    return None
+
+
 def answer_table(tbl, underlined: set[str]) -> list[str] | None:
     """조판기의 짝짓기 답항표(compose.answer_table — 무테 6행: 머리행 [빈 칸, 기호…] + ①~⑤ 행) → `:::답항표` 몸 줄
     [머리 줄, 행 다섯]. 아니면 None. 머리 기호의 밑줄은 조판이 다는 것이라 뺀다."""
@@ -366,6 +391,10 @@ def classify_table(tbl, underlined: set[str], *, boxes: dict | None = None, pict
     table = answer_table(tbl, underlined)
     if table is not None:
         return "답항표", table
+    if isinstance(boxes, _GenericBoxes):
+        got = generic_box(tbl, underlined, picture=picture, mono=mono)
+        if got is not None:
+            return got
     md: list[list[str]] = []
     for tr in tbl.findall(q("hp", "tr")):
         row = []
@@ -509,7 +538,7 @@ def resolve_front(read: dict[str, str | None], given: dict[str, str], required) 
         front["대상"] = f"{given['학년']}학년 {read['대상_반']}"
     missing = [k for k in required if not front.get(k)]
     if missing:
-        raise ReverseStop(f"머리 값을 문서에서 읽지 못했다: {', '.join(missing)} — 누름틀이 없거나 비었다. "
+        raise ReverseStop(f"머리 값을 문서에서 읽지 못했다: {', '.join(missing)} — 누름틀·글에서 찾지 못했다. "
                           f"`--front {' '.join(f'{k}=…' for k in missing)}`로 준다")
     return ["---"] + [f"{k}: {front[k]}" for k in _머리_차례 if front.get(k)] + ["---", ""]
 
@@ -519,7 +548,7 @@ class _Question:
         pm = _배점.search(head)
         self.k, self.member = k, member
         self.points = float(pm.group(1)) if pm else None
-        stem = re.sub(rf"^{k}\.\s*", "", _배점.sub("", head).strip())  # 글자 번호 양식의 `N. `은 번호 — 원고는 머리에 쓴다
+        stem = re.sub(rf"^{k}\s*[.．)]\s*", "", _배점.sub("", head).strip())  # 글자 번호 양식의 `N. `은 번호 — 원고는 머리에 쓴다
         self.lines = [self._head_line(), stem]
         self.text_at: list[int] = [1]  # 글 줄(발문·발문 이음)의 자리 — 배점이 머리 문단이 아니라 뒤 줄 끝에 있을 때 찾는다
         self.blocked = False  # 블록(박스·표·그림 등)을 지났는가 — 그 전의 글 문단은 발문 문단이다
@@ -757,6 +786,9 @@ class FormProfile:
     boxes: dict | None                  # 〈보기〉·자료 박스 모양(None이면 박스를 가리지 않고 격자표로)
     required: tuple[str, ...]           # 원고 머리 필수 키
     front: Callable[[HwpxDocument], dict[str, str | None]]  # 문서에서 읽은 머리 값(못 읽으면 None)
+    heads: Callable[[HwpxDocument], list[int]] = question_heads  # 문항 머리 문단 번호(구역 0 최상위)
+    start: Callable[[list[int]], int] = lambda heads: 1          # 본문 첫 문단(킷 양식: 관리박스 문단 0 다음)
+    tail: Callable[[HwpxDocument], int] | None = None           # 본문 끝(이 문단 앞까지) — None이면 꼬리 박스 글(tail_marker)로
 
 
 def kit_profile(kit: Kit) -> FormProfile:
@@ -779,18 +811,20 @@ def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | Non
             return reverse(open_source(Path(src), Path(tmp)), profile, image_dir=image_dir, front=front)
     doc = src.doc
     ps = [p.element for p in doc.sections[0].paragraphs]
-    heads = question_heads(doc)
+    heads = profile.heads(doc)
     if not heads:
         raise ReverseStop("문항 머리(자동번호 문단 또는 글자 번호 `N.`)를 찾지 못했다 — 원안지가 아닌가?")
-    tail = _tail_index(doc, profile.tail_marker)
+    tail = profile.tail(doc) if profile.tail is not None else _tail_index(doc, profile.tail_marker)
+    first = profile.start(heads)
     pages = page_guess(ps, _columns(doc))
     # 보존 구간(서술형·논술형 등 — 아직 조판하지 않는다): 다시 조판한 문서는 책갈피로, 원안지는 머리 글로 찾는다
     spans = preserve.ranges(doc)
     keep = spans[0][0] if spans else preserve.find_start(ps, heads[0] + 1, tail)
     end = tail if keep is None else keep
-    body = reverse_body(ps[1:end], {i - 1 for i in heads if i < end}, underlined_char_prs(doc),
+    body = reverse_body(ps[first:end], {i - first for i in heads if first <= i < end}, underlined_char_prs(doc),
                         bins=_bin_items(src.hwpx), image_dir=image_dir, mono=mono_char_prs(doc),
-                        skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[1:end], para_prs=para_info(doc))
+                        skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[first:end],
+                        para_prs=para_info(doc))
     if keep is not None:
         body += _preserved(src, ps, keep, tail, image_dir, pages[keep])
     head = resolve_front(profile.front(doc), front or {}, profile.required)
@@ -842,17 +876,19 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description="원안지(.hwp·.hwpx) → md v2 (그림은 md 옆에 PNG로). 끝 코드: 0 · 1 원고 문법 오류 · 2 멈춤")
     ap.add_argument("원안지", help=".hwp 또는 .hwpx")
-    ap.add_argument("--kit", required=True)
+    ap.add_argument("--kit", help="학교 킷 폴더 — 없으면 일반 규칙으로 읽는다(등록하지 않은 학교·교과, 이슈 #8)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--front", nargs="*", default=[], metavar="키=값", help="문서에서 읽지 못한 머리 값(예: 학년=3 과목=기하)")
     a = ap.parse_args(argv)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    kit = load_kit(Path(a.kit))
+    from .generic import generic_profile
+
+    kit = load_kit(Path(a.kit)) if a.kit else None
     try:
         with tempfile.TemporaryDirectory() as tmp:
             src = open_source(Path(a.원안지), Path(tmp))
-            md = reverse(src, kit, image_dir=out.parent, front=_given(a.front))
+            md = reverse(src, kit if kit is not None else generic_profile(), image_dir=out.parent, front=_given(a.front))
     except (ReverseStop, SourceError) as e:
         print(f"역변환 멈춤 — {e}")
         return 2
@@ -863,7 +899,9 @@ def main(argv: list[str] | None = None) -> int:
     unanswered = [q.number for q in s.questions if not any(c.correct for c in q.choices)]
     if unanswered:  # 한/글 초안은 정답 형광펜이 아직 없는 것이 흔하다 — 멈추지 않고 알린다
         print(f"알림: 정답 표시(노랑 형광펜) 없음 {len(unanswered)}문항({', '.join(unanswered)}번) — 원고에서 정답 답지 앞에 `*`를 붙인다")
-    vs = lint(md, md_dir=out.parent, rules=kit.rules)
+    if kit is None:
+        print("알림: 학교 킷 없이 일반 규칙으로 읽었다 — 문항 머리·박스·머리 값은 추정이다. 원고를 한 번 훑어본다")
+    vs = lint(md, md_dir=out.parent, rules=kit.rules if kit else None)
     n_err = len(errors(vs))
     print(f"wrote {out} — 문항 {len(s.questions)} · 배점 합 {sum(x.points or 0 for x in s.questions):.1f}"
           f" · lint 오류 {n_err} · 경고 {len(vs) - n_err}")
