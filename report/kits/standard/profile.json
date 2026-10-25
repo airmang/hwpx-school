@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "hwpx.design.profile.v1",
+  "kind": "marked",
+  "id": "standard",
+  "template": "template.hwpx",
+  "fragments": {
+    "표제": "fragments/00.xml",
+    "날짜": "fragments/01.xml",
+    "쪽나눔": "fragments/02.xml",
+    "띠": "fragments/03.xml",
+    "1단계": "fragments/04.xml",
+    "2단계": "fragments/05.xml",
+    "3단계": "fragments/06.xml",
+    "참고": "fragments/07.xml"
+  },
+  "slots": {
+    "표제": [
+      "위",
+      "아래"
+    ],
+    "날짜": [
+      ""
+    ],
+    "쪽나눔": [
+      ""
+    ],
+    "띠": [
+      "번호",
+      "제목"
+    ],
+    "1단계": [
+      ""
+    ],
+    "2단계": [
+      ""
+    ],
+    "3단계": [
+      ""
+    ],
+    "참고": [
+      ""
+    ]
+  },
+  "page": {
+    "width": 59528,
+    "height": 84186,
+    "orientation": "WIDELY",
+    "margins": {
+      "left": 8504,
+      "right": 8504,
+      "top": 5668,
+      "bottom": 4252
+    }
+  },
+  "char_pr_count": 16,
+  "style_coverage_threshold": 0.98,
+  "source_basename": "견본.hwpx",
+  "ignored_static_paragraphs": 0
+}
