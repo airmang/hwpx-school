@@ -33,11 +33,13 @@
 | `exam/` | 원안지 조판 엔진 `exam_kit` — 학교 서식 파일 그대로 위에 조판, 새 학교 등록(`onboard`) | `skills/exam` |
 | `worksheet/` | 학습지 조판(hwpx·docx) — 씨앗 킷 `kits/standard` | `skills/worksheet` |
 | `assessment/` | 수행평가 문제지 조판 — 씨앗 킷 `kits/standard` | `skills/assessment` |
+| `report/` | 보고서·계획서 — 자리표시 견본의 서식(장 제목 띠·□ㅇ- 위계) 그대로 조립, 씨앗 킷 `kits/standard` | `skills/report` |
 
 각 폴더는 독립 uv 프로젝트다(자기 `pyproject.toml`·`uv.lock`). 엔진 폴더에서 `uv run`으로 돌린다.
 
 ## 테스트와 한컴
 
 - `exam`: `uv run pytest -q -m "not render"`(한컴 없이). 학교 킷이 필요한 테스트는 환경변수가 없으면 skip — `exam/README.md`.
+- `report`: `uv run pytest -q`(한컴 렌더는 `-m hancom`).
 - `worksheet`·`assessment`: `uv run --python 3.13 pytest -q`. **`-m`을 주지 않는다** — addopts가 한컴·외부 렌더 테스트를 빼는데 `-m`이 그 기본을 덮는다.
 - 실제 한컴 렌더는 공용 자원이다: 한 번에 하나, 넣기 전 zip 검사, 다른 세션의 창·대화상자는 건드리지 않는다.
