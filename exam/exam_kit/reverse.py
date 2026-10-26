@@ -1143,4 +1143,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # `-m exam_kit.reverse`로 돌면 이 파일이 __main__으로 한 번 더 읽힌다 — generic.generic_profile이 만드는 FormProfile은
+    # exam_kit.reverse의 것이라 여기(__main__)의 isinstance가 거짓이 된다. 패키지 모듈의 main으로 돈다.
+    from exam_kit.reverse import main as _main
+
+    raise SystemExit(_main())
