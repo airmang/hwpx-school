@@ -30,6 +30,47 @@ def img_attrs(m: re.Match) -> dict:
     """그림 줄 매치 → Block attrs(src·width_cm·align·indent_cm)."""
     return {"src": m.group("src"), "width_cm": float(m.group("w")) if m.group("w") else None,
             "align": m.group("align") or "center", "indent_cm": float(m.group("indent")) if m.group("indent") else 0.0}
+
+
+# 그림 위 얹기(10-26 수학 교사 답): `:::그림` 펜스 안, 그림 줄 아래 한 줄에 하나. 좌표는 그림 왼쪽 위에서 잰 얹을 것의
+# 중심(cm, 음수 가능 — 그림 밖 가장자리 글자). 글자 `$LaTeX$ {x=1.3cm y=-0.09cm}`는 발문 수식과 같은 한/글 수식으로,
+# 점 `● {x=1.5cm y=2cm}`는 채운 원으로 그림 위에 따로 얹는다(교사가 한/글에서 지우고 옮길 수 있게).
+OVERLAY_RE = re.compile(r"^(?P<what>\$.+\$|●)\s*\{x=(?P<x>-?\d+(?:\.\d+)?)cm\s+y=(?P<y>-?\d+(?:\.\d+)?)cm\}\s*$")
+
+
+@dataclass(frozen=True)
+class Overlay:
+    kind: str           # "글자" · "점"
+    latex: str | None   # 글자의 `$…$` 안
+    x_cm: float
+    y_cm: float
+
+
+def overlay_line(o: Overlay) -> str:
+    """Overlay → 원고 줄(역변환이 쓴다). 좌표는 0.01cm까지."""
+    what = "●" if o.kind == "점" else f"${o.latex}$"
+    return f"{what} {{x={_cm(o.x_cm)}cm y={_cm(o.y_cm)}cm}}"
+
+
+def _cm(v: float) -> str:
+    s = f"{v:.2f}".rstrip("0").rstrip(".")
+    return "0" if s in ("-0", "") else s
+
+
+def figure_parts(block: Block) -> tuple[list[str], list[Overlay], list[str]]:
+    """`:::그림` 펜스 → (그림 줄들, 얹을 것들, 귀속 불가 줄들). 그림 한 줄짜리 블록(펜스 없이)은 얹을 것이 없다."""
+    pics, overlays, bad = [], [], []
+    for ln in block.lines:
+        s = ln.strip()
+        if IMG_RE.match(s):
+            pics.append(s)
+        elif m := OVERLAY_RE.match(s):
+            w = m.group("what")
+            overlays.append(Overlay("점", None, float(m.group("x")), float(m.group("y"))) if w == "●"
+                            else Overlay("글자", w[1:-1].strip(), float(m.group("x")), float(m.group("y"))))
+        elif s:
+            bad.append(s)
+    return pics, overlays, bad
 TABLE_ROW_RE = re.compile(r"^\|.*\|\s*$")
 _ATTR_RE = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
 펜스_이름 = ("자료", "보기", "조건", "답항표", "그림", "보존")  # 조건: 〈조건〉 박스(학교 B 결정표 29) — 킷에 견본이 있어야 조판된다

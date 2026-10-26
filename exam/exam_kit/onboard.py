@@ -227,7 +227,7 @@ def draft_kit(path: Path, name: str) -> dict:
         "boxes": {"보기": TODO, "자료": TODO},
         "set_marker": {"pattern": "^\\[\\d+∼\\d+\\]$", "char_height": TODO, "bold": TODO},
         "typeset": {"score_suffix": " [{points:.1f}점]", "set_head": "[{a}∼{b}]", "text_replace": [["~", "∼"]],
-                    "grayscale_pictures": True, "stem_hanging": None},
+                    "grayscale_pictures": True, "stem_hanging": None, "equation_font": "HancomEQN"},
         "metrics": {"full": TODO, "half": TODO, "space": TODO, "upper": TODO, "char_height": TODO,
                     "line_pitch": {"160": TODO}, "box_extra": TODO, "mark_col": TODO,
                     "note": "실한컴 렌더로 잰다(학교-등록.md: 텍스트 층 글자 간격)"},

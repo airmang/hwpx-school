@@ -107,3 +107,16 @@ def test_역변환_명령은_킷_없이도_돈다(tmp_path, capsys):
     assert "일반 규칙으로 읽었다" in capsys.readouterr().out
     s = scan_markdown((tmp_path / "md" / "원고.md").read_text(encoding="utf-8"))
     assert len(s.questions) == 6 and s.front.양식 == "미등록"
+
+def test_킷_없는_역변환_CLI(tmp_path):
+    """`python -m exam_kit.reverse <원안지> --out …`(--kit 없이)가 일반 규칙으로 돈다 — __main__으로 한 번 더 읽힌 모듈의
+    FormProfile과 generic_profile의 것이 달라 멈추던 결함(10-26)."""
+    import subprocess
+    import sys
+
+    kit = load_kit(킷)
+    src = rebuild((픽스처 / "합성서식_6문항.md").read_text(encoding="utf-8"), kit, 서식, 픽스처, tmp_path / "원안지.hwpx")
+    r = subprocess.run([sys.executable, "-W", "ignore", "-m", "exam_kit.reverse", str(src), "--out", str(tmp_path / "o" / "원고.md"),
+                        "--front", "과목=합성"], capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1])
+    assert r.returncode == 0, r.stderr[-800:]
+    assert (tmp_path / "o" / "원고.md").is_file()

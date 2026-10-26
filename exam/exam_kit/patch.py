@@ -104,6 +104,17 @@ def _pictures(region: list) -> list[str]:
     return [pic.find(f".//{q('hc', 'img')}").get("binaryItemIDRef") for top in region for pic in top.iter(q("hp", "pic"))]
 
 
+def _overlays(p) -> list[tuple]:
+    """문단에 떠 있는 수식·원(그림 위 얹기) — (종류, 수식 글, 세로·가로 오프셋)."""
+    out = []
+    for run in p.findall(q("hp", "run")):
+        for e in run:
+            pos = e.find(q("hp", "pos"))
+            if e.tag in (q("hp", "equation"), q("hp", "ellipse")) and pos is not None and pos.get("treatAsChar") == "0":
+                out.append((e.tag, (e.findtext(q("hp", "script")) or "").strip(), pos.get("vertOffset"), pos.get("horzOffset")))
+    return out
+
+
 def _bin_hashes(doc: HwpxDocument) -> dict[str, str]:
     """BinData id → 내용 sha1 — 그림이 바뀌었는지 견준다."""
     out = {}
@@ -167,6 +178,8 @@ def apply_patch(old: HwpxDocument, new: HwpxDocument, kit: Kit) -> list[str]:
         if len(ua) != len(ub):
             raise NeedsRebuild(f"{k}번 문단 수 {len(ua)} ≠ {len(ub)}")
         for j, (x, y) in enumerate(zip(ua, ub)):
+            if _overlays(x) != _overlays(y):
+                raise NeedsRebuild(f"{k}번 그림 위 얹기(글자·점)가 바뀌었다")
             if re.sub(r"\s", "", para_text(x)) == re.sub(r"\s", "", para_text(y)):
                 continue
             if any(r.find(q("hp", t)) is not None for r in x.findall(q("hp", "run")) for t in ("tbl", "pic")):
