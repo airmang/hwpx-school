@@ -67,7 +67,7 @@ def hancom_windows_pdf(pdf: Path) -> bool:
 _잉크 = bytes(1 if v < 128 else 0 for v in range(256))  # 회색 픽셀 → 잉크(1)·바탕(0). 노란 형광펜(밝기 약 226)은 바탕
 _잉크_배율 = 4.0  # 288dpi — 잉크 상자의 눈금 0.25pt
 _글자_캐시: dict[tuple, tuple[list, list]] = {}
-_수식_글꼴 = "hyhwpeq"  # 한/글 수식 글꼴 HyhwpEQ — PDF 텍스트 층 span 글꼴 이름(부분 집합 접두 `ABCDEF+`는 뗀 것)
+_수식_글꼴 = ("hyhwpeq", "hancomeqn")  # 한/글 수식 글꼴 HyhwpEQ·HancomEQN — PDF 텍스트 층 span 글꼴 이름(부분 집합 접두 `ABCDEF+`는 뗀 것)
 
 
 def _수식_글꼴인가(font: str) -> bool:

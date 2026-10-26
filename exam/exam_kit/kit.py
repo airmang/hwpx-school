@@ -90,7 +90,7 @@ class Kit:
     leftover_prefix: str            # 마지막 문항과 꼬리 사이에서 지울 안내 줄의 머리
     boxes: dict                     # 견본 박스 {"보기"|"자료": title·title_match·shape·cells·content_cell·rails·style}
     set_marker: dict                # 세트 표지 견본 run: pattern(정규식)·char_height·bold
-    typeset: dict                   # 조판 관례: score_suffix·set_head(format 문자열)·text_replace·grayscale_pictures
+    typeset: dict                   # 조판 관례: score_suffix·set_head(format 문자열)·text_replace·grayscale_pictures·equation_font(선택)
     metrics: Metrics                # 본문 글자·줄 치수
     front_matter: dict              # 원고 머리 키: {"required": [...], "optional": [...]}
     text_slots: list                # 글자 자리 슬롯(누름틀 없는 양식): [{name, where, find, fill, (each, join, read)}]

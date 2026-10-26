@@ -344,3 +344,18 @@ def test_얹은_글자가_그림_선과_겹치면_알린다(tmp_path, x, clash):
     fill_slots(doc, kit, s.front, question_count=1, total_points=5.0)
     notes = compose(doc, s, kit, answer_key=False, image_root=tmp_path).notes
     assert any("[글자·선 겹침]" in n for n in notes) == clash
+
+
+def test_수식_글꼴은_킷_값_없으면_HancomEQN(조판, tmp_path):
+    """교사 원안지 수식은 HancomEQN(실측 250개) — python-hwpx 기본 HYhwpEQ는 더 가늘어 달라 보였다(10-26 owner)."""
+    import dataclasses
+
+    _, _, doc, _ = 조판
+    fonts = {e.get("font") for e in doc.sections[0].element.iter(q("hp", "equation"))}
+    assert fonts == {"HancomEQN"}
+    kit = load_kit(킷)
+    kit = dataclasses.replace(kit, typeset={**kit.typeset, "equation_font": "HYhwpEQ"})
+    src = rebuild(_md(), kit, 서식, 픽스처, tmp_path / "y.hwpx")
+    from hwpx.document import HwpxDocument
+
+    assert {e.get("font") for e in HwpxDocument.open(str(src)).sections[0].element.iter(q("hp", "equation"))} == {"HYhwpEQ"}

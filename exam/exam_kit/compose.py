@@ -89,6 +89,8 @@ CM = 72000 / 25.4  # 1 cm = 2834.6 HWPUNIT
 발문_이음_왼여백 = 1680  # 발문 둘째 줄부터의 자리(렌더 실측: 발문 이음 줄 첫 글리프 dx 17.3~17.8pt, 1770이면 참고 줄이 0.9pt 오른쪽) — 〈보기〉 뒤 참고 줄을 여기에 맞춘다
 그림_DPI = 300      # 그림 원래 크기 = 원본 px ÷ 300dpi(인쇄 규격, Task 30) — 원고 폭이 이보다 작으면 줄여 넣는 것
 점_지름 = 340       # 그림 위에 얹는 점(●) 지름 HWPUNIT(3.4pt ≈ 1.2mm) — 기하 원안지 그림의 점(선과 겹치지 않은 것) 실측
+수식_글꼴 = "HancomEQN"  # 킷 typeset.equation_font가 없을 때 — 한/글 기본 수식 글꼴. 교사 원안지 실측(10-26): 기하 원안지
+                        # 수식 230개·답변 파일 20개 모두 HancomEQN. python-hwpx add_equation은 HYhwpEQ를 적는다(더 가늘다 — owner 지적)
 겹침_비율 = 0.02    # 얹은 글자 자리 밑 그림의 어두운 점(L < 110) 비율이 이보다 크면 글자가 그림 선과 겹친다 — 교사 예시 문항
                     # 실측(10-26): 제자리 9개 모두 0.000, 0.30cm 밀린 E·H·2는 0.062~0.188
 
@@ -662,6 +664,13 @@ class _Composer:
             raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
         return p
 
+    def _수식(self, p, script: str, cp: str) -> ET._Element:
+        """문단 끝에 한/글 수식 run을 붙인다(공개 API add_equation) — 그 자리 글자 크기, 글꼴은 킷 typeset.equation_font
+        (없으면 수식_글꼴). 수식 요소를 돌려준다."""
+        el = p.add_equation(script, base_unit=self.글자_크기(cp), char_pr_id_ref=cp).element
+        el.set("font", self.kit.typeset.get("equation_font", 수식_글꼴))
+        return el
+
     def 글자_크기(self, cp: str) -> int:
         """charPr의 글자 크기(height, HWPUNIT) — 수식 기준 크기(baseUnit)로 쓴다(한/글도 넣는 자리의 글자 크기로 만든다)."""
         el = self.header.element.find(f".//{q('hh', 'charPr')}[@id='{cp}']")
@@ -673,7 +682,7 @@ class _Composer:
         """칸 안 문단에 넣을 수식 run — 임시 문단에 공개 API(add_equation)로 만들고 떼어 낸다(그림 _pic_element와 같은 방식)."""
         sec = self.doc.sections[0]
         tmp = sec.add_paragraph("")
-        tmp.add_equation(m.script, base_unit=self.글자_크기(cp), char_pr_id_ref=cp)
+        self._수식(tmp, m.script, cp)
         run = tmp.element.findall(q("hp", "run"))[-1]
         tmp.element.remove(run)
         sec.remove_paragraph(tmp)
@@ -1102,7 +1111,7 @@ class _Composer:
         mark, tabs = spec.mark, iter(spec.tabs)
         for text, c in spec.segs:
             if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
-                p.add_equation(text.script, base_unit=self.글자_크기(c or cp), char_pr_id_ref=c or cp)
+                self._수식(p, text.script, c or cp)
                 continue
             run = ET.SubElement(p.element, q("hp", "run"), {"charPrIDRef": c or cp})
             mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
@@ -1177,7 +1186,7 @@ class _Composer:
             if o.kind == "점":
                 el = p.add_ellipse(점_지름, 점_지름, line_color="#000000", fill_color="#000000", treat_as_char=False).element
             else:
-                el = p.add_equation(equation.to_script(o.latex), base_unit=self.글자_크기(cp), char_pr_id_ref=cp).element
+                el = self._수식(p, equation.to_script(o.latex), cp)
             om = el.find(q("hp", "outMargin"))
             ol, ot = (int(om.get("left") or 0), int(om.get("top") or 0)) if om is not None else (0, 0)
             left, top = cx - bw // 2, cy - bh // 2
