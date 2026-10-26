@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .equation import MathError, mask, split_pipes, without_math
-from .scan import IMG_RE, Scan, scan_markdown
+from .scan import IMG_RE, OVERLAY_RE, Scan, figure_parts, scan_markdown
 
 원문자 = "①②③④⑤"
 
@@ -349,6 +349,8 @@ def rule_E025(s: Scan) -> list[Violation]:
             if b.kind in ("코드", "그림", "답항표"):  # 답항표 줄은 답지로 본다
                 if b.kind == "답항표":
                     out += [(b.line_no, h) for h in b.attrs.get("머리") or []]
+                if b.kind == "그림":  # 그림 위에 얹는 글자도 한/글 수식이다
+                    out += [(b.line_no, f"${o.latex}$") for o in figure_parts(b)[1] if o.kind == "글자"]
                 continue
             out += [(b.line_no, ln) for ln in _글_줄(b.lines) if not IMG_RE.match(ln.strip())]
         return out
@@ -370,8 +372,44 @@ def rule_E025(s: Scan) -> list[Violation]:
     return out
 
 
+def rule_E027(s: Scan) -> list[Violation]:
+    """그림 위 얹기(`:::그림` 펜스 안 `$…$ {x=…cm y=…cm}`·`● {…}`): 펜스에 그림 줄이 꼭 하나, 나머지는 얹기 줄. 글자는 수식
+    하나. 얹기 줄은 `:::그림` 펜스 안에만 — 자료 박스 안 그림에는 아직 얹지 않고, 펜스 밖의 얹기 줄은 발문 글이 되어 버린다."""
+    out = []
+    owners = [(f"{q.number}번", q.blocks, [(q.line_no, ln) for ln in q.stem]) for q in s.questions]
+    owners += [(f"세트 {a}~{b}", st.blocks, [(st.line_no, ln) for ln in st.passage]) for st in s.sets for a, b in [st.rng]]
+    for name, blocks, texts in owners:
+        for b in blocks:
+            if b.kind == "그림" and b.attrs.get("src") is None:
+                pics, overlays, bad = figure_parts(b)
+                if len(pics) != 1:
+                    out.append(_v("E027", b.line_no, f"{name} :::그림 펜스에 그림 줄이 {len(pics)}개 — 하나만 둔다"))
+                out += [_v("E027", b.line_no, f"{name} :::그림 안의 모르는 줄 {t[:24]!r} — 그림 줄 또는 "
+                                              "`$…$ {x=…cm y=…cm}`·`● {x=…cm y=…cm}`") for t in bad]
+                out += [_v("E027", b.line_no, f"{name} 얹는 글자 ${o.latex}$ — 수식 하나만 쓴다")
+                        for o in overlays
+                        if o.kind == "글자" and _수식_하나(o.latex) and len(mask(f"${o.latex}$")[1]) != 1]
+            elif b.kind == "자료":
+                out += [_v("E027", b.line_no, f"{name} 자료 박스 안 그림에는 아직 얹지 않는다: {ln.strip()[:24]!r}")
+                        for ln in b.lines if OVERLAY_RE.match(ln.strip())]
+            elif b.kind == "주":
+                texts += [(b.line_no, ln) for ln in b.lines]
+        out += [_v("E027", n, f"{name} 그림 위 얹기 줄이 :::그림 펜스 밖에 있다: {t.strip()[:24]!r}")
+                for n, t in texts if OVERLAY_RE.match(t.strip())]
+    return out
+
+
+def _수식_하나(latex: str) -> bool:
+    """mask가 표기 오류 없이 도는가 — 표기 오류는 E025가 알린다(여기서 겹쳐 알리지 않는다)."""
+    try:
+        mask(f"${latex}$")
+        return True
+    except MathError:
+        return False
+
+
 ENGINE_RULES = [rule_E001, rule_E002, rule_E003, rule_E004, rule_E005, rule_E006, rule_E009, rule_E011, rule_E021, rule_E024,
-                rule_E025]
+                rule_E025, rule_E027]
 SCHOOL_RULES = {"W003": rule_W003, "E007": rule_E007, "E008": rule_E008, "E012": rule_E012, "E013": rule_E013,
                 "E014": rule_E014, "E015": rule_E015, "E016": rule_E016, "E017": rule_E017, "E018": rule_E018,
                 "W019": rule_W019, "W020": rule_W020}

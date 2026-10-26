@@ -39,7 +39,7 @@ except ImportError:  # 옮겨졌으면 임시 문단의 add_picture로 만든다
 from . import HP, equation, preserve, q
 from .kit import Kit, Metrics, style_ids
 from .prepare import _top_tables, is_sample_box
-from .scan import IMG_RE, TABLE_ROW_RE, Block, Question, QuestionSet, Scan, img_attrs
+from .scan import IMG_RE, OVERLAY_RE, TABLE_ROW_RE, Block, Overlay, Question, QuestionSet, Scan, figure_parts, img_attrs
 from .verify import question_heads
 
 형광 = "#FFFF00"
@@ -88,6 +88,7 @@ def box_kind(kit: Kit, block: Block) -> str:
 CM = 72000 / 25.4  # 1 cm = 2834.6 HWPUNIT
 발문_이음_왼여백 = 1680  # 발문 둘째 줄부터의 자리(렌더 실측: 발문 이음 줄 첫 글리프 dx 17.3~17.8pt, 1770이면 참고 줄이 0.9pt 오른쪽) — 〈보기〉 뒤 참고 줄을 여기에 맞춘다
 그림_DPI = 300      # 그림 원래 크기 = 원본 px ÷ 300dpi(인쇄 규격, Task 30) — 원고 폭이 이보다 작으면 줄여 넣는 것
+점_지름 = 340       # 그림 위에 얹는 점(●) 지름 HWPUNIT(3.4pt ≈ 1.2mm) — 기하 원안지 그림의 점(선과 겹치지 않은 것) 실측
 
 
 _언어_키 = {"HANGUL": "hangul", "LATIN": "latin", "HANJA": "hanja", "JAPANESE": "japanese", "OTHER": "other",
@@ -386,6 +387,8 @@ class _Para:
     align: str | None = None  # 문단 정렬을 바꿀 때만(그림은 가운데)
     tabs: list[int] = field(default_factory=list)  # segs 속 \t마다 hp:tab width(추정 — 한글이 다시 잰다)
     left: int | None = None  # 왼여백을 바꿀 때만(〈보기〉 뒤 참고 줄 — 발문 이음 줄 자리)
+    overlays: list[Overlay] = field(default_factory=list)  # obj(그림) 위에 얹을 글자·점 — 같은 문단에 떠 있는 개체로
+    room: tuple[int, int] = (0, 0)  # 얹은 글자가 그림 위·아래로 나가는 만큼 문단 위·아래 간격을 더한다(HWPUNIT)
 
 
 def _body_region(doc: HwpxDocument, kit: Kit) -> tuple[int, int]:
@@ -450,15 +453,20 @@ class _Composer:
 
     # ---- 서식 파생 -----------------------------------------------------------
 
-    def para_pr(self, role: str, *, keep: bool, gap: bool, align: str | None = None, left: int | None = None) -> str:
+    def para_pr(self, role: str, *, keep: bool, gap: bool, align: str | None = None, left: int | None = None,
+                room: tuple[int, int] = (0, 0)) -> str:
         """역할 스타일 paraPr의 복제 — keepWithNext=keep, keepLines=1, gap이면 prev = question_gap(case)·2배(default).
 
-        1행답항은 한 번에 균등 칸 탭(tab_pr)도 단다 — 양식의 1행답항 문단·스타일은 그대로.
+        1행답항은 한 번에 균등 칸 탭(tab_pr)도 단다 — 양식의 1행답항 문단·스타일은 그대로. room = (위, 아래) 더 띄울 간격
+        (그림 위에 얹은 글자가 그림 밖으로 나가는 만큼 — 위·아래 문단 글과 겹치지 않게).
         """
-        key = (role, keep, gap, align, left)
+        key = (role, keep, gap, align, left, room)
         if key in self._pp:
             return self._pp[key]
         margins = {"left": left} if left is not None else None
+        if room != (0, 0):
+            base = self._margins(role)
+            margins = {**(margins or {}), "prev": base.get("prev", 0) + room[0], "next": base.get("next", 0) + room[1]}
         if role == "number" and self.kit.typeset.get("stem_hanging") == "space":
             # 발문이 다음 줄로 넘어가면 번호 자릿수와 무관하게 공백 한 칸만 들여 쓴다(학교 B 결정표 6) — 첫 줄은 그대로.
             # 한글 문단: 왼여백은 모든 줄, 음수 intent(내어쓰기)는 둘째 줄부터 |intent|만큼 더 들어간다(09-29 렌더 실측)
@@ -948,10 +956,17 @@ class _Composer:
             elif b.kind == "그림":
                 at = _picture_attrs(b)
                 pic = self.picture(b, self.kit.columns["width"])
+                over = figure_parts(b)[1] if b.attrs.get("src") is None else []  # 얹을 것은 `:::그림` 펜스에만
+                room = self._overlay_room(pic, over)
+                if over:  # [의미] — 엔진은 원고 좌표대로 얹을 뿐, 자리가 맞는지·그림 속 길이 표시는 사람이 본다
+                    n_dot = sum(o.kind == "점" for o in over)
+                    self.notes.append(f"{where} 그림 위 얹기(글자 {len(over) - n_dot}·점 {n_dot}): 글자·점이 꼭짓점·선분 "
+                                      "자리에 앉았는지, 그림 속 길이가 점선 호 + 숫자인지 렌더에서 사람이 본다")
                 if at["align"] == "left":  # 단 왼쪽(+ 띄움) — 글자처럼 취급한 그림을 왼쪽 정렬 문단에, 띄움은 문단 왼여백
-                    out.append(_Para("normal", [("", None)], obj=pic, align="LEFT", left=round(at["indent_cm"] * CM)))
+                    out.append(_Para("normal", [("", None)], obj=pic, align="LEFT", left=round(at["indent_cm"] * CM),
+                                     overlays=over, room=room))
                 else:
-                    out.append(_Para("normal", [("", None)], obj=pic, align="CENTER"))
+                    out.append(_Para("normal", [("", None)], obj=pic, align="CENTER", overlays=over, room=room))
             elif b.kind == "코드":  # 문항·세트의 코드 블록 — 줄마다 고정폭·왼쪽 정렬 문단(Task 30)
                 cp = self.code_char_pr("normal")
                 out += [_Para("normal", [(ln.replace("\t", "    "), cp)], align="LEFT") for ln in b.lines]
@@ -1072,7 +1087,7 @@ class _Composer:
 
     def materialize(self, spec: _Para):
         sid, _, cp = self.style[spec.role]
-        pid = self.para_pr(spec.role, keep=spec.keep, gap=spec.gap, align=spec.align, left=spec.left)
+        pid = self.para_pr(spec.role, keep=spec.keep, gap=spec.gap, align=spec.align, left=spec.left, room=spec.room)
         sec = self.doc.sections[0]
         p = sec.add_paragraph("", para_pr_id_ref=pid, style_id_ref=sid, char_pr_id_ref=cp, inherit_style=False)
         if spec.brk:
@@ -1091,7 +1106,63 @@ class _Composer:
             raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
         if spec.obj is not None:
             p.element.find(q("hp", "run")).insert(0, spec.obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
+        if spec.overlays:
+            self._overlay(p, pid, spec.obj, spec.overlays)
         return p
+
+    def _overlay_box(self, o: Overlay) -> tuple[int, int]:
+        """얹을 것의 상자 (폭, 높이) HWPUNIT — 점은 점_지름, 글자는 발문 수식 크기의 수식 상자."""
+        if o.kind == "점":
+            return 점_지름, 점_지름
+        return equation.box(equation.to_script(o.latex), self.글자_크기(self.style["number"][2]))
+
+    def _overlay_room(self, pic: ET._Element, overlays: list[Overlay]) -> tuple[int, int]:
+        """얹은 것이 그림 위끝보다 위로, 아래끝보다 아래로 나가는 만큼(HWPUNIT). 한/글은 문단 기준 음수 세로 오프셋을 0으로
+        자른다(실한컴 렌더 10-26: 그림 위로 0.3cm 나간 글자가 문단 위끝에 붙었다) — 위로 나가는 만큼 문단 앞 간격을 둔다."""
+        h = int(pic.find(q("hp", "sz")).get("height"))
+        above = below = 0
+        for o in overlays:
+            bh = self._overlay_box(o)[1]
+            cy = round(o.y_cm * CM)
+            above, below = max(above, bh // 2 - cy), max(below, cy + (bh - bh // 2) - h)
+        return max(0, above), max(0, below)
+
+    def _overlay(self, p, pid: str, pic: ET._Element, overlays: list[Overlay]) -> None:
+        """그림 위에 글자(한/글 수식)·점(채운 원)을 같은 문단의 떠 있는 개체로 얹는다 — 교사가 한/글에서 얹는 방식 그대로
+        (10-26 수학 교사 답: 글자를 지운 그림 + 문제와 같은 글꼴·크기의 수식, 점도 따로).
+
+        자리: 개체는 문단 기준(vertRelTo=PARA) 세로, 단 기준(COLUMN) 가로다. 문단 기준 세로 원점은 문단 앞 간격(prev)
+        **위**이고, 글자처럼 취급한 그림 혼자인 문단에서 그림 위끝은 원점 + prev다. 가운데 문단의 그림 왼끝은 줄 시작 +
+        (줄 폭 − 그림 폭) / 2(실한컴 렌더 실측 10-26: 원점·그림 위끝 오차 0.2pt 안). 원고 좌표는 그림 왼쪽 위에서 잰
+        얹을 것의 중심이다. 수식 글자는 상자 + 바깥 여백 안쪽에 찍힌다(hp:outMargin)."""
+        pp = self.header.element.find(f".//{q('hh', 'paraPr')}[@id='{pid}']")
+        mg = pp.find(f"{q('hp', 'switch')}/{q('hp', 'case')}/{q('hh', 'margin')}")
+        mg = pp.find(q("hh", "margin")) if mg is None else mg
+        m = {c.tag.split("}")[1]: int(c.get("value")) for c in mg}
+        w = int(pic.find(q("hp", "sz")).get("width"))
+        start = m.get("left", 0) + m.get("intent", 0)
+        line_w = self.kit.columns["width"] - m.get("left", 0) - m.get("right", 0) - m.get("intent", 0)
+        center = pp.find(q("hh", "align")).get("horizontal") == "CENTER"
+        x0, y0 = start + ((line_w - w) // 2 if center else 0), m.get("prev", 0)
+        cp = self.style["number"][2]  # 발문 수식과 같은 글자 크기(발문 = 문항 번호 스타일 문단)
+        for o in overlays:
+            cx, cy = x0 + round(o.x_cm * CM), y0 + round(o.y_cm * CM)
+            bw, bh = self._overlay_box(o)
+            if o.kind == "점":
+                el = p.add_ellipse(점_지름, 점_지름, line_color="#000000", fill_color="#000000", treat_as_char=False).element
+            else:
+                el = p.add_equation(equation.to_script(o.latex), base_unit=self.글자_크기(cp), char_pr_id_ref=cp).element
+            om = el.find(q("hp", "outMargin"))
+            ol, ot = (int(om.get("left") or 0), int(om.get("top") or 0)) if om is not None else (0, 0)
+            left, top = cx - bw // 2, cy - bh // 2
+            if left < 0 or left + bw > self.kit.columns["width"]:
+                what = "점" if o.kind == "점" else f"${o.latex}$"
+                raise ValueError(f"그림 위 {what} {{x={o.x_cm}cm y={o.y_cm}cm}}이 단 밖으로 나간다 — 좌표를 고친다")
+            el.set("textWrap", "IN_FRONT_OF_TEXT")
+            el.find(q("hp", "pos")).attrib.update({
+                "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
+                "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
+                "vertOffset": str(top - ot), "horzOffset": str(left - ol)})
 
 
 _낱말 = re.compile(r"((?:__.+?__|[^\s_]|_(?!_))+)(\s*)")  # 낱말 = 공백 없는 덩어리, 밑줄 `__…__`은 공백이 있어도 한 덩어리
@@ -1172,6 +1243,8 @@ def _box_parts(block: Block) -> list[tuple[str, object]]:
             if m.group("align") or m.group("indent"):  # 박스 안 그림은 칸 가운데 — 단 왼쪽 정렬은 문항 블록 그림만
                 raise ValueError(f"L{block.line_no} 박스 안 그림 {m.group('src')}에 align·indent를 쓸 수 없다(칸 가운데)")
             out.append(("그림", Block("그림", (ln,), img_attrs(m), block.line_no)))
+        elif OVERLAY_RE.match(ln):  # 박스 안 그림에는 아직 얹지 않는다(원고 규칙 E027) — 글로 찍히게 두지 않는다
+            raise ValueError(f"L{block.line_no} :::{block.kind} 안의 그림 위 얹기 줄 {ln[:24]!r} — 박스 안 그림에는 아직 얹지 않는다")
         elif ln:
             out.append(("글", ln))
     if code is not None:
