@@ -314,7 +314,7 @@ def test_붙은_rm은_문서에_띄워_쓰고_원고에_붙여_쓴다():
 
     assert equation.to_script("rmA") == "rm A"
     assert equation.box("rm A", 1100)[0] < equation.box("rmA", 1100)[0] / 2
-    for doc in ("rm A", "rmA", "rm BED", "rm A ( - 1 , 0 )"):
+    for doc in ("rm A", "rmA", "rm PQR", "rm K ( 7 , - 2 )"):
         latex = eqedit_to_latex(equation.glued(doc))
         assert equation.to_script(latex) == equation.spaced(doc)  # 고정점
     assert equation.spaced("5 rm cm") == "5 rm cm"  # 소문자 단위는 그대로
