@@ -223,8 +223,8 @@ def test_교사식_배치_그림과_다른_문단의_글자():
     _attach([fig], floats, geo)
     cm = lambda v: round(v / CM, 2)  # noqa: E731
     assert fig.overlays == [
-        Overlay("글자", "rm P", cm(13000 + 56 + 400 - 10000), cm(700 + 550 - 1500)),
-        Overlay("글자", "rm Q", cm(16000 + 56 + 400 - 10000), cm(1800 + 1500 + 550 - 1500)),
+        Overlay("글자", "rmP", cm(13000 + 56 + 400 - 10000), cm(700 + 550 - 1500)),
+        Overlay("글자", "rmQ", cm(16000 + 56 + 400 - 10000), cm(1800 + 1500 + 550 - 1500)),
         Overlay("점", None, cm(12000 + 150 - 10000), cm(1800 + 200 + 150 - 1500)),
     ]
     assert fig.md()[0] == ":::그림" and fig.md()[-1] == ":::"
@@ -301,3 +301,46 @@ def test_렌더_얹은_자리(조판, 오라클, tmp_path):
             for d in page.get_drawings() if d.get("fill") is not None and 2 < d["rect"].width < 5]
     for (wx, wy), found in [((0, -0.2), glyphs), ((6, 3.6), glyphs), ((3, 1.8), glyphs), ((1.5, 1.0), dots)]:
         assert any(abs(gx - wx) < 0.05 and abs(gy - wy) < 0.05 for gx, gy in found), ((wx, wy), found)
+
+
+# --- 붙은 글꼴 명령(rmA)·겹침 --------------------------------------------------------
+
+
+def test_붙은_rm은_문서에_띄워_쓰고_원고에_붙여_쓴다():
+    """교사 원안지의 점 이름 `rmA`: python-hwpx 폭 어림은 r·m·A 세 글자로 읽어 세 배 넓게 잡는다 — 그 상자 가운데에 놓은 글자가
+    0.30cm 밀렸다(10-26 렌더). 문서에는 `rm A`(폭이 맞는다), 원고 LaTeX에는 `rmA`(띄운 `rm A`는 되돌리면 글자 rm이 찍힌다)."""
+    from exam_kit import equation
+    from hwpx.equation import eqedit_to_latex
+
+    assert equation.to_script("rmA") == "rm A"
+    assert equation.box("rm A", 1100)[0] < equation.box("rmA", 1100)[0] / 2
+    for doc in ("rm A", "rmA", "rm BED", "rm A ( - 1 , 0 )"):
+        latex = eqedit_to_latex(equation.glued(doc))
+        assert equation.to_script(latex) == equation.spaced(doc)  # 고정점
+    assert equation.spaced("5 rm cm") == "5 rm cm"  # 소문자 단위는 그대로
+
+
+def test_역변환_얹은_rmA는_원고에_붙은_꼴로():
+    p = _xml(f'<hp:run>{_eq("rm C", 0, 100)}</hp:run>')
+    gp = {"0": {"align": "JUSTIFY", "left": 0, "right": 0, "intent": 0, "prev": 0}}
+    ov = _float_item(floats_in(p)[0], 0, p, Geometry(30000, gp, [None]))[0]
+    assert ov.latex == "rmC"
+
+
+@pytest.mark.parametrize("x, clash", [(3.0, True), (1.0, False)])
+def test_얹은_글자가_그림_선과_겹치면_알린다(tmp_path, x, clash):
+    from PIL import Image, ImageDraw
+
+    im = Image.new("L", (600, 360), 255)
+    ImageDraw.Draw(im).line([(300, 0), (300, 359)], fill=0, width=4)  # 가운데(3cm) 세로선
+    im.save(tmp_path / "그림.png")
+    kit = load_kit(킷)
+    s = scan_markdown(_md([f"$\\mathrm{{E}}$ {{x={x}cm y=1.8cm}}"]), kit.front_matter)
+    from exam_kit.compose import compose
+    from exam_kit.prepare import prepare_document
+    from exam_kit.slots import fill_slots
+
+    doc, _ = prepare_document(서식, kit)
+    fill_slots(doc, kit, s.front, question_count=1, total_points=5.0)
+    notes = compose(doc, s, kit, answer_key=False, image_root=tmp_path).notes
+    assert any("[글자·선 겹침]" in n for n in notes) == clash

@@ -119,7 +119,7 @@ def _수식_원고(eq) -> str:
     """hp:equation → 원고 수식 `$LaTeX$`(hwpx.equation.eqedit_to_latex). 되돌린 LaTeX가 다시 한/글 수식으로 바뀌지 않으면
     (조판할 수 없는 원고가 되면) 오류."""
     s = eq.find(q("hp", "script"))
-    script = "" if s is None else (s.text or "").strip()
+    script = equation.glued("" if s is None else (s.text or "").strip())  # `rm A` → `rmA`(equation.glued)
     if not script:
         raise ValueError("빈 수식(hp:script 없음) — 역변환하지 않는다")
     try:

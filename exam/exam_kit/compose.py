@@ -89,6 +89,8 @@ CM = 72000 / 25.4  # 1 cm = 2834.6 HWPUNIT
 발문_이음_왼여백 = 1680  # 발문 둘째 줄부터의 자리(렌더 실측: 발문 이음 줄 첫 글리프 dx 17.3~17.8pt, 1770이면 참고 줄이 0.9pt 오른쪽) — 〈보기〉 뒤 참고 줄을 여기에 맞춘다
 그림_DPI = 300      # 그림 원래 크기 = 원본 px ÷ 300dpi(인쇄 규격, Task 30) — 원고 폭이 이보다 작으면 줄여 넣는 것
 점_지름 = 340       # 그림 위에 얹는 점(●) 지름 HWPUNIT(3.4pt ≈ 1.2mm) — 기하 원안지 그림의 점(선과 겹치지 않은 것) 실측
+겹침_비율 = 0.02    # 얹은 글자 자리 밑 그림의 어두운 점(L < 110) 비율이 이보다 크면 글자가 그림 선과 겹친다 — 교사 예시 문항
+                    # 실측(10-26): 제자리 9개 모두 0.000, 0.30cm 밀린 E·H·2는 0.062~0.188
 
 
 _언어_키 = {"HANGUL": "hangul", "LATIN": "latin", "HANJA": "hanja", "JAPANESE": "japanese", "OTHER": "other",
@@ -959,6 +961,8 @@ class _Composer:
                 over = figure_parts(b)[1] if b.attrs.get("src") is None else []  # 얹을 것은 `:::그림` 펜스에만
                 room = self._overlay_room(pic, over)
                 if over:  # [의미] — 엔진은 원고 좌표대로 얹을 뿐, 자리가 맞는지·그림 속 길이 표시는 사람이 본다
+                    self.notes += [f"[글자·선 겹침] {where} 그림 위 {t} — 그림의 선·글자와 겹친다. 좌표를 옮긴다"
+                                   for t in self._overlay_clash(at, over)]
                     n_dot = sum(o.kind == "점" for o in over)
                     self.notes.append(f"{where} 그림 위 얹기(글자 {len(over) - n_dot}·점 {n_dot}): 글자·점이 꼭짓점·선분 "
                                       "자리에 앉았는지, 그림 속 길이가 점선 호 + 숫자인지 렌더에서 사람이 본다")
@@ -1115,6 +1119,28 @@ class _Composer:
         if o.kind == "점":
             return 점_지름, 점_지름
         return equation.box(equation.to_script(o.latex), self.글자_크기(self.style["number"][2]))
+
+    def _overlay_clash(self, at: dict, overlays: list[Overlay]) -> list[str]:
+        """얹은 글자 중 그림의 선·글자와 겹치는 것 — 글자 자리(수식 상자 가운데 폭 80%·높이 60%, 글자 모양이 찍히는 곳) 밑
+        원본 그림 픽셀의 어두운 점 비율이 겹침_비율보다 크면. [기계] 픽셀 셈이다(겹쳐도 되는지는 보지 않는다)."""
+        with Image.open(Path(self.image_root) / at["src"]) as src:
+            im = ImageOps.exif_transpose(src).convert("L")
+        wcm = at["width_cm"]
+        hcm = wcm * im.height / im.width
+        out = []
+        for o in overlays:
+            if o.kind == "점":
+                continue
+            bw, bh = (v / CM for v in self._overlay_box(o))
+            x0, x1 = (o.x_cm - bw * 0.4) / wcm * im.width, (o.x_cm + bw * 0.4) / wcm * im.width
+            y0, y1 = (o.y_cm - bh * 0.3) / hcm * im.height, (o.y_cm + bh * 0.3) / hcm * im.height
+            box = (max(0, round(x0)), max(0, round(y0)), min(im.width, round(x1)), min(im.height, round(y1)))
+            if box[2] <= box[0] or box[3] <= box[1]:
+                continue  # 그림 밖 — 겹칠 것이 없다
+            hist = im.crop(box).histogram()
+            if sum(hist[:110]) / max(1, sum(hist)) > 겹침_비율:
+                out.append(f"${o.latex}$ {{x={o.x_cm}cm y={o.y_cm}cm}}")
+        return out
 
     def _overlay_room(self, pic: ET._Element, overlays: list[Overlay]) -> tuple[int, int]:
         """얹은 것이 그림 위끝보다 위로, 아래끝보다 아래로 나가는 만큼(HWPUNIT). 한/글은 문단 기준 음수 세로 오프셋을 0으로

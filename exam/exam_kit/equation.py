@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -40,11 +41,30 @@ class Math:
         return f"${self.latex}$"
 
 
+# 한/글 수식의 글꼴 명령 rm + 대문자(점 이름). 한/글은 `rmA`·`rm A` 둘 다 정자 A로 찍는다(교사 원안지 실물). python-hwpx 6.8.0은
+# 두 꼴을 다르게 다룬다 — 폭 어림은 붙은 꼴을 한 낱말(r·m·A)로 읽어 세 배쯤 넓게 잡고(`rmA` 2431 vs 한/글 825 HWPUNIT: 그림
+# 위 점 이름이 0.30cm 밀렸다, 10-26 렌더), LaTeX 되돌림은 rm을 옮기지 않아 띄운 꼴은 `rm A` → 다시 한/글 수식 `"rm" A`(글자
+# rm이 찍힌다)가 된다. 그래서 문서에는 띄운 꼴(spaced — 폭이 맞는다), 원고 LaTeX에는 붙은 꼴(glued — 그대로 왕복한다)을 쓴다.
+# 상류가 rm을 \mathrm으로 옮기면 걷는다.
+_붙은_rm = re.compile(r"(?<![A-Za-z])rm(?=[A-Z])")
+_띄운_rm = re.compile(r"(?<![A-Za-z])rm\s+(?=[A-Z])")
+
+
+def spaced(script: str) -> str:
+    """한/글 수식 문자열의 붙은 글꼴 명령을 띄운다(`rmA` → `rm A`) — 한/글 렌더는 같고 폭 어림이 맞는다."""
+    return _붙은_rm.sub("rm ", script)
+
+
+def glued(script: str) -> str:
+    """띄운 글꼴 명령을 붙인다(`rm A` → `rmA`) — 원고 LaTeX로 되돌릴 때. 되돌린 `rmA`는 다시 `rmA`로 바뀐다(왕복)."""
+    return _띄운_rm.sub("rm", script)
+
+
 @lru_cache(maxsize=4096)
 def to_script(latex: str) -> str:
     """LaTeX → 한/글 수식 문자열. 바꿀 수 없으면 MathError(변환기 까닭을 붙인다)."""
     try:
-        return latex_to_eqedit(latex)
+        return spaced(latex_to_eqedit(latex))
     except EquationConversionError as e:  # UnsupportedLatexError도 이 갈래다
         raise MathError(f"한/글 수식으로 바꿀 수 없다 ${latex}$ — {e}") from e
 
