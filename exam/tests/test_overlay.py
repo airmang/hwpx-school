@@ -359,3 +359,31 @@ def test_수식_글꼴은_킷_값_없으면_HancomEQN(조판, tmp_path):
     from hwpx.document import HwpxDocument
 
     assert {e.get("font") for e in HwpxDocument.open(str(src)).sections[0].element.iter(q("hp", "equation"))} == {"HYhwpEQ"}
+
+
+def _발문_문단_모양(kit, tmp_path, name="x.hwpx"):
+    from hwpx.document import HwpxDocument
+    from exam_kit.kit import style_ids
+
+    src = rebuild(_md(), kit, 서식, 픽스처, tmp_path / name)
+    doc = HwpxDocument.open(str(src))
+    sid = style_ids(doc)
+    pp = {e.get("id"): e for e in doc.oxml.headers[0].element.iter(q("hh", "paraPr"))}
+    def 모양(style):
+        return {(pp[p.element.get("paraPrIDRef")].find(q("hh", "align")).get("horizontal"),
+                 pp[p.element.get("paraPrIDRef")].find(q("hh", "breakSetting")).get("breakNonLatinWord"))
+                for p in doc.sections[0].paragraphs if p.element.get("styleIDRef") == sid[kit.styles[style]][0]}
+    return 모양("number"), 모양("choice2") | 모양("choice3") | 모양("choice5") | 모양("choice1")
+
+
+def test_발문_왼쪽_어절은_습관값으로(tmp_path):
+    """10-27 수학 교사: 문제는 왼쪽 정렬, 줄 나눔 기준 어절 — 습관 stem_align·stem_word_break. 답지는 양식 그대로, 키가 없으면
+    발문도 양식 그대로."""
+    import dataclasses
+
+    kit = load_kit(킷)
+    base_stem, base_choice = _발문_문단_모양(kit, tmp_path, "a.hwpx")
+    stem, choice = _발문_문단_모양(dataclasses.replace(kit, stem_align="LEFT", stem_word_break="어절"), tmp_path, "b.hwpx")
+    assert stem == {("LEFT", "BREAK_WORD")}  # 한/글 breakNonLatinWord는 이름과 거꾸로 — BREAK_WORD가 어절(렌더 10-27)
+    assert choice == base_choice
+    assert ("LEFT", "BREAK_WORD") not in base_stem

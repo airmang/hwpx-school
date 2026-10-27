@@ -37,7 +37,7 @@ except ImportError:  # 옮겨졌으면 임시 문단의 add_picture로 만든다
     _create_picture_element = None
 
 from . import HP, equation, preserve, q
-from .kit import Kit, Metrics, style_ids
+from .kit import STEM_WORD_BREAKS, Kit, Metrics, style_ids
 from .prepare import _top_tables, is_sample_box
 from .scan import IMG_RE, OVERLAY_RE, TABLE_ROW_RE, Block, Overlay, Question, QuestionSet, Scan, figure_parts, img_attrs
 from .verify import question_heads
@@ -393,6 +393,7 @@ class _Para:
     left: int | None = None  # 왼여백을 바꿀 때만(〈보기〉 뒤 참고 줄 — 발문 이음 줄 자리)
     overlays: list[Overlay] = field(default_factory=list)  # obj(그림) 위에 얹을 글자·점 — 같은 문단에 떠 있는 개체로
     room: tuple[int, int] = (0, 0)  # 얹은 글자가 그림 위·아래로 나가는 만큼 문단 위·아래 간격을 더한다(HWPUNIT)
+    stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break를 받는다
 
 
 def _body_region(doc: HwpxDocument, kit: Kit) -> tuple[int, int]:
@@ -458,15 +459,20 @@ class _Composer:
     # ---- 서식 파생 -----------------------------------------------------------
 
     def para_pr(self, role: str, *, keep: bool, gap: bool, align: str | None = None, left: int | None = None,
-                room: tuple[int, int] = (0, 0)) -> str:
+                room: tuple[int, int] = (0, 0), stem: bool = False) -> str:
         """역할 스타일 paraPr의 복제 — keepWithNext=keep, keepLines=1, gap이면 prev = question_gap(case)·2배(default).
 
         1행답항은 한 번에 균등 칸 탭(tab_pr)도 단다 — 양식의 1행답항 문단·스타일은 그대로. room = (위, 아래) 더 띄울 간격
         (그림 위에 얹은 글자가 그림 밖으로 나가는 만큼 — 위·아래 문단 글과 겹치지 않게).
         """
-        key = (role, keep, gap, align, left, room)
+        if stem and align is None:
+            align = self.kit.stem_align  # 습관(예: 수학 교사 왼쪽 정렬) — 없으면 양식 스타일
+        key = (role, keep, gap, align, left, room, stem)
         if key in self._pp:
             return self._pp[key]
+        base = self.style[role][1]
+        if stem and self.kit.stem_word_break:
+            base = self._break_variant(base, STEM_WORD_BREAKS[self.kit.stem_word_break])
         margins = {"left": left} if left is not None else None
         if room != (0, 0):
             base = self._margins(role)
@@ -475,12 +481,40 @@ class _Composer:
             # 발문이 다음 줄로 넘어가면 번호 자릿수와 무관하게 공백 한 칸만 들여 쓴다(학교 B 결정표 6) — 첫 줄은 그대로.
             # 한글 문단: 왼여백은 모든 줄, 음수 intent(내어쓰기)는 둘째 줄부터 |intent|만큼 더 들어간다(09-29 렌더 실측)
             margins = {"intent": -self.kit.metrics.space}
-        pid = derive_para_pr(self.header, self.style[role][1], prev=self.kit.question_gap if gap else None,
+        pid = derive_para_pr(self.header, base, prev=self.kit.question_gap if gap else None,
                              align=align, break_setting={"keep_with_next": keep, "keep_lines": True},
                              margins=margins,
                              tab_pr=self.tab_pr(self.slots(role)[1:]) if role == "choice1" else None)
         self._pp[key] = pid
         return pid
+
+    def _break_variant(self, base: str, non_latin: str) -> str:
+        """base paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)만 다른 paraPr id — 있으면 그것, 없으면 새로.
+
+        공개 API(ensure_paragraph_format)의 break_setting은 줄 나눔 기준을 받지 않는다 — 바탕 모양을 먼저 따로 두고 거기서
+        파생해야, 같은 모양을 찾아 재사용하는 규칙이 글자 단위 문단과 어절 단위 문단을 섞지 않는다."""
+        box = next(self.header.element.iter(q("hh", "paraProperties")))
+        src = box.find(f"{q('hh', 'paraPr')}[@id='{base}']")
+        bs = src.find(q("hh", "breakSetting"))
+        if bs is not None and bs.get("breakNonLatinWord") == non_latin:
+            return base
+        want = deepcopy(src)
+        want.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+
+        def 모양(e) -> bytes:
+            c = deepcopy(e)
+            c.attrib.pop("id", None)
+            return ET.tostring(c, method="c14n")
+
+        key = 모양(want)
+        for pp in box.findall(q("hh", "paraPr")):
+            if 모양(pp) == key:
+                return pp.get("id")
+        want.set("id", str(max(int(pp.get("id")) for pp in box.findall(q("hh", "paraPr"))) + 1))
+        box.append(want)
+        box.set("itemCnt", str(len(box.findall(q("hh", "paraPr")))))
+        self.header.mark_dirty()
+        return want.get("id")
 
     def tab_pr(self, positions: list[int]) -> str:
         """왼쪽 탭 positions(단 왼끝 기준 HWPUNIT)의 tabPr id — 1행답항 스타일 tabPr을 본뜬다: 탭마다 hp:switch 하나,
@@ -985,7 +1019,7 @@ class _Composer:
                 out += [_Para("normal", [(ln.replace("\t", "    "), cp)], align="LEFT") for ln in b.lines]
             elif b.kind == "주":  # 〈보기〉 뒤 참고 줄 — 바탕글 문단, 발문 글자 모양, 발문 이음 줄 자리(09-29 결정)
                 cp = self.style["number"][2]
-                out += [_Para("normal", [(t, c or cp) for t, c in self._segs(ln, "number")], left=발문_이음_왼여백)
+                out += [_Para("normal", [(t, c or cp) for t, c in self._segs(ln, "number")], left=발문_이음_왼여백, stem=True)
                         for ln in b.lines]
             elif b.kind != "답항표":
                 raise ValueError(f"L{b.line_no} {where} 모르는 블록 {b.kind}")
@@ -1001,11 +1035,11 @@ class _Composer:
         segs = self._segs(stems[0] + (suffix if len(stems) == 1 else ""), "number")
         if self.kit.number["mode"] == "literal":  # 스타일에 자동번호가 없다 — 견본 번호 글자 모양으로 `N. `을 쓴다
             segs = [(self.kit.number["format"].format(n=qn.number), self.samples.번호_charpr)] + segs
-        out = [_Para("number", segs, gap=True)]
+        out = [_Para("number", segs, gap=True, stem=True)]
         cp = self.style["number"][2]
         for k, text in enumerate(stems[1:], 2):
             text += suffix if k == len(stems) else ""
-            out.append(_Para("normal", [(t, c or cp) for t, c in self._segs(text, "number")], left=발문_이음_왼여백))
+            out.append(_Para("normal", [(t, c or cp) for t, c in self._segs(text, "number")], left=발문_이음_왼여백, stem=True))
         return out
 
     def _choices(self, qn: Question) -> tuple[str, list[_Para]]:
@@ -1045,7 +1079,8 @@ class _Composer:
         segs: list[tuple[str | equation.Math, str | None]] = [(self.kit.typeset["set_head"].format(a=a, b=b), self.samples.세트_charpr)]
         if s.passage:
             segs += self._segs(" " + s.passage[0], "normal")
-        return [_Para("normal", segs, gap=True)] + [_Para("normal", self._segs(line, "normal")) for line in s.passage[1:]]
+        return [_Para("normal", segs, gap=True, stem=True)] + [_Para("normal", self._segs(line, "normal"), stem=True)
+                                                               for line in s.passage[1:]]
 
     @staticmethod
     def _keep(paras: list[_Para]) -> None:
@@ -1100,7 +1135,8 @@ class _Composer:
 
     def materialize(self, spec: _Para):
         sid, _, cp = self.style[spec.role]
-        pid = self.para_pr(spec.role, keep=spec.keep, gap=spec.gap, align=spec.align, left=spec.left, room=spec.room)
+        pid = self.para_pr(spec.role, keep=spec.keep, gap=spec.gap, align=spec.align, left=spec.left, room=spec.room,
+                           stem=spec.stem)
         sec = self.doc.sections[0]
         p = sec.add_paragraph("", para_pr_id_ref=pid, style_id_ref=sid, char_pr_id_ref=cp, inherit_style=False)
         if spec.brk:
