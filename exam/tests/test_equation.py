@@ -346,12 +346,14 @@ def test_키_큰_것을_감싼_괄호는_늘인다(latex, want):
     assert eq.to_script(latex) == want
 
 
-def test_W028_선분_길이_막대():
+def test_E028_선분_길이_막대():
     head = ("---\n양식: synthetic\n학년도: 2026\n학년: 1\n학기: 1\n차: 1\n과목: 수학\n시행: 4월 21일 (화) 1교시\n출제교사: 김출제\n"
             "만점: 5\n---\n\n## 1. [5.0점]\n")
     tail = "인 값은?\n\n*① 1\n② 2\n③ 3\n④ 4\n⑤ 5\n"
     codes = lambda x: [v.code for v in lint(head + x + tail)]  # noqa: E731
-    for bad in (r"$\mathrm{PQ}=7$", r"$PQ = 7$", r"$rmPQ=7$"):
-        assert "W028" in codes(bad), bad
-    for ok in (r"$\overline{\mathrm{PQ}}=7$", r"$\overline{PQ}=\overline{RS}$", r"$\vec{PQ}=\vec{a}$", r"$x=7$"):
-        assert "W028" not in codes(ok), ok
+    for bad in (r"$\mathrm{PQ}=7$", r"$rmPQ=7$", r"$\text{PQ} = 7$"):  # 정자 점 이름 = 오류(owner 10-27)
+        assert "E028" in codes(bad), bad
+    assert "W028" in codes(r"$PQ = 7$") and "E028" not in codes(r"$PQ = 7$")  # 이탤릭은 행렬 곱일 수 있어 경고
+    for ok in (r"$\overline{\mathrm{PQ}}=7$", r"$\overline{PQ}=\overline{RS}$", r"$\vec{PQ}=\vec{a}$", r"$x=7$",
+               r"$\mathrm{PQ}$의 길이"):
+        assert not {"E028", "W028"} & set(codes(ok)), ok

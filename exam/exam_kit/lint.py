@@ -399,24 +399,29 @@ def rule_E027(s: Scan) -> list[Violation]:
     return out
 
 
-# W028 선분 길이 막대(10-27 수학 교사): 선분의 길이는 점 이름 위에 막대(\\overline{\\mathrm{AB}}). 점 이름 두 글자(정자
-# `\\mathrm{AB}`·`rmAB`·`\\text{AB}` 또는 그냥 `AB`) 바로 뒤에 `=`가 오는데 막대·벡터 화살표 안이 아니면 알린다. AB가 선분이
-# 아닐 수도 있어(곱·직선 이름) 경고다 — 선분인지는 [의미].
+# E028·W028 선분 길이 막대(10-27 수학 교사): 선분의 길이는 점 이름 위에 막대(\\overline{\\mathrm{AB}}). 점 이름 두 글자
+# 바로 뒤에 `=`가 오는데 막대·벡터 화살표 안이 아니면 알린다. 교사 기하 원안지 실측: `AB =` 꼴 8곳 모두 막대, 막대 없는
+# 점 이름은 "선분 HR의 길이"·"직선 BC"처럼 `=` 없이 이름을 부를 때(5곳)뿐. 정자(`\\mathrm{AB}`·`rmAB`·`\\text{AB}`)는 점
+# 이름이라 오류(E028, owner 10-27), 이탤릭 `AB`는 행렬 곱(`AB = BA`, 2022 개정 공통수학1)일 수 있어 경고(W028).
 _막대_안 = re.compile(r"\\(?:overline|bar|vec|overrightarrow|overleftrightarrow)\s*\{(?:[^{}]|\{[^{}]*\})*\}")
-_선분_꼴 = re.compile(r"(?<![A-Za-z\\])(?:\\mathrm\{|\\text\{|rm\s*)?([A-Z]{2})\}?\s*=")
+_선분_정자 = re.compile(r"(?<![A-Za-z\\])(?:\\mathrm\{|\\text\{|rm\s*)([A-Z]{2})\}?\s*=")
+_선분_이탤릭 = re.compile(r"(?<![A-Za-z\\{])([A-Z]{2})\s*=")
 
 
-def rule_W028(s: Scan) -> list[Violation]:
+def rule_E028(s: Scan) -> list[Violation]:
     out = []
     for q in s.questions:
         lines = [(q.line_no, ln) for ln in q.stem] + [(c.line_no, c.text) for c in q.choices]
         lines += [(b.line_no, ln) for b in q.blocks if b.kind not in ("코드", "그림", "답항표") for ln in b.lines]
         for line, text in lines:
             for latex in re.findall(r"(?<!\\)\$(.+?)(?<!\\)\$", text):
-                m = _선분_꼴.search(_막대_안.sub("", latex))
-                if m:
-                    out.append(_v("W028", line, f"{q.number}번 ${latex}$ — 선분의 길이면 점 이름 위에 막대: "
-                                                f"`\\overline{{\\mathrm{{{m.group(1)}}}}}`(선분이 아니면 그대로 둔다)"))
+                bare = _막대_안.sub("", latex)
+                if m := _선분_정자.search(bare):
+                    out.append(_v("E028", line, f"{q.number}번 ${latex}$ — 선분의 길이는 점 이름 위에 막대: "
+                                                f"`\\overline{{\\mathrm{{{m.group(1)}}}}}`"))
+                elif m := _선분_이탤릭.search(bare):
+                    out.append(_v("W028", line, f"{q.number}번 ${latex}$ — 선분의 길이면 점 이름 위에 막대(정자): "
+                                                f"`\\overline{{\\mathrm{{{m.group(1)}}}}}`(행렬 곱 등 선분이 아니면 그대로 둔다)"))
     return out
 
 
@@ -430,7 +435,7 @@ def _수식_하나(latex: str) -> bool:
 
 
 ENGINE_RULES = [rule_E001, rule_E002, rule_E003, rule_E004, rule_E005, rule_E006, rule_E009, rule_E011, rule_E021, rule_E024,
-                rule_E025, rule_E027, rule_W028]
+                rule_E025, rule_E027, rule_E028]
 SCHOOL_RULES = {"W003": rule_W003, "E007": rule_E007, "E008": rule_E008, "E012": rule_E012, "E013": rule_E013,
                 "E014": rule_E014, "E015": rule_E015, "E016": rule_E016, "E017": rule_E017, "E018": rule_E018,
                 "W019": rule_W019, "W020": rule_W020}
