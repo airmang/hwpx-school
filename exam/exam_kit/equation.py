@@ -60,9 +60,23 @@ def glued(script: str) -> str:
     return _띄운_rm.sub("rm", script)
 
 
+# LaTeX 원문에 남은 한/글 글꼴 명령 낱말 — python-hwpx(6.8.0·6.9.0)의 eqedit_to_latex는 한/글 수식의 rm·it·bold를 LaTeX로
+# 옮기지 않고 낱말로 두고, latex_to_eqedit는 그 낱말을 글로 보고 따옴표를 쳐(`"it"`) 한/글이 글자 it를 찍는다 — 기하 원안지를
+# 다시 조판하니 벡터 식이 `AB = ita`로 찍혔다(10-26 렌더). 상류가 고치기 전까지 조용히 깨진 수식을 내지 않고 멈춘다.
+# 글 인자(\text{…}·\mathrm{…} 등) 안은 글이라 보지 않고, 점 이름 `rmA`(뒤에 글자가 붙은 꼴)는 한/글이 정자 A로 읽어 걸지 않는다.
+_글_인자 = re.compile(r"\\(?:text|textrm|mathrm|mathbf|operatorname)\s*\{[^{}]*\}")
+_글꼴_낱말 = re.compile(r"(?<![\\A-Za-z])(rm|it|bold)(?![A-Za-z])")
+
+
 @lru_cache(maxsize=4096)
 def to_script(latex: str) -> str:
-    """LaTeX → 한/글 수식 문자열. 바꿀 수 없으면 MathError(변환기 까닭을 붙인다)."""
+    """LaTeX → 한/글 수식 문자열. 바꿀 수 없으면 MathError(변환기 까닭을 붙인다). 글꼴 명령 낱말(rm·it·bold)이 글 인자 밖에
+    남아 있으면 글자로 찍히니 MathError — 정자는 `\\mathrm{…}`(점 이름은 `rmA`도 된다), 기울임은 명령 없이, 굵게는 `\\mathbf{…}`."""
+    m = _글꼴_낱말.search(_글_인자.sub("", latex))
+    if m:
+        raise MathError(f"한/글 글꼴 명령 `{m.group(1)}`이 낱말로 남아 수식에 글자 {m.group(1)}로 찍힌다 ${latex}$ — 정자는 "
+                        "`\\mathrm{…}`(점 이름은 `rmA`도 된다), 기울임은 명령 없이, 굵게는 `\\mathbf{…}`로 쓴다(한/글 원안지를 "
+                        "되돌린 수식이면 상류 python-hwpx 글꼴 명령 되돌림 문제)")
     try:
         return spaced(latex_to_eqedit(latex))
     except EquationConversionError as e:  # UnsupportedLatexError도 이 갈래다

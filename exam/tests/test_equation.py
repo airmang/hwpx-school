@@ -298,3 +298,20 @@ def test_원고_머리_답항_1행부터면_짧은_답지는_1행(front, want):
     prep.refresh(doc)
     res = compose(doc, s, kit, answer_key=False, image_root=원고.parent)
     assert res.layouts == want
+
+
+@pytest.mark.parametrize("latex", [r"{\vec{rm AB}} = it {\vec{a}}", "5 rm cm", r"rm {\bar{BC}}", "bold x", "rm A"])
+def test_글꼴_명령_낱말은_글자로_찍히니_멈춘다(latex):
+    """한/글 원안지를 되돌린 수식의 rm·it·bold — 상류 latex_to_eqedit가 따옴표를 쳐 글자로 찍는다(기하 원안지 다시 조판:
+    `AB = ita`, 10-26 렌더). 원고 검사 E025·조판·역변환이 모두 이 변환을 거친다."""
+    with pytest.raises(eq.MathError, match="글꼴 명령"):
+        eq.to_script(latex)
+    md = ("---\n양식: synthetic\n학년도: 2026\n학년: 1\n학기: 1\n차: 1\n과목: 수학\n시행: 4월 21일 (화) 1교시\n출제교사: 김출제\n"
+          "만점: 5\n---\n\n## 1. [5.0점]\n" + f"${latex}$의 값은?\n\n") + "\n".join(f"{'*' if k == 0 else ''}{c} $1$" for k, c in enumerate("①②③④⑤"))
+    assert any(v.code == "E025" and "글꼴 명령" in v.msg for v in lint(md))
+
+
+@pytest.mark.parametrize("latex", [r"\mathrm{A}", "rmA", r"5\,\mathrm{cm}", r"\text{it}", r"{\vec{\mathrm{AB}}} = {\vec{a}}",
+                                   r"\mathbf{x}", r"\sin x", "bit"])
+def test_바른_글꼴_표기는_그대로(latex):
+    eq.to_script(latex)  # 글 인자 안의 낱말(\\text{it})·붙은 점 이름(rmA)·낱말 속 글자(bit)는 걸지 않는다
