@@ -331,3 +331,27 @@ def test_역변환은_끝의_4분의1칸을_걷는다():
 
     el = ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>2`</hp:script></hp:equation>')
     assert _수식_원고(el) == "$2$"
+
+
+@pytest.mark.parametrize("latex, want", [
+    (r"(\frac{5}{2}, \frac{3}{2}, 1)", "LEFT ( {5} over {2} , {3} over {2} , 1 RIGHT )"),  # 10-27 비교 그림: 긴 괄호가 맞다
+    (r"|\vec{a}| = \sqrt{3}", "LEFT | vec {a} RIGHT | = sqrt {3}"),                         # 교사 원안지: 벡터 크기 4곳 모두
+    (r"[\frac{1}{2}, 1]", "LEFT [ {1} over {2} , 1 RIGHT ]"),
+    (r"((\frac{1}{2})^2 + 1)", "LEFT ( LEFT ( {1} over {2} RIGHT ) ^{2} + 1 RIGHT )"),
+    (r"\left(\frac{1}{2}\right)", "LEFT ( {1} over {2} RIGHT )"),                              # 이미 붙은 것은 그대로
+    (r"(1, 2)", "( 1 , 2 )"), (r"f(x)=\frac{1}{x}", "f ( x ) = {1} over {x}"), (r"|x|+|y|", "| x | + | y |"),
+    (r"P(A|B)", "P ( A | B )"),
+])
+def test_키_큰_것을_감싼_괄호는_늘인다(latex, want):
+    assert eq.to_script(latex) == want
+
+
+def test_W028_선분_길이_막대():
+    head = ("---\n양식: synthetic\n학년도: 2026\n학년: 1\n학기: 1\n차: 1\n과목: 수학\n시행: 4월 21일 (화) 1교시\n출제교사: 김출제\n"
+            "만점: 5\n---\n\n## 1. [5.0점]\n")
+    tail = "인 값은?\n\n*① 1\n② 2\n③ 3\n④ 4\n⑤ 5\n"
+    codes = lambda x: [v.code for v in lint(head + x + tail)]  # noqa: E731
+    for bad in (r"$\mathrm{PQ}=7$", r"$PQ = 7$", r"$rmPQ=7$"):
+        assert "W028" in codes(bad), bad
+    for ok in (r"$\overline{\mathrm{PQ}}=7$", r"$\overline{PQ}=\overline{RS}$", r"$\vec{PQ}=\vec{a}$", r"$x=7$"):
+        assert "W028" not in codes(ok), ok

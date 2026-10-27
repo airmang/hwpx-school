@@ -471,33 +471,37 @@ class _Composer:
         if key in self._pp:
             return self._pp[key]
         base = self.style[role][1]
-        if stem and self.kit.stem_word_break:
-            base = self._break_variant(base, STEM_WORD_BREAKS[self.kit.stem_word_break])
         margins = {"left": left} if left is not None else None
         if room != (0, 0):
-            base = self._margins(role)
-            margins = {**(margins or {}), "prev": base.get("prev", 0) + room[0], "next": base.get("next", 0) + room[1]}
+            mg = self._margins(role)
+            margins = {**(margins or {}), "prev": mg.get("prev", 0) + room[0], "next": mg.get("next", 0) + room[1]}
         if role == "number" and self.kit.typeset.get("stem_hanging") == "space":
             # 발문이 다음 줄로 넘어가면 번호 자릿수와 무관하게 공백 한 칸만 들여 쓴다(학교 B 결정표 6) — 첫 줄은 그대로.
             # 한글 문단: 왼여백은 모든 줄, 음수 intent(내어쓰기)는 둘째 줄부터 |intent|만큼 더 들어간다(09-29 렌더 실측)
             margins = {"intent": -self.kit.metrics.space}
+        before = {pp.get("id") for pp in self.header.element.iter(q("hh", "paraPr"))}
         pid = derive_para_pr(self.header, base, prev=self.kit.question_gap if gap else None,
                              align=align, break_setting={"keep_with_next": keep, "keep_lines": True},
                              margins=margins,
                              tab_pr=self.tab_pr(self.slots(role)[1:]) if role == "choice1" else None)
+        if stem and self.kit.stem_word_break:
+            pid = self._with_break(pid, STEM_WORD_BREAKS[self.kit.stem_word_break], fresh=pid not in before)
         self._pp[key] = pid
         return pid
 
-    def _break_variant(self, base: str, non_latin: str) -> str:
-        """base paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)만 다른 paraPr id — 있으면 그것, 없으면 새로.
-
-        공개 API(ensure_paragraph_format)의 break_setting은 줄 나눔 기준을 받지 않는다 — 바탕 모양을 먼저 따로 두고 거기서
-        파생해야, 같은 모양을 찾아 재사용하는 규칙이 글자 단위 문단과 어절 단위 문단을 섞지 않는다."""
+    def _with_break(self, pid: str, non_latin: str, *, fresh: bool) -> str:
+        """pid paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)이 non_latin인 paraPr id. 이번에 새로 만든
+        paraPr(fresh)이면 그 자리에서 고치고, 양식 등에 있던 것을 재사용했으면 같은 모양을 찾거나 사본을 만든다(양식 문단까지
+        바뀌지 않게). 공개 API(ensure_paragraph_format)의 break_setting은 줄 나눔 기준을 받지 않는다 — 고친 뒤에는 모양이
+        달라, 같은 모양을 찾아 재사용하는 규칙이 글자 단위 문단과 섞지 않는다."""
         box = next(self.header.element.iter(q("hh", "paraProperties")))
-        src = box.find(f"{q('hh', 'paraPr')}[@id='{base}']")
-        bs = src.find(q("hh", "breakSetting"))
-        if bs is not None and bs.get("breakNonLatinWord") == non_latin:
-            return base
+        src = box.find(f"{q('hh', 'paraPr')}[@id='{pid}']")
+        if src.find(q("hh", "breakSetting")).get("breakNonLatinWord") == non_latin:
+            return pid
+        if fresh:
+            src.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+            self.header.mark_dirty()
+            return pid
         want = deepcopy(src)
         want.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
 

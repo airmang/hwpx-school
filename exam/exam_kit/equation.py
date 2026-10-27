@@ -68,6 +68,48 @@ _글_인자 = re.compile(r"\\(?:text|textrm|mathrm|mathbf|operatorname)\s*\{[^{}
 _글꼴_낱말 = re.compile(r"(?<![\\A-Za-z])(rm|it|bold)(?![A-Za-z])")
 
 
+# 키 큰 것(분수·이항계수·벡터 화살표)을 감싼 괄호·절댓값 막대는 내용 높이만큼 늘인다(\\left…\\right → 한/글 LEFT…RIGHT) —
+# 교사 원안지는 벡터 크기 |a⃗|를 4곳 모두 LEFT | … RIGHT |로 썼고, 분수를 감싼 괄호는 글자 높이 괄호가 틀린 것이라 했다(10-27
+# 비교 그림 `(5/2, 3/2, 1)`). 중괄호는 한/글에서 묶음 기호와 겹쳐(`LEFT { … RIGHT }`) 늘이지 않는다.
+_키_큰 = re.compile(r"\\(?:d?frac|tfrac|binom|vec|overrightarrow|overleftrightarrow)(?![A-Za-z])")
+_짝 = {")": "(", "]": "["}
+
+
+def stretched(latex: str) -> str:
+    """키 큰 것을 감싼 ( )·[ ]·| |에 \\left·\\right를 붙인다(이미 붙은 것, 글자로 쓴 \\( \\| 등은 그대로). 같은 중괄호
+    깊이의 짝만 본다 — | |는 같은 깊이의 이웃한 두 막대를 짝으로."""
+    ins: list[tuple[int, str]] = []
+    depth, opens, bars = 0, {}, {}
+    for i, ch in enumerate(latex):
+        if ch == "{" and (i == 0 or latex[i - 1] != "\\"):
+            depth += 1
+            continue
+        if ch == "}" and (i == 0 or latex[i - 1] != "\\"):
+            opens.pop(depth, None), bars.pop(depth, None)
+            depth -= 1
+            continue
+        if ch not in "()[]|" or (i and latex[i - 1] == "\\"):
+            continue
+        tagged = latex[:i].endswith(("\\left", "\\right"))
+        if ch in "([":
+            opens.setdefault(depth, []).append((i, ch, tagged))
+        elif ch in ")]":
+            stack = opens.get(depth) or []
+            if stack and stack[-1][1] == _짝[ch]:
+                j, _, open_tagged = stack.pop()
+                if not open_tagged and not tagged and _키_큰.search(latex[j + 1:i]):
+                    ins += [(j, "\\left"), (i, "\\right")]
+        else:  # |
+            j = bars.pop(depth, None)
+            if j is None:
+                bars[depth] = i
+            elif not tagged and not latex[:j].endswith(("\\left", "\\right")) and _키_큰.search(latex[j + 1:i]):
+                ins += [(j, "\\left"), (i, "\\right")]
+    for k, word in sorted(ins, reverse=True):
+        latex = latex[:k] + word + latex[k:]
+    return latex
+
+
 @lru_cache(maxsize=4096)
 def to_script(latex: str) -> str:
     """LaTeX → 한/글 수식 문자열. 바꿀 수 없으면 MathError(변환기 까닭을 붙인다). 글꼴 명령 낱말(rm·it·bold)이 글 인자 밖에
@@ -78,7 +120,7 @@ def to_script(latex: str) -> str:
                         "`\\mathrm{…}`(점 이름은 `rmA`도 된다), 기울임은 명령 없이, 굵게는 `\\mathbf{…}`로 쓴다(한/글 원안지를 "
                         "되돌린 수식이면 상류 python-hwpx 글꼴 명령 되돌림 문제)")
     try:
-        return spaced(latex_to_eqedit(latex))
+        return spaced(latex_to_eqedit(stretched(latex)))
     except EquationConversionError as e:  # UnsupportedLatexError도 이 갈래다
         raise MathError(f"한/글 수식으로 바꿀 수 없다 ${latex}$ — {e}") from e
 
