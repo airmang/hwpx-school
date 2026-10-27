@@ -32,10 +32,10 @@ HABIT_KEYS = frozenset({"question_gap", "question_gap_min", "gap_extra_max", "le
                         "letter_spacing_role_min", "letter_spacing_safety", "word_pull_min", "word_pull_gap",
                         "gap_mode", "pack", "bogi_hanging_indent", "grid"})
 HABIT_OPTIONAL = frozenset({"source", "note", "stem_align", "stem_word_break"})
-STEM_ALIGNS = ("LEFT", "JUSTIFY")   # 발문 문단 정렬 — 없으면 양식 스타일 그대로
+STEM_ALIGNS = ("LEFT", "JUSTIFY", "양식")   # 발문 문단 정렬 — 없으면 LEFT(엔진 기본, 10-27 owner), "양식"이면 양식 스타일 그대로
 # 발문 한글 줄 나눔 기준(한/글 문단 모양 '줄 나눔 기준 — 한글') → breakNonLatinWord. 이름과 거꾸로다: 실한컴 렌더(10-27)에서
 # BREAK_WORD 문단은 어절 통째로 넘기고(`원기둥모양그릇에서 ⋯ 물높이변화량과`), KEEP_WORD 문단은 낱말 가운데서 끊었다(`⋯의관/계`).
-STEM_WORD_BREAKS = {"어절": "BREAK_WORD", "글자": "KEEP_WORD"}
+STEM_WORD_BREAKS = {"어절": "BREAK_WORD", "글자": "KEEP_WORD"}  # 없으면 어절(엔진 기본), "양식"이면 양식 스타일 그대로
 DEFAULT_HABITS = Path(__file__).resolve().parent / "defaults" / "habits.json"
 
 
@@ -116,8 +116,8 @@ class Kit:
     grid: dict                      # 격자표: in_margin·out_margin(칸 안·바깥 여백)·min_col(열 최소 폭)
     habits_source: str              # 습관값 출처(보고서에 적는다) — "킷" 또는 기본 파일의 source
     rules: dict | None              # 학교 규칙(rules.json 내용) — 없으면 None(엔진 규칙만)
-    stem_align: str | None = None   # 발문 문단 정렬(STEM_ALIGNS) — None이면 양식 스타일(습관 선택 키, 10-27 수학 교사: 왼쪽)
-    stem_word_break: str | None = None  # 발문 한글 줄 나눔(STEM_WORD_BREAKS 키) — None이면 양식 스타일(수학 교사: 어절)
+    stem_align: str | None = "LEFT"     # 발문 문단 정렬 — None이면 양식 스타일(습관 키 "양식"). 10-27 수학 교사 요청 → 엔진 기본(owner)
+    stem_word_break: str | None = "어절"  # 발문 한글 줄 나눔(STEM_WORD_BREAKS 키) — None이면 양식 스타일
 
     @property
     def forbidden_text(self) -> tuple[str, ...]:
@@ -177,16 +177,17 @@ def load_kit(root: Path) -> Kit:
         letter_spacing_role_min=h["letter_spacing_role_min"], letter_spacing_safety=h["letter_spacing_safety"],
         word_pull_min=h["word_pull_min"], word_pull_gap=h["word_pull_gap"], gap_mode=h["gap_mode"], pack=h["pack"],
         bogi_hanging_indent=h["bogi_hanging_indent"], grid=h["grid"], habits_source=source,
-        rules=rules, stem_align=_choice(h, "stem_align", STEM_ALIGNS),
-        stem_word_break=_choice(h, "stem_word_break", tuple(STEM_WORD_BREAKS)),
+        rules=rules, stem_align=_choice(h, "stem_align", STEM_ALIGNS, "LEFT"),
+        stem_word_break=_choice(h, "stem_word_break", (*STEM_WORD_BREAKS, "양식"), "어절"),
     )
 
 
-def _choice(h: dict, key: str, allowed: tuple) -> str | None:
-    v = h.get(key)
-    if v is not None and v not in allowed:
-        raise ValueError(f"habits.json {key} {v!r} — 지원: {list(allowed)} 또는 없음")
-    return v
+def _choice(h: dict, key: str, allowed: tuple, default: str) -> str | None:
+    """습관 선택 키 — 없으면 default(엔진 기본), "양식"이면 None(양식 스타일 그대로)."""
+    v = h.get(key, default)
+    if v not in allowed:
+        raise ValueError(f"habits.json {key} {v!r} — 지원: {list(allowed)}")
+    return None if v == "양식" else v
 
 
 def style_ids(doc: HwpxDocument) -> dict[str, tuple[str, str | None, str | None]]:

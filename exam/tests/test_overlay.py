@@ -166,6 +166,14 @@ def test_조판_그림_밖으로_나간_글자만큼_문단_간격(조판):
     a = floats_in(host)[0]
     assert int(a.find(q("hp", "pos")).get("vertOffset")) == 0  # 맨 위 글자가 문단 원점에 닿는다
     assert geo["prev"] == int(a.find(q("hp", "sz")).get("height")) // 2 + round(0.2 * CM)
+    # 간격만 넓힌 바탕글 모양이다 — 정렬은 가운데, 줄 간격은 바탕글 스타일 그대로(여백 사전이 바탕 모양 id를 덮어쓰던 결함)
+    from exam_kit.kit import style_ids
+
+    pps = {e.get("id"): e for e in doc.oxml.headers[0].element.iter(q("hh", "paraPr"))}
+    normal = pps[style_ids(doc)[load_kit(킷).styles["normal"]][1]]
+    host_pp = pps[host.get("paraPrIDRef")]
+    assert host_pp.find(q("hh", "align")).get("horizontal") == "CENTER"
+    assert host_pp.find(f".//{q('hh', 'lineSpacing')}").attrib == normal.find(f".//{q('hh', 'lineSpacing')}").attrib
 
 
 def test_조판_단_밖으로_나가면_멈춘다(tmp_path):
@@ -376,14 +384,14 @@ def _발문_문단_모양(kit, tmp_path, name="x.hwpx"):
     return 모양("number"), 모양("choice2") | 모양("choice3") | 모양("choice5") | 모양("choice1")
 
 
-def test_발문_왼쪽_어절은_습관값으로(tmp_path):
+def test_발문은_기본이_왼쪽_어절(tmp_path):
     """10-27 수학 교사: 문제는 왼쪽 정렬, 줄 나눔 기준 어절 — 습관 stem_align·stem_word_break. 답지는 양식 그대로, 키가 없으면
     발문도 양식 그대로."""
     import dataclasses
 
-    kit = load_kit(킷)
-    base_stem, base_choice = _발문_문단_모양(kit, tmp_path, "a.hwpx")
-    stem, choice = _발문_문단_모양(dataclasses.replace(kit, stem_align="LEFT", stem_word_break="어절"), tmp_path, "b.hwpx")
+    kit = load_kit(킷)  # 키 없음 = 엔진 기본(왼쪽·어절, 10-27 owner)
+    stem, choice = _발문_문단_모양(kit, tmp_path, "a.hwpx")
+    form_stem, form_choice = _발문_문단_모양(dataclasses.replace(kit, stem_align=None, stem_word_break=None), tmp_path, "b.hwpx")
     assert stem == {("LEFT", "BREAK_WORD")}  # 한/글 breakNonLatinWord는 이름과 거꾸로 — BREAK_WORD가 어절(렌더 10-27)
-    assert choice == base_choice
-    assert ("LEFT", "BREAK_WORD") not in base_stem
+    assert choice == form_choice  # 답지는 양식 그대로
+    assert ("LEFT", "BREAK_WORD") not in form_stem  # "양식"이면 양식 스타일
