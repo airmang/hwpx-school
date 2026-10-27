@@ -120,6 +120,7 @@ def _수식_원고(eq) -> str:
     (조판할 수 없는 원고가 되면) 오류."""
     s = eq.find(q("hp", "script"))
     script = equation.glued("" if s is None else (s.text or "").strip())  # `rm A` → `rmA`(equation.glued)
+    script = script.rstrip(" " + equation.뒤_띄움).rstrip() or script  # 끝의 1/4 칸(`)은 조판 관례 — 원고에 쓰지 않는다
     if not script:
         raise ValueError("빈 수식(hp:script 없음) — 역변환하지 않는다")
     try:

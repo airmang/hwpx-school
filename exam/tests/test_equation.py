@@ -315,3 +315,19 @@ def test_글꼴_명령_낱말은_글자로_찍히니_멈춘다(latex):
                                    r"\mathbf{x}", r"\sin x", "bit"])
 def test_바른_글꼴_표기는_그대로(latex):
     eq.to_script(latex)  # 글 인자 안의 낱말(\\text{it})·붙은 점 이름(rmA)·낱말 속 글자(bit)는 걸지 않는다
+
+
+@pytest.mark.parametrize("text, scripts", [("$2$인 정육면체", ["2`"]), ("$x$, $y$의 값", ["x", "y`"]), ("$a$ 와", ["a"]),
+                                           ("$f(x)$이다.", ["f ( x )`"])])
+def test_수식_바로_뒤_한글이면_끝에_4분의1칸(text, scripts):
+    """교사 원안지 실측(10-27): 발문에서 수식 바로 뒤가 한글인 95곳 중 92곳이 `로 끝났다(`2`인`). 공백·쉼표 뒤는 없다."""
+    assert [m.script for m in eq.mask(text)[1]] == scripts
+
+
+def test_역변환은_끝의_4분의1칸을_걷는다():
+    import lxml.etree as ET
+    from exam_kit import HP
+    from exam_kit.reverse import _수식_원고
+
+    el = ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>2`</hp:script></hp:equation>')
+    assert _수식_원고(el) == "$2$"

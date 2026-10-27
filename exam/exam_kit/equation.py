@@ -138,19 +138,30 @@ def 자리_번호(ch: str) -> int | None:
     return o if 0 <= o < _자리_끝 - _자리0 else None
 
 
+# 수식 바로 뒤에 한글(조사 등)이 붙으면 수식 끝에 한/글 수식의 1/4 칸(`)을 둔다 — 교사 원안지 실측(10-27): 발문에서 수식
+# 바로 뒤가 한글인 95곳 중 92곳이 `로 끝났고(`2`인`·`…=1`의`), 뒤가 공백·쉼표인 곳과 답지·그림 위 글자에는 없었다.
+# 원고에는 쓰지 않는다 — 조판이 붙이고 역변환이 걷는다(reverse._수식_원고).
+뒤_띄움 = "`"
+_한글 = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
+
+
 @lru_cache(maxsize=8192)
 def mask(text: str) -> tuple[str, tuple[Math, ...]]:
-    """원고 글 → (가린 글, 수식들). 표기 오류·바꿀 수 없는 LaTeX는 MathError."""
+    """원고 글 → (가린 글, 수식들). 표기 오류·바꿀 수 없는 LaTeX는 MathError. 수식 바로 뒤가 한글이면 그 수식의 한/글
+    수식 문자열 끝에 뒤_띄움(`)을 붙인다."""
     out: list[str] = []
     maths: list[Math] = []
-    for s, is_math in _pieces(text, strict=True):
+    pieces = _pieces(text, strict=True)
+    for i, (s, is_math) in enumerate(pieces):
         if is_math:
             latex = s.strip()
             if not latex:
                 raise MathError(f"빈 수식 `${s}$`")
             if len(maths) >= _자리_끝 - _자리0:
                 raise MathError("한 문단의 수식이 너무 많다")
-            maths.append(Math(latex, to_script(latex)))
+            after = pieces[i + 1] if i + 1 < len(pieces) else None
+            tick = after is not None and not after[1] and bool(_한글.match(after[0]))
+            maths.append(Math(latex, to_script(latex) + (뒤_띄움 if tick else "")))
             out.append(자리(len(maths) - 1))
         else:
             if any(자리_번호(ch) is not None for ch in s):

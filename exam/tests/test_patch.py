@@ -80,7 +80,7 @@ def test_수식도_갈아_끼운다(tmp_path):
     new = HwpxDocument.open(str(rebuild(md.replace("$x^2-5x+6=0$", "$x^2-7x+12=0$", 1), kit, 서식, 픽스처, tmp_path / "new.hwpx")))
     assert apply_patch(old, new, kit) == ["1번 문단 1"]
     scripts = [s.text for s in old.sections[0].paragraphs[1].element.iter("{*}script")]
-    assert "x ^{2} - 7 x + 12 = 0" in scripts
+    assert "x ^{2} - 7 x + 12 = 0`" in scripts  # 수식 바로 뒤 한글(`의`) — 끝에 1/4 칸(equation.뒤_띄움)
 
 
 def test_그림이_바뀌면_다시_조판(tmp_path):
