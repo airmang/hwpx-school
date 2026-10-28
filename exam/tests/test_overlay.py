@@ -231,8 +231,8 @@ def test_교사식_배치_그림과_다른_문단의_글자():
     _attach([fig], floats, geo)
     cm = lambda v: round(v / CM, 2)  # noqa: E731
     assert fig.overlays == [
-        Overlay("글자", "rmP", cm(13000 + 56 + 400 - 10000), cm(700 + 550 - 1500)),
-        Overlay("글자", "rmQ", cm(16000 + 56 + 400 - 10000), cm(1800 + 1500 + 550 - 1500)),
+        Overlay("글자", "\\mathrm{P}", cm(13000 + 56 + 400 - 10000), cm(700 + 550 - 1500)),
+        Overlay("글자", "\\mathrm{Q}", cm(16000 + 56 + 400 - 10000), cm(1800 + 1500 + 550 - 1500)),
         Overlay("점", None, cm(12000 + 150 - 10000), cm(1800 + 200 + 150 - 1500)),
     ]
     assert fig.md()[0] == ":::그림" and fig.md()[-1] == ":::"
@@ -314,25 +314,32 @@ def test_렌더_얹은_자리(조판, 오라클, tmp_path):
 # --- 붙은 글꼴 명령(rmA)·겹침 --------------------------------------------------------
 
 
-def test_붙은_rm은_문서에_띄워_쓰고_원고에_붙여_쓴다():
+def test_붙은_rm은_띄워서_문서에_넣고_띄워서_되돌린다():
     """교사 원안지의 점 이름 `rmA`: python-hwpx 폭 어림은 r·m·A 세 글자로 읽어 세 배 넓게 잡는다 — 그 상자 가운데에 놓은 글자가
-    0.30cm 밀렸다(10-26 렌더). 문서에는 `rm A`(폭이 맞는다), 원고 LaTeX에는 `rmA`(띄운 `rm A`는 되돌리면 글자 rm이 찍힌다)."""
+    0.30cm 밀렸다(10-26 렌더). 문서에는 `rm A`(폭이 맞는다). 역변환도 띄워서 넘기면 6.10.0이 `\\mathrm{A}`로 되돌린다(#582)."""
     from exam_kit import equation
-    from hwpx.equation import eqedit_to_latex
 
     assert equation.to_script("rmA") == "rm A"
     assert equation.box("rm A", 1100)[0] < equation.box("rmA", 1100)[0] / 2
+    import lxml.etree as ET
+    from exam_kit import HP
+    from exam_kit.reverse import _수식_원고
+
+    def back(script: str) -> str:  # 역변환이 쓰는 원고 수식(`$…$` 안)
+        return _수식_원고(ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>{script}</hp:script></hp:equation>'))[1:-1]
+
     for doc in ("rm A", "rmA", "rm PQR", "rm K ( 7 , - 2 )"):
-        latex = eqedit_to_latex(equation.glued(doc))
-        assert equation.to_script(latex) == equation.spaced(doc)  # 고정점
+        latex = back(doc)
+        assert "\\mathrm" in latex and '"rm"' not in equation.to_script(latex)
+        assert back(equation.to_script(latex)) == latex  # 원고 → 문서 → 원고 고정점
     assert equation.spaced("5 rm cm") == "5 rm cm"  # 소문자 단위는 그대로
 
 
-def test_역변환_얹은_rmA는_원고에_붙은_꼴로():
-    p = _xml(f'<hp:run>{_eq("rm C", 0, 100)}</hp:run>')
+def test_역변환_얹은_rmC는_원고에_정자로():
+    p = _xml(f'<hp:run>{_eq("rmC", 0, 100)}</hp:run>')
     gp = {"0": {"align": "JUSTIFY", "left": 0, "right": 0, "intent": 0, "prev": 0}}
     ov = _float_item(floats_in(p)[0], 0, p, Geometry(30000, gp, [None]))[0]
-    assert ov.latex == "rmC"
+    assert ov.latex == "\\mathrm{C}"
 
 
 @pytest.mark.parametrize("x, clash", [(3.0, True), (1.0, False)])

@@ -41,28 +41,21 @@ class Math:
         return f"${self.latex}$"
 
 
-# 한/글 수식의 글꼴 명령 rm + 대문자(점 이름). 한/글은 `rmA`·`rm A` 둘 다 정자 A로 찍는다(교사 원안지 실물). python-hwpx 6.8.0은
-# 두 꼴을 다르게 다룬다 — 폭 어림은 붙은 꼴을 한 낱말(r·m·A)로 읽어 세 배쯤 넓게 잡고(`rmA` 2431 vs 한/글 825 HWPUNIT: 그림
-# 위 점 이름이 0.30cm 밀렸다, 10-26 렌더), LaTeX 되돌림은 rm을 옮기지 않아 띄운 꼴은 `rm A` → 다시 한/글 수식 `"rm" A`(글자
-# rm이 찍힌다)가 된다. 그래서 문서에는 띄운 꼴(spaced — 폭이 맞는다), 원고 LaTeX에는 붙은 꼴(glued — 그대로 왕복한다)을 쓴다.
-# 상류가 rm을 \mathrm으로 옮기면 걷는다.
+# 한/글 수식의 글꼴 명령 rm + 대문자(점 이름). 한/글은 `rmA`·`rm A` 둘 다 정자 A로 찍는다(교사 원안지 실물). python-hwpx는
+# 붙은 꼴을 한 낱말(r·m·A)로 읽는다 — 폭 어림이 세 배쯤 넓고(`rmA` 2431 vs 한/글 825 HWPUNIT: 그림 위 점 이름이 0.30cm
+# 밀렸다, 10-26 렌더), LaTeX 되돌림도 `rmA`로 남긴다(6.10.0에서도). 띄운 꼴은 6.10.0부터 `\\mathrm{A}`로 되돌아온다(#582).
+# 그래서 문서에도 역변환 입력에도 띄운 꼴을 쓴다(spaced).
 _붙은_rm = re.compile(r"(?<![A-Za-z])rm(?=[A-Z])")
-_띄운_rm = re.compile(r"(?<![A-Za-z])rm\s+(?=[A-Z])")
 
 
 def spaced(script: str) -> str:
-    """한/글 수식 문자열의 붙은 글꼴 명령을 띄운다(`rmA` → `rm A`) — 한/글 렌더는 같고 폭 어림이 맞는다."""
+    """한/글 수식 문자열의 붙은 글꼴 명령을 띄운다(`rmA` → `rm A`) — 한/글 렌더는 같고 폭 어림·LaTeX 되돌림이 맞는다."""
     return _붙은_rm.sub("rm ", script)
 
 
-def glued(script: str) -> str:
-    """띄운 글꼴 명령을 붙인다(`rm A` → `rmA`) — 원고 LaTeX로 되돌릴 때. 되돌린 `rmA`는 다시 `rmA`로 바뀐다(왕복)."""
-    return _띄운_rm.sub("rm", script)
-
-
-# LaTeX 원문에 남은 한/글 글꼴 명령 낱말 — python-hwpx(6.8.0·6.9.0)의 eqedit_to_latex는 한/글 수식의 rm·it·bold를 LaTeX로
-# 옮기지 않고 낱말로 두고, latex_to_eqedit는 그 낱말을 글로 보고 따옴표를 쳐(`"it"`) 한/글이 글자 it를 찍는다 — 기하 원안지를
-# 다시 조판하니 벡터 식이 `AB = ita`로 찍혔다(10-26 렌더). 상류가 고치기 전까지 조용히 깨진 수식을 내지 않고 멈춘다.
+# LaTeX 원문에 남은 한/글 글꼴 명령 낱말 — latex_to_eqedit는 낱말 rm·it·bold를 글로 보고 따옴표를 쳐(`"it"`) 한/글이 글자
+# it를 찍는다. python-hwpx 6.8.0·6.9.0의 eqedit_to_latex가 원안지 수식의 글꼴 명령을 낱말로 남겨 기하 원안지를 다시 조판하니
+# 벡터 식이 `AB = ita`로 찍혔다(10-26 렌더) — 6.10.0이 고쳤다(#582). 손으로 쓴 원고 LaTeX에 남은 낱말은 여전히 멈춘다.
 # 글 인자(\text{…}·\mathrm{…} 등) 안은 글이라 보지 않고, 점 이름 `rmA`(뒤에 글자가 붙은 꼴)는 한/글이 정자 A로 읽어 걸지 않는다.
 _글_인자 = re.compile(r"\\(?:text|textrm|mathrm|mathbf|operatorname)\s*\{[^{}]*\}")
 _글꼴_낱말 = re.compile(r"(?<![\\A-Za-z])(rm|it|bold)(?![A-Za-z])")
