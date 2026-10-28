@@ -34,7 +34,7 @@ HABIT_KEYS = frozenset({"question_gap", "question_gap_min", "gap_extra_max", "le
 HABIT_OPTIONAL = frozenset({"source", "note", "stem_align", "stem_word_break"})
 STEM_ALIGNS = ("LEFT", "JUSTIFY", "양식")   # 발문 문단 정렬 — 없으면 LEFT(엔진 기본, 10-27 owner), "양식"이면 양식 스타일 그대로
 # 발문 한글 줄 나눔 기준(한/글 문단 모양 '줄 나눔 기준 — 한글') → breakNonLatinWord. 이름과 거꾸로다: 실한컴 렌더(10-27)에서
-# BREAK_WORD 문단은 어절 통째로 넘기고(`원기둥모양그릇에서 ⋯ 물높이변화량과`), KEEP_WORD 문단은 낱말 가운데서 끊었다(`⋯의관/계`).
+# BREAK_WORD 문단은 어절 통째로 넘기고, KEEP_WORD 문단은 긴 낱말 가운데서 끊었다(합성 긴 낱말 발문 렌더).
 STEM_WORD_BREAKS = {"어절": "BREAK_WORD", "글자": "KEEP_WORD"}  # 없으면 어절(엔진 기본), "양식"이면 양식 스타일 그대로
 DEFAULT_HABITS = Path(__file__).resolve().parent / "defaults" / "habits.json"
 
