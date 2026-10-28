@@ -115,16 +115,21 @@ def _check_run(run) -> None:
             raise ValueError(f"run 안의 모르는 요소 hp:{_tag(ch)} — 역변환하지 않는다")
 
 
+_글_인자 = re.compile(r"\\text\{([^{}]*)\}")
+
+
 def _수식_원고(eq) -> str:
     """hp:equation → 원고 수식 `$LaTeX$`(hwpx.equation.eqedit_to_latex). 되돌린 LaTeX가 다시 한/글 수식으로 바뀌지 않으면
     (조판할 수 없는 원고가 되면) 오류."""
     s = eq.find(q("hp", "script"))
-    script = equation.glued("" if s is None else (s.text or "").strip())  # `rm A` → `rmA`(equation.glued)
+    script = equation.spaced("" if s is None else (s.text or "").strip())  # `rmA` → `rm A` → `\\mathrm{A}`(equation.spaced)
     script = script.rstrip(" " + equation.뒤_띄움).rstrip() or script  # 끝의 1/4 칸(`)은 조판 관례 — 원고에 쓰지 않는다
     if not script:
         raise ValueError("빈 수식(hp:script 없음) — 역변환하지 않는다")
     try:
-        latex = eqedit_to_latex(script)
+        # 한/글 `{rm "A" it}`는 python-hwpx 6.10.0이 `\\text{A}`로 되돌린다 — `\\mathrm{A}`와 한/글 수식이 같다(둘 다
+        # `{rm "A" it}`). 교사 원안지의 `rm A`는 `\\mathrm{A}`로 오니 원고 표기를 하나로 맞춘다(왕복 고정점).
+        latex = _글_인자.sub(r"\\mathrm{\1}", eqedit_to_latex(script))
         equation.to_script(latex)
     except (EquationConversionError, equation.MathError) as e:
         raise ValueError(f"수식 {script!r}을 원고 LaTeX로 되돌릴 수 없다 — {e}") from e
