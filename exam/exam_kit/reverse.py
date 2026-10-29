@@ -128,6 +128,7 @@ def _수식_원고(eq) -> str:
     s = eq.find(q("hp", "script"))
     script = equation.spaced("" if s is None else (s.text or "").strip())  # `rmA` → `rm A` → `\\mathrm{A}`(equation.spaced)
     script = script.rstrip(" " + equation.뒤_띄움).rstrip() or script  # 끝의 1/4 칸(`)은 조판 관례 — 원고에 쓰지 않는다
+    script = equation.comma_unspaced(script)  # 쉼표 뒤 1/2 칸(``)도 조판 관례
     if not script:
         raise ValueError("빈 수식(hp:script 없음) — 역변환하지 않는다")
     try:

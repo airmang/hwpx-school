@@ -334,12 +334,12 @@ def test_역변환은_끝의_4분의1칸을_걷는다():
 
 
 @pytest.mark.parametrize("latex, want", [
-    (r"(\frac{5}{2}, \frac{3}{2}, 1)", "LEFT ( {5} over {2} , {3} over {2} , 1 RIGHT )"),  # 10-27 비교 그림: 긴 괄호가 맞다
+    (r"(\frac{5}{2}, \frac{3}{2}, 1)", "LEFT ( {5} over {2} ,`` {3} over {2} ,`` 1 RIGHT )"),  # 10-27 비교 그림: 긴 괄호가 맞다
     (r"|\vec{a}| = \sqrt{3}", "LEFT | vec {a} RIGHT | = sqrt {3}"),                         # 교사 원안지: 벡터 크기 4곳 모두
-    (r"[\frac{1}{2}, 1]", "LEFT [ {1} over {2} , 1 RIGHT ]"),
+    (r"[\frac{1}{2}, 1]", "LEFT [ {1} over {2} ,`` 1 RIGHT ]"),
     (r"((\frac{1}{2})^2 + 1)", "LEFT ( LEFT ( {1} over {2} RIGHT ) ^{2} + 1 RIGHT )"),
     (r"\left(\frac{1}{2}\right)", "LEFT ( {1} over {2} RIGHT )"),                              # 이미 붙은 것은 그대로
-    (r"(1, 2)", "( 1 , 2 )"), (r"f(x)=\frac{1}{x}", "f ( x ) = {1} over {x}"), (r"|x|+|y|", "| x | + | y |"),
+    (r"(1, 2)", "( 1 ,`` 2 )"), (r"f(x)=\frac{1}{x}", "f ( x ) = {1} over {x}"), (r"|x|+|y|", "| x | + | y |"),
     (r"P(A|B)", "P ( A | B )"),
 ])
 def test_키_큰_것을_감싼_괄호는_늘인다(latex, want):
@@ -357,3 +357,21 @@ def test_E028_선분_길이_막대():
     for ok in (r"$\overline{\mathrm{PQ}}=7$", r"$\overline{PQ}=\overline{RS}$", r"$\vec{PQ}=\vec{a}$", r"$x=7$",
                r"$\mathrm{PQ}$의 길이"):
         assert not {"E028", "W028"} & set(codes(ok)), ok
+
+
+@pytest.mark.parametrize("latex, want", [
+    (r"(4, 1)", "( 4 ,`` 1 )"), (r"\alpha, \beta", "alpha ,`` beta"), (r"x,", "x ,"), (r"\text{a, b}", '{rm "a , b" it}'),
+])
+def test_수식_안_쉼표_뒤는_2분의1칸(latex, want):
+    """교사 기하 원안지 실측(10-29): 수식 안 쉼표 뒤에 이어지는 것이 있는 27곳 모두 `` — 수식 끝 쉼표·따옴표 글은 그대로."""
+    assert eq.to_script(latex) == want
+
+
+def test_역변환은_쉼표_뒤_띄움을_걷는다():
+    import lxml.etree as ET
+    from exam_kit import HP
+    from exam_kit.reverse import _수식_원고
+
+    el = ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>(4,``1)`</hp:script></hp:equation>')
+    latex = _수식_원고(el)[1:-1]
+    assert "\\," not in latex and eq.to_script(latex) == "( 4 ,`` 1 )"

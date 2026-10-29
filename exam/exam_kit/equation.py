@@ -53,6 +53,29 @@ def spaced(script: str) -> str:
     return _붙은_rm.sub("rm ", script)
 
 
+# 수식 안 쉼표 뒤에 다른 것이 이어지면 1/2 칸(``)을 둔다 — 교사 기하 원안지 실측(10-29): 그런 쉼표 27곳(좌표 `(4,``1)`
+# 17·나열 `α,``β` 10) 모두. 쉼표 앞 띄움은 26곳 중 3곳뿐이라 관례가 아니다. 원고에는 쓰지 않는다 — 조판이 붙이고 역변환이 걷는다.
+쉼표_뒤 = "``"
+_쉼표_띄움 = re.compile(r",(?:\s*`)*\s*(?=\S)")
+_쉼표_걷기 = re.compile(r",\s*(?:`\s*)+")
+
+
+def _따옴표_밖(script: str, fn) -> str:
+    """한/글 수식의 따옴표 글(`"…"`) 밖에만 fn을."""
+    parts = script.split('"')
+    return '"'.join(fn(x) if k % 2 == 0 else x for k, x in enumerate(parts))
+
+
+def comma_spaced(script: str) -> str:
+    """수식 안 쉼표 뒤에 이어지는 것이 있으면 `` (1/2 칸) — 이미 있는 띄움은 하나로 맞춘다."""
+    return _따옴표_밖(script, lambda x: _쉼표_띄움.sub(f",{쉼표_뒤} ", x))
+
+
+def comma_unspaced(script: str) -> str:
+    """comma_spaced의 거꾸로 — 쉼표 뒤 ` 띄움을 걷는다(역변환: 원고에는 쉼표만)."""
+    return _따옴표_밖(script, lambda x: _쉼표_걷기.sub(", ", x))
+
+
 # LaTeX 원문에 남은 한/글 글꼴 명령 낱말 — latex_to_eqedit는 낱말 rm·it·bold를 글로 보고 따옴표를 쳐(`"it"`) 한/글이 글자
 # it를 찍는다. python-hwpx 6.8.0·6.9.0의 eqedit_to_latex가 원안지 수식의 글꼴 명령을 낱말로 남겨 기하 원안지를 다시 조판하니
 # 벡터 식이 `AB = ita`로 찍혔다(10-26 렌더) — 6.10.0이 고쳤다(#582). 손으로 쓴 원고 LaTeX에 남은 낱말은 여전히 멈춘다.
@@ -113,7 +136,7 @@ def to_script(latex: str) -> str:
                         "`\\mathrm{…}`(점 이름은 `rmA`도 된다), 기울임은 명령 없이, 굵게는 `\\mathbf{…}`로 쓴다(한/글 원안지를 "
                         "되돌린 수식이면 상류 python-hwpx 글꼴 명령 되돌림 문제)")
     try:
-        return spaced(latex_to_eqedit(stretched(latex)))
+        return comma_spaced(spaced(latex_to_eqedit(stretched(latex))))
     except EquationConversionError as e:  # UnsupportedLatexError도 이 갈래다
         raise MathError(f"한/글 수식으로 바꿀 수 없다 ${latex}$ — {e}") from e
 
