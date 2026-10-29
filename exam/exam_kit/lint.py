@@ -206,6 +206,7 @@ def lint(md: str, *, md_dir: Path | None = None, rules: dict | None = None, draf
         if code not in SCHOOL_RULES:
             raise ValueError(f"rules.json: 모르는 규칙 {code} — 지원: {sorted(SCHOOL_RULES)}")
         out.extend(SCHOOL_RULES[code](s, cfg))
+    out.extend(rule_md_lines(md))
     out.extend(rule_E010(s, md_dir))
     out.extend(rule_E026(s, md_dir))
     out.extend(rule_W022(s, md_dir))
@@ -428,6 +429,33 @@ def rule_E028(s: Scan) -> list[Violation]:
                 elif m := _선분_이탤릭.search(bare):
                     out.append(_v("W028", line, f"{q.number}번 ${latex}$ — 선분의 길이면 점 이름 위에 막대(정자): "
                                                 f"`\\overline{{\\mathrm{{{m.group(1)}}}}}`(행렬 곱 등 선분이 아니면 그대로 둔다)"))
+    return out
+
+
+_펜스줄 = re.compile(r"^\s*(```|~~~)")
+표_열_최대 = 7  # 열 최소 폭 × 열 수가 박스 안 가용 폭(≈28000~30000)을 넘으면 조판이 멈춘다(G5-6)
+
+
+def rule_md_lines(md: str) -> list[Violation]:
+    """원고 줄 단위 규칙(G5-5·G5-6) — 코드 블록 안 역슬래시(W025), md 표 열 수(E030)."""
+    out, code, table = [], False, False
+    for i, ln in enumerate(md.splitlines(), 1):
+        if _펜스줄.match(ln):
+            code, table = not code, False
+            continue
+        if code:
+            if "\\" in ln:
+                out.append(_v("W025", i, "코드에 역슬래시(\\) — 한글 고정폭 글꼴(굴림체·돋움체)에서 ₩로 찍힌다(줄 이음은 괄호로)"))
+            continue
+        s = ln.strip()
+        if s.startswith("|"):
+            if not table:
+                n = len(split_pipes(s.strip("|")))
+                if n > 표_열_최대:
+                    out.append(_v("E030", i, f"md 표 {n}열 — 박스 폭에 안 들어간다(최대 {표_열_최대}열, 행·열을 바꿔 세로로)"))
+            table = True
+        else:
+            table = False
     return out
 
 

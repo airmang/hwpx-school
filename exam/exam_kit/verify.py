@@ -174,7 +174,7 @@ def _tail_box_findings(page, kit: Kit) -> list[Finding]:
     """꼬리 박스가 오른쪽 단 맨 아래 제자리에 있고 글자와 안 겹치는지 — 순수 함수(pymupdf 쪽 하나).
 
     박스는 geometry.tail_box_rect(폭 = kit.tailbox.width인 가로 테두리선 무리)로 찾는다 — 오른쪽 단에 〈보기〉·격자표가
-    있어도(폭 body_table_width) 섞이지 않는다. 자리 = 윗선이 tail_box_top(kit) ±3pt(설계 R-5, Task 26). 실렌더 없이도
+    있어도 섞이지 않는다(폭, 또는 box_fit = column으로 같은 폭이면 표지 글·높이 — G5-1). 자리 = 윗선이 tail_box_top(kit) ±3pt(설계 R-5, Task 26). 실렌더 없이도
     (합성 PDF) 검증할 수 있도록 쪽 하나만 받는다.
     """
     box = tail_box_rect(page, kit)

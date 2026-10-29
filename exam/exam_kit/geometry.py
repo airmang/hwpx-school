@@ -342,13 +342,18 @@ class Box:
         return self.bottom - self.lines[-1][1]
 
 
+def box_width(kit: Kit) -> int:
+    """본문 박스·격자표 폭(HWPUNIT) — kit.box_fit = column이면 단 폭, 아니면 양식 견본 폭(G5-1)."""
+    return kit.columns["width"] if kit.box_fit == "column" else kit.columns["body_table_width"]
+
+
 def boxes(pdf: Path, kit: Kit, *, width: float | None = None) -> list[Box]:
     """쪽 → 단 → y 차례의 테두리 틀. width = 틀 폭(pt, 기본 본문 표 폭) — 좌우 세로선 짝을 찾는 데 쓴다.
 
     격자표는 열 구분선이 틀 윗선에서 곧장 내려오므로 "표"로 가른다(자료 안의 표는 안여백만큼 아래에서 시작해
     "박스" 그대로). 안에 글리프 줄이 없는 틀은 버린다.
     """
-    w = (width if width is not None else kit.columns["body_table_width"] / 100.0)
+    w = (width if width is not None else box_width(kit) / 100.0)
     out: list[Box] = []
     with pymupdf.open(str(pdf)) as doc:
         for pno, page in enumerate(doc, 1):
@@ -418,11 +423,37 @@ def tail_box_rect(page, kit: Kit):
           and d["rect"].y0 > half and any(abs(d["rect"].x0 - cl) < 1.5 for cl in lefts)]
     if not hs:
         return None
+    if kit.box_fit == "column":
+        return _tail_among_column_boxes(page, kit, hs)
     # 꼬리 박스는 쪽 맨 아래에 있다 — 폭이 비슷한 다른 상자(학교 B의 ◦ 자료 상자 295.1 vs 296.2pt)가 걸려도
     # 가장 아래 가로선에서 박스 높이 안의 무리만 꼬리로 본다.
     low = max(r.y1 for r in hs) - kit.tailbox["height"] / 100.0 - 2.0
     hs = [r for r in hs if r.y0 >= low]
     return pymupdf.Rect(min(r.x0 for r in hs), min(r.y0 for r in hs), max(r.x1 for r in hs), max(r.y1 for r in hs))
+
+
+def _tail_among_column_boxes(page, kit: Kit, hs: list):
+    """본문 박스도 단 폭이라 꼬리 박스와 폭이 같을 때(G5-1·G5-7) — 같은 단에서 꼬리 박스 높이 창 안의 선끼리 무리를 짓고,
+    표지 글(kit.tailbox.marker, 기본 '확인 사항')이 든 무리, 없으면 높이가 꼬리 박스와 같은 무리. 둘 다 없으면 None —
+    넓힌 본문 박스를 꼬리로 잘못 잡으면 measure가 그 안 글자를 빼 단 높이를 낮게 세고 간격 나눔이 넘친다."""
+
+    def 외곽(rs):
+        return pymupdf.Rect(min(r.x0 for r in rs), min(r.y0 for r in rs), max(r.x1 for r in rs), max(r.y1 for r in rs))
+
+    tall, want = kit.tailbox["height"] / 100.0 + 2.0, kit.tailbox["height"] / 100.0
+    groups = []
+    for r in sorted(hs, key=lambda r: r.y0):
+        g = 외곽([x for x in hs if abs(x.x0 - r.x0) < 1.5 and r.y0 - 0.5 <= x.y0 <= r.y0 + tall])
+        if g not in groups:
+            groups.append(g)
+    marks = page.search_for(kit.tailbox.get("marker", "확인 사항"))
+    for g in groups:
+        if any(g.intersects(m) for m in marks):
+            return g
+    for g in groups:
+        if abs(g.height - want) < 2.0:
+            return g
+    return None
 
 
 def tail_box_top(kit: Kit) -> float:
