@@ -73,7 +73,7 @@ def figure_parts(block: Block) -> tuple[list[str], list[Overlay], list[str]]:
     return pics, overlays, bad
 TABLE_ROW_RE = re.compile(r"^\|.*\|\s*$")
 _ATTR_RE = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
-펜스_이름 = ("자료", "보기", "조건", "답항표", "그림", "보존")  # 조건: 〈조건〉 박스(학교 B 결정표 29) — 킷에 견본이 있어야 조판된다
+펜스_이름 = ("자료", "보기", "조건", "답항표", "그림", "보존", "도형")  # 조건: 〈조건〉 박스(학교 B 결정표 29) — 킷에 견본이 있어야 조판된다. 도형: 좌표로 그리는 그림(drawing)
 
 
 @dataclass(frozen=True)

@@ -104,14 +104,18 @@ def _pictures(region: list) -> list[str]:
     return [pic.find(f".//{q('hc', 'img')}").get("binaryItemIDRef") for top in region for pic in top.iter(q("hp", "pic"))]
 
 
+_떠_있는_것 = {q("hp", t) for t in ("equation", "ellipse", "line", "polygon", "curve", "rect", "arc")}
+
+
 def _overlays(p) -> list[tuple]:
-    """문단에 떠 있는 수식·원(그림 위 얹기) — (종류, 수식 글, 세로·가로 오프셋)."""
+    """문단의 그림 위 얹기·도형 개체 — (종류, 수식 글, 세로·가로 오프셋, 크기). 도형 틀(글자처럼 취급한 사각형)도 크기로 든다."""
     out = []
     for run in p.findall(q("hp", "run")):
         for e in run:
-            pos = e.find(q("hp", "pos"))
-            if e.tag in (q("hp", "equation"), q("hp", "ellipse")) and pos is not None and pos.get("treatAsChar") == "0":
-                out.append((e.tag, (e.findtext(q("hp", "script")) or "").strip(), pos.get("vertOffset"), pos.get("horzOffset")))
+            pos, sz = e.find(q("hp", "pos")), e.find(q("hp", "sz"))
+            if e.tag in _떠_있는_것 and pos is not None and (pos.get("treatAsChar") == "0" or e.tag == q("hp", "rect")):
+                out.append((e.tag, (e.findtext(q("hp", "script")) or "").strip(), pos.get("vertOffset"), pos.get("horzOffset"),
+                            None if sz is None else (sz.get("width"), sz.get("height"))))
     return out
 
 
@@ -179,7 +183,7 @@ def apply_patch(old: HwpxDocument, new: HwpxDocument, kit: Kit) -> list[str]:
             raise NeedsRebuild(f"{k}번 문단 수 {len(ua)} ≠ {len(ub)}")
         for j, (x, y) in enumerate(zip(ua, ub)):
             if _overlays(x) != _overlays(y):
-                raise NeedsRebuild(f"{k}번 그림 위 얹기(글자·점)가 바뀌었다")
+                raise NeedsRebuild(f"{k}번 그림 위 얹기(글자·점)·도형이 바뀌었다")
             if re.sub(r"\s", "", para_text(x)) == re.sub(r"\s", "", para_text(y)):
                 continue
             if any(r.find(q("hp", t)) is not None for r in x.findall(q("hp", "run")) for t in ("tbl", "pic")):

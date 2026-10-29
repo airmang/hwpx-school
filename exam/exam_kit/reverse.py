@@ -94,6 +94,7 @@ def underlined_char_prs(doc: HwpxDocument) -> set[str]:
 _run_자식 = {q("hp", "t"), q("hp", "tbl"), q("hp", "pic"), q("hp", "equation"),  # 표·그림은 부르는 쪽이 따로 옮긴다
             q("hp", "ellipse")}  # 떠 있는 작은 원 = 그림 위 점(●) — reverse_body가 그림에 붙인다(아니면 멈춘다)
 # 글을 싣지 않는 컨트롤(누름틀 경계·책갈피·단 설정·쪽 번호·감추기) — 건너뛴다. 각주·미주·새 번호 등은 글이 있어 오류.
+_그리기 = {q("hp", t) for t in ("line", "rect", "polygon", "curve", "arc", "container", "connectLine")}  # :::도형 역변환은 다음 단계
 _무해_컨트롤 = {q("hp", t) for t in ("fieldBegin", "fieldEnd", "bookmark", "colPr", "pageNum", "pageHiding")}
 _공백_자식 = {q("hp", "lineBreak"), q("hp", "nbSpace"), q("hp", "fwSpace")}
 _t_자식 = {q("hp", "tab"), q("hp", "markpenBegin"), q("hp", "markpenEnd")} | _공백_자식
@@ -111,6 +112,9 @@ def _check_run(run) -> None:
             bad = [_tag(c) for c in ch if c.tag not in _무해_컨트롤]
             if bad:
                 raise ValueError(f"run 안의 컨트롤 hp:{', hp:'.join(bad)} — 역변환하지 않는다")
+        elif ch.tag in _그리기:
+            raise ValueError(f"그리기 개체 hp:{_tag(ch)}(선·면·곡선·틀 — 원고 :::도형으로 그린 그림이나 한/글에서 그린 도형)는 "
+                             "아직 원고로 되돌리지 않는다 — 원고의 :::도형을 고쳐 다시 조판한다")
         elif ch.tag not in _run_자식:
             raise ValueError(f"run 안의 모르는 요소 hp:{_tag(ch)} — 역변환하지 않는다")
 

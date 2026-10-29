@@ -220,12 +220,12 @@ def test_paragraph_text_노랑_형광펜이_낱말에_있으면_오류():
         paragraph_text(_p(_run('가<hp:markpenBegin color="#FFFF00"/>중요<hp:markpenEnd/>')), set())
 
 
-@pytest.mark.parametrize("inner", [
-    '<hp:run charPrIDRef="8"><hp:rect/></hp:run>',
-    '<hp:run charPrIDRef="8"><hp:t>a<hp:hyphen/>b</hp:t></hp:run>',
+@pytest.mark.parametrize("inner, match", [
+    ('<hp:run charPrIDRef="8"><hp:rect/></hp:run>', "그리기 개체"),  # 도형 개체는 :::도형을 고치라고 알린다
+    ('<hp:run charPrIDRef="8"><hp:t>a<hp:hyphen/>b</hp:t></hp:run>', "모르는 요소"),
 ])
-def test_paragraph_text_모르는_요소는_오류(inner):
-    with pytest.raises(ValueError, match="모르는 요소"):
+def test_paragraph_text_모르는_요소는_오류(inner, match):
+    with pytest.raises(ValueError, match=match):
         paragraph_text(_p(inner), set())
 
 
