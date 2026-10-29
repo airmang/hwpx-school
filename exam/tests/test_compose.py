@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -19,8 +20,13 @@ from exam_kit.verify import errors, extract_answers, question_heads, verify_docu
 _M = load_kit(kit_dir()).metrics
 
 
+def _1학기(kit):
+    """견본 폭 박스·번호 없는 코드(1학기 모양)로 고정 — 이 파일의 치수 단언은 그 모양을 잰다. 단 폭·회색 번호(G5)는 test_g5."""
+    return replace(kit, box_fit="sample", code_style="plain")
+
+
 def _조판(양식_hwpx, md: str, *, answer_key: bool, doctor=None):
-    kit = load_kit(킷_디렉터리)
+    kit = _1학기(load_kit(킷_디렉터리))
     scan = scan_markdown(md)
     doc, prepared = prepare_document(양식_hwpx, kit)
     fill_slots(doc, kit, scan.front, question_count=len(scan.questions),
@@ -1249,7 +1255,7 @@ def test_그림은_줄이지_않고_넓으면_멈춘다(양식_hwpx, tmp_path):
 
 
 def test_코드_블록은_고정폭_왼쪽_정렬(양식_hwpx):
-    """(Task 30) 코드 줄 = 문단 하나씩, 글자 그대로(공백), 굴림체(kit.code_font)·장평 100·자간 0, 왼쪽 정렬·들여쓰기 0.
+    """(Task 30) 코드 줄 = 문단 하나씩, 글자 그대로(공백), 고정폭(kit.code_font)·장평 100·자간 0, 왼쪽 정렬·들여쓰기 0.
     자료 박스 안 코드도 같다. 자간 맞춤 대상(fit.targets)에서 빠진다. 역변환은 ``` 펜스로 되돌린다."""
     from exam_kit.fit import targets
     from exam_kit.reverse import is_code, mono_char_prs, reverse_body, underlined_char_prs
@@ -1265,7 +1271,7 @@ def test_코드_블록은_고정폭_왼쪽_정렬(양식_hwpx):
             for f in ff.findall(q("hh", "font"))}
     for p in code_ps:
         cp = hdr.find(f".//{q('hh', 'charPr')}[@id='{p.find(q('hp', 'run')).get('charPrIDRef')}']")
-        assert font[cp.find(q("hh", "fontRef")).get("hangul")] == "굴림체"
+        assert font[cp.find(q("hh", "fontRef")).get("hangul")] == kit.code_font
         assert set(cp.find(q("hh", "ratio")).attrib.values()) == {"100"} and set(cp.find(q("hh", "spacing")).attrib.values()) == {"0"}
         pp = _para_pr(doc, p.get("paraPrIDRef"))
         assert pp.find(q("hh", "align")).get("horizontal") == "LEFT"
@@ -1328,7 +1334,7 @@ def test_답항표_균등과_글_길이(양식_hwpx):
 
 
 def test_렌더_코드_블록은_열이_맞는다(양식_hwpx, 오라클, tmp_path):
-    """(Task 30) 굴림체 고정폭 — `열A   0`의 0과 `열B  17`의 7은 같은 글자 칸(x)에 온다(공백 그대로·자간 0·장평 100).
+    """(Task 30) 고정폭(kit.code_font) — `열A   0`의 0과 `열B  17`의 7은 같은 글자 칸(x)에 온다(공백 그대로·자간 0·장평 100).
     자료 박스 안 코드도 같다."""
     import pymupdf
 
@@ -1343,11 +1349,16 @@ def test_렌더_코드_블록은_열이_맞는다(양식_hwpx, 오라클, tmp_pa
     with pymupdf.open(str(pdf)) as d:
         lines = [(sp["font"], [(c["c"], c["bbox"][0]) for c in sp["chars"]])
                  for b in d[0].get_text("rawdict")["blocks"] for ln in b.get("lines", []) for sp in ln["spans"]]
-    code = ["".join(c for c, _ in chars) for f, chars in lines if "Gulim" in f or "굴림" in f]
+    names = {"굴림체": ("Gulim", "굴림"), "돋움체": ("Dotum", "돋움")}[kit.code_font]  # PDF 글꼴 이름
+
+    def mono(f):
+        return any(n in f for n in names)
+
+    code = ["".join(c for c, _ in chars) for f, chars in lines if mono(f)]
     assert any("열A" in t for t in code) and any("열B" in t for t in code), code
 
     def x_of(prefix, ch):
-        chars = next(chars for f, chars in lines if ("Gulim" in f or "굴림" in f) and "".join(c for c, _ in chars).startswith(prefix))
+        chars = next(chars for f, chars in lines if mono(f) and "".join(c for c, _ in chars).startswith(prefix))
         return next(x for c, x in chars if c == ch)
 
     assert abs(x_of("열A", "0") - x_of("열B", "7")) < 0.5  # 반각 칸 6번째(열=2칸, A·B=1칸, 공백 3·2칸)

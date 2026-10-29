@@ -434,7 +434,7 @@ def tail_box_rect(page, kit: Kit):
 
 def _tail_among_column_boxes(page, kit: Kit, hs: list):
     """본문 박스도 단 폭이라 꼬리 박스와 폭이 같을 때(G5-1·G5-7) — 같은 단에서 꼬리 박스 높이 창 안의 선끼리 무리를 짓고,
-    표지 글(kit.tailbox.marker, 기본 '확인 사항')이 든 무리, 없으면 높이가 꼬리 박스와 같은 무리. 둘 다 없으면 None —
+    표지 글(킷 tailbox.marker — 학교 양식 글이라 엔진에 기본값이 없다)이 든 무리, 없으면 높이가 꼬리 박스와 같은 무리. 둘 다 없으면 None —
     넓힌 본문 박스를 꼬리로 잘못 잡으면 measure가 그 안 글자를 빼 단 높이를 낮게 세고 간격 나눔이 넘친다."""
 
     def 외곽(rs):
@@ -446,7 +446,7 @@ def _tail_among_column_boxes(page, kit: Kit, hs: list):
         g = 외곽([x for x in hs if abs(x.x0 - r.x0) < 1.5 and r.y0 - 0.5 <= x.y0 <= r.y0 + tall])
         if g not in groups:
             groups.append(g)
-    marks = page.search_for(kit.tailbox.get("marker", "확인 사항"))
+    marks = page.search_for(kit.tailbox["marker"]) if kit.tailbox.get("marker") else []
     for g in groups:
         if any(g.intersects(m) for m in marks):
             return g

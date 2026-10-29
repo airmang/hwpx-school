@@ -18,7 +18,7 @@ def test_kit_json_로드():
     assert {k: v for k, v in kit.tailbox.items() if k != "note"} == {
         "vertRelTo": "PAPER", "horzRelTo": "PAPER", "horzOffset": 37136, "vertOffset": 85400,
         "width": 30888, "height": 8974, "outMargin": 284, "room": 980,  # room = 줄 아래끝 여유(렌더 실측, Task 15b)
-        "match_text": "저작권"}
+        "match_text": "저작권", "marker": "확인 사항"}  # marker = 단 폭 박스 사이에서 꼬리 박스를 가리는 표지 글(G5-7)
     assert kit.slots_removed == ["논술형_문항수", "논술형_만점"]
     assert kit.notice_box_height == 10668
     assert len(kit.slot_ids()) == 18
@@ -69,7 +69,8 @@ def test_습관값은_habits_json에서_읽고_출처를_남긴다():
     assert (kit.letter_spacing_min, kit.letter_spacing_tail, kit.letter_spacing_safety) == (-17, 0.25, 1)
     assert kit.letter_spacing_role_min == {"발문": -17, "기타": -7}
     assert (kit.word_pull_min, kit.word_pull_gap) == (-4, 2.0)
-    assert kit.code_font == "굴림체" and kit.box_min_height == 6336
+    assert kit.code_font == "돋움체" and kit.box_min_height == 6336  # 2학기 2차 지필(G5)에서 굴림체 → 돋움체
+    assert (kit.box_fit, kit.code_style) == ("column", "gutter")
 
 
 def test_habits_json이_없으면_엔진_기본을_쓰고_출처에_적는다(tmp_path):
