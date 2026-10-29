@@ -14,6 +14,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import drawing
 from .equation import MathError, mask, split_pipes, without_math
 from .scan import IMG_RE, OVERLAY_RE, Scan, figure_parts, scan_markdown
 
@@ -94,7 +95,7 @@ def rule_E007(s: Scan, cfg: dict) -> list[Violation]:
 def rule_E008(s: Scan, cfg: dict) -> list[Violation]:
     out = []
     for q in s.questions:
-        kinds = [b.kind for b in q.blocks if b.kind != "주"]  # 발문 이음 줄(주)은 바로 위 블록에 딸린다 — 순서를 따지지 않는다
+        kinds = [("그림" if b.kind == "도형" else b.kind) for b in q.blocks if b.kind != "주"]  # 발문 이음 줄(주)은 바로 위 블록에 딸린다 — 순서를 따지지 않는다. 도형은 그림 자리
         ranks = [cfg["order"][k] for k in kinds]
         if ranks != sorted(ranks):
             out.append(_v("E008", q.line_no, f"{q.number}번 블록 순서 {kinds} — {cfg['message']}"))
@@ -346,7 +347,12 @@ def rule_E025(s: Scan) -> list[Violation]:
     def 글(blocks) -> list[tuple[int, str]]:
         out = []
         for b in blocks:
-            if b.kind in ("코드", "그림", "답항표"):  # 답항표 줄은 답지로 본다
+            if b.kind in ("코드", "그림", "답항표", "도형"):  # 답항표 줄은 답지로 본다
+                if b.kind == "도형":  # 도형 줄은 글이 아니다 — 얹는 글자(점 이름·길이·자유 글자)만
+                    d = drawing.parse(b)
+                    out += [(b.line_no, f"$\\mathrm{{{n}}}$") for n, dr in d.label_dir.items() if dr]
+                    out += [(b.line_no, f"${t}$") for *_, t, _ in d.lengths]
+                    out += [(b.line_no, f"${o.latex}$") for o in d.labels if o.kind == "글자"]
                 if b.kind == "답항표":
                     out += [(b.line_no, h) for h in b.attrs.get("머리") or []]
                 if b.kind == "그림":  # 그림 위에 얹는 글자도 한/글 수식이다
@@ -412,7 +418,7 @@ def rule_E028(s: Scan) -> list[Violation]:
     out = []
     for q in s.questions:
         lines = [(q.line_no, ln) for ln in q.stem] + [(c.line_no, c.text) for c in q.choices]
-        lines += [(b.line_no, ln) for b in q.blocks if b.kind not in ("코드", "그림", "답항표") for ln in b.lines]
+        lines += [(b.line_no, ln) for b in q.blocks if b.kind not in ("코드", "그림", "답항표", "도형") for ln in b.lines]
         for line, text in lines:
             for latex in re.findall(r"(?<!\\)\$(.+?)(?<!\\)\$", text):
                 bare = _막대_안.sub("", latex)
@@ -425,6 +431,14 @@ def rule_E028(s: Scan) -> list[Violation]:
     return out
 
 
+def rule_E029(s: Scan) -> list[Violation]:
+    """`:::도형`(좌표로 그리는 그림, exam_kit.drawing) 문법 — 모르는 줄, 정의하지 않은 점, 틀 밖의 점, 틀 크기 없음 등."""
+    blocks = [(f"{q.number}번", b) for q in s.questions for b in q.blocks]
+    blocks += [(f"세트 {a}~{b2}", b) for st in s.sets for a, b2 in [st.rng] for b in st.blocks]
+    return [_v("E029", b.line_no, f"{name} :::도형 — {why}") for name, b in blocks if b.kind == "도형"
+            for why in drawing.parse(b).bad]
+
+
 def _수식_하나(latex: str) -> bool:
     """mask가 표기 오류 없이 도는가 — 표기 오류는 E025가 알린다(여기서 겹쳐 알리지 않는다)."""
     try:
@@ -435,7 +449,7 @@ def _수식_하나(latex: str) -> bool:
 
 
 ENGINE_RULES = [rule_E001, rule_E002, rule_E003, rule_E004, rule_E005, rule_E006, rule_E009, rule_E011, rule_E021, rule_E024,
-                rule_E025, rule_E027, rule_E028]
+                rule_E025, rule_E027, rule_E028, rule_E029]
 SCHOOL_RULES = {"W003": rule_W003, "E007": rule_E007, "E008": rule_E008, "E012": rule_E012, "E013": rule_E013,
                 "E014": rule_E014, "E015": rule_E015, "E016": rule_E016, "E017": rule_E017, "E018": rule_E018,
                 "W019": rule_W019, "W020": rule_W020}

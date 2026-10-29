@@ -36,7 +36,7 @@ try:  # paragraph.add_picture가 쓰는 pic 생성기(private) — 칸 안에도
 except ImportError:  # 옮겨졌으면 임시 문단의 add_picture로 만든다(_Composer._pic_element)
     _create_picture_element = None
 
-from . import HP, equation, preserve, q
+from . import HP, drawing, equation, preserve, q
 from .kit import STEM_WORD_BREAKS, Kit, Metrics, style_ids
 from .prepare import _top_tables, is_sample_box
 from .scan import IMG_RE, OVERLAY_RE, TABLE_ROW_RE, Block, Overlay, Question, QuestionSet, Scan, figure_parts, img_attrs
@@ -89,6 +89,7 @@ CM = 72000 / 25.4  # 1 cm = 2834.6 HWPUNIT
 발문_이음_왼여백 = 1680  # 발문 둘째 줄부터의 자리(렌더 실측: 발문 이음 줄 첫 글리프 dx 17.3~17.8pt, 1770이면 참고 줄이 0.9pt 오른쪽) — 〈보기〉 뒤 참고 줄을 여기에 맞춘다
 그림_DPI = 300      # 그림 원래 크기 = 원본 px ÷ 300dpi(인쇄 규격, Task 30) — 원고 폭이 이보다 작으면 줄여 넣는 것
 점_지름 = 340       # 그림 위에 얹는 점(●) 지름 HWPUNIT(3.4pt ≈ 1.2mm) — 기하 원안지 그림의 점(선과 겹치지 않은 것) 실측
+선_굵기 = {"선": 85, "점선": 60, "호": 45, "직각": 55}  # 도형 개체 선 굵기 hp:lineShape width — 교사 원안지 그림 선 0.6~0.9pt 실측(10-23)
 수식_글꼴 = "HancomEQN"  # 킷 typeset.equation_font가 없을 때 — 한/글 기본 수식 글꼴. 교사 원안지 실측(10-26): 기하 원안지
                         # 수식 230개·답변 파일 20개 모두 HancomEQN. python-hwpx add_equation은 HYhwpEQ를 적는다(더 가늘다 — owner 지적)
 겹침_비율 = 0.02    # 얹은 글자 자리 밑 그림의 어두운 점(L < 110) 비율이 이보다 크면 글자가 그림 선과 겹친다 — 교사 예시 문항
@@ -394,6 +395,7 @@ class _Para:
     overlays: list[Overlay] = field(default_factory=list)  # obj(그림) 위에 얹을 글자·점 — 같은 문단에 떠 있는 개체로
     room: tuple[int, int] = (0, 0)  # 얹은 글자가 그림 위·아래로 나가는 만큼 문단 위·아래 간격을 더한다(HWPUNIT)
     stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break를 받는다
+    drawing: object | None = None  # obj(보이지 않는 틀) 위에 그릴 :::도형(drawing.Drawing) — 선·면·곡선을 떠 있는 개체로
 
 
 def _body_region(doc: HwpxDocument, kit: Kit) -> tuple[int, int]:
@@ -1002,6 +1004,18 @@ class _Composer:
             elif b.kind == "표":
                 out.append(_Para("normal", [("", None)],
                                  obj=self.grid(b.lines, self.kit.columns["body_table_width"], f"L{b.line_no} {where}")))
+            elif b.kind == "도형":  # 좌표로 그리는 그림 — 개체마다 따로(drawing)
+                d = drawing.parse(b)
+                if d.bad:
+                    raise ValueError(f"L{b.line_no} {where} :::도형 — {d.bad[0]}")
+                frame = self._frame(round(d.width_cm * CM), round(d.height_cm * CM))
+                labels = self._drawing_labels(d)
+                bulge = [Overlay("점", None, x, y) for a, bb, _, side in d.lengths
+                         for x, y in drawing.length_arc(d.points[a], d.points[bb], side)[0][1:2]]
+                room = self._overlay_room(frame, labels + bulge)
+                self.notes += [f"[글자·선 겹침] {where} 도형 글자 {t} — 그린 선과 겹친다. 이름 놓을 쪽이나 좌표를 바꾼다"
+                               for t in self._drawing_clash(d, labels)]
+                out.append(_Para("normal", [("", None)], obj=frame, align="CENTER", overlays=labels, room=room, drawing=d))
             elif b.kind == "그림":
                 at = _picture_attrs(b)
                 pic = self.picture(b, self.kit.columns["width"])
@@ -1159,9 +1173,122 @@ class _Composer:
             raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
         if spec.obj is not None:
             p.element.find(q("hp", "run")).insert(0, spec.obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
+        if spec.drawing is not None:
+            self._draw(p, pid, spec.obj, spec.drawing)
         if spec.overlays:
             self._overlay(p, pid, spec.obj, spec.overlays)
         return p
+
+    # ---- 좌표로 그리는 도형(:::도형) ------------------------------------------------------------------
+
+    def _frame(self, w: int, h: int) -> ET._Element:
+        """도형 자리를 잡는 보이지 않는 틀 — 글자처럼 취급한 선·채움 없는 사각형(그림 자리와 같은 구실)."""
+        sec = self.doc.sections[0]
+        tmp = sec.add_paragraph("")
+        el = tmp.add_rectangle(w, h, line_width="0", treat_as_char=True).element
+        el.find(q("hp", "lineShape")).set("style", "NONE")
+        el.getparent().remove(el)
+        sec.remove_paragraph(tmp)
+        return el
+
+    def _drawing_labels(self, d) -> list[Overlay]:
+        """얹을 글자·점 — 점 이름(정자, 이름 놓을 쪽으로 글자 반 크기 + 틈만큼), 길이 숫자(호 꼭대기 바깥), 점 찍기, 자유 글자."""
+        out: list[Overlay] = []
+        gap = 0.12  # 꼭짓점·호와 글자 가장자리 사이(cm) — 0.06이면 선 끝에 닿아 보였다(10-29 렌더)
+        for n, dr in d.label_dir.items():
+            if not dr:
+                continue
+            o = Overlay("글자", f"\\mathrm{{{n}}}", 0, 0)
+            bw, bh = (v / CM for v in self._overlay_box(o))
+            ux, uy = drawing.unit(*drawing.방향[dr])
+            off = gap + abs(ux) * bw * 0.45 + abs(uy) * bh * 0.35
+            x, y = d.points[n]
+            out.append(Overlay("글자", o.latex, round(x + ux * off, 3), round(y + uy * off, 3)))
+        for a, b, label, side in d.lengths:
+            (_, top, _), (nx, ny) = drawing.length_arc(d.points[a], d.points[b], side)
+            o = Overlay("글자", label, 0, 0)
+            bw, bh = (v / CM for v in self._overlay_box(o))
+            off = gap + abs(nx) * bw * 0.45 + abs(ny) * bh * 0.35
+            out.append(Overlay("글자", label, round(top[0] + nx * off, 3), round(top[1] + ny * off, 3)))
+        out += [Overlay("점", None, x, y) for x, y in d.dots]
+        return out + list(d.labels)
+
+    def _drawing_clash(self, d, labels: list[Overlay]) -> list[str]:
+        """[기계] 얹은 글자의 글자 자리(수식 상자 가운데 80%×60%)가 그린 선분과 만나는가."""
+        segs = drawing.segments(d)
+        out = []
+        for o in labels:
+            if o.kind != "글자":
+                continue
+            bw, bh = (v / CM for v in self._overlay_box(o))
+            box = (o.x_cm - bw * 0.4, o.y_cm - bh * 0.3, o.x_cm + bw * 0.4, o.y_cm + bh * 0.3)
+            if any(drawing.hits_box(sg, box) for sg in segs):
+                out.append(f"${o.latex}$")
+        return out
+
+    def _origin(self, pid: str, w: int) -> tuple[int, int]:
+        """그림·틀 왼쪽 위의 (가로 단 기준, 세로 문단 기준) 자리 — 문단 기준 세로 원점은 문단 앞 간격(prev) 위, 가운데 문단의
+        그림 왼끝은 줄 시작 + (줄 폭 − 그림 폭) / 2(실한컴 렌더 실측 10-26: 원점·그림 위끝 오차 0.2pt 안)."""
+        pp = self.header.element.find(f".//{q('hh', 'paraPr')}[@id='{pid}']")
+        mg = pp.find(f"{q('hp', 'switch')}/{q('hp', 'case')}/{q('hh', 'margin')}")
+        mg = pp.find(q("hh", "margin")) if mg is None else mg
+        m = {c.tag.split("}")[1]: int(c.get("value")) for c in mg}
+        start = m.get("left", 0) + m.get("intent", 0)
+        line_w = self.kit.columns["width"] - m.get("left", 0) - m.get("right", 0) - m.get("intent", 0)
+        center = pp.find(q("hh", "align")).get("horizontal") == "CENTER"
+        return start + ((line_w - w) // 2 if center else 0), m.get("prev", 0)
+
+    @staticmethod
+    def _float(el: ET._Element, x: int, y: int) -> ET._Element:
+        el.set("textWrap", "IN_FRONT_OF_TEXT")
+        el.find(q("hp", "pos")).attrib.update({
+            "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
+            "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
+            "vertOffset": str(y), "horzOffset": str(x)})
+        return el
+
+    def _draw(self, p, pid: str, frame: ET._Element, d) -> None:
+        """도형을 개체마다 따로 — 면(채운 다각형, 테두리 없음) → 선·점선 → 곡선 → 길이 점선 호 → 직각 표시. 글자·점은 _overlay가
+        뒤에 얹는다(문단 안 차례 = 위에 그려지는 차례)."""
+        x0, y0 = self._origin(pid, int(frame.find(q("hp", "sz")).get("width")))
+
+        def hw(pts):  # cm 좌표들 → (단 기준 왼쪽 위, 그 기준의 상대 좌표들) HWPUNIT
+            xs, ys = [round(x * CM) for x, _ in pts], [round(y * CM) for _, y in pts]
+            mx, my = min(xs), min(ys)
+            return (x0 + mx, y0 + my), [(x - mx, y - my) for x, y in zip(xs, ys)]
+
+        def style(el, kind: str, dash: bool) -> None:
+            ls = el.find(q("hp", "lineShape"))
+            ls.set("width", str(선_굵기[kind]))
+            if dash:
+                ls.set("style", "DASH")
+
+        for ns, color in d.faces:
+            (x, y), pts = hw([d.points[n] for n in ns])
+            el = p.add_polygon(pts, line_width="0", fill_color=color, treat_as_char=False).element
+            el.find(q("hp", "lineShape")).set("style", "NONE")
+            self._float(el, x, y)
+        for a, b, dash in d.lines:
+            (x, y), [(ax, ay), (bx, by)] = hw([d.points[a], d.points[b]])
+            el = p.add_line(ax, ay, bx, by, treat_as_char=False).element
+            style(el, "점선" if dash else "선", dash)
+            self._float(el, x, y)
+        for pts_cm, dash in d.curves:
+            (x, y), pts = hw(pts_cm)
+            el = p.add_curve(pts, treat_as_char=False).element
+            style(el, "점선" if dash else "선", dash)
+            self._float(el, x, y)
+        for a, b, _, side in d.lengths:
+            (x, y), pts = hw(drawing.length_arc(d.points[a], d.points[b], side)[0])
+            el = p.add_curve(pts, treat_as_char=False).element
+            style(el, "호", True)
+            self._float(el, x, y)
+        for h, a, b in d.rights:
+            for seg in drawing.right_mark(d.points[h], d.points[a], d.points[b]):
+                (x, y), [(ax, ay), (bx, by)] = hw(list(seg))
+                el = p.add_line(ax, ay, bx, by, treat_as_char=False).element
+                style(el, "직각", False)
+                self._float(el, x, y)
 
     def _overlay_box(self, o: Overlay) -> tuple[int, int]:
         """얹을 것의 상자 (폭, 높이) HWPUNIT — 점은 점_지름, 글자는 발문 수식 크기의 수식 상자."""
@@ -1210,15 +1337,7 @@ class _Composer:
         **위**이고, 글자처럼 취급한 그림 혼자인 문단에서 그림 위끝은 원점 + prev다. 가운데 문단의 그림 왼끝은 줄 시작 +
         (줄 폭 − 그림 폭) / 2(실한컴 렌더 실측 10-26: 원점·그림 위끝 오차 0.2pt 안). 원고 좌표는 그림 왼쪽 위에서 잰
         얹을 것의 중심이다. 수식 글자는 상자 + 바깥 여백 안쪽에 찍힌다(hp:outMargin)."""
-        pp = self.header.element.find(f".//{q('hh', 'paraPr')}[@id='{pid}']")
-        mg = pp.find(f"{q('hp', 'switch')}/{q('hp', 'case')}/{q('hh', 'margin')}")
-        mg = pp.find(q("hh", "margin")) if mg is None else mg
-        m = {c.tag.split("}")[1]: int(c.get("value")) for c in mg}
-        w = int(pic.find(q("hp", "sz")).get("width"))
-        start = m.get("left", 0) + m.get("intent", 0)
-        line_w = self.kit.columns["width"] - m.get("left", 0) - m.get("right", 0) - m.get("intent", 0)
-        center = pp.find(q("hh", "align")).get("horizontal") == "CENTER"
-        x0, y0 = start + ((line_w - w) // 2 if center else 0), m.get("prev", 0)
+        x0, y0 = self._origin(pid, int(pic.find(q("hp", "sz")).get("width")))
         cp = self.style["number"][2]  # 발문 수식과 같은 글자 크기(발문 = 문항 번호 스타일 문단)
         for o in overlays:
             cx, cy = x0 + round(o.x_cm * CM), y0 + round(o.y_cm * CM)
@@ -1233,11 +1352,7 @@ class _Composer:
             if left < 0 or left + bw > self.kit.columns["width"]:
                 what = "점" if o.kind == "점" else f"${o.latex}$"
                 raise ValueError(f"그림 위 {what} {{x={o.x_cm}cm y={o.y_cm}cm}}이 단 밖으로 나간다 — 좌표를 고친다")
-            el.set("textWrap", "IN_FRONT_OF_TEXT")
-            el.find(q("hp", "pos")).attrib.update({
-                "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
-                "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
-                "vertOffset": str(top - ot), "horzOffset": str(left - ol)})
+            self._float(el, left - ol, top - ot)
 
 
 _낱말 = re.compile(r"((?:__.+?__|[^\s_]|_(?!_))+)(\s*)")  # 낱말 = 공백 없는 덩어리, 밑줄 `__…__`은 공백이 있어도 한 덩어리
