@@ -78,7 +78,7 @@ def test_대상_문단(견본):
         if t.key[1] >= 0:
             assert el.get("styleIDRef") in box_styles, t
     assert not [t for t in ts if t.number == 10 and t.role == "자료"]  # 10번 자료는 격자표뿐(칸은 바탕글)
-    assert not [t for t in ts if t.number == 6 and t.text.strip() in ("(가)", "강화", "지도")]  # 답항표 칸
+    assert not [t for t in ts if t.number == 6 and t.text.strip() in ("(A)", "강화", "지도")]  # 답항표 칸
     answers = [t for t in ts if t.role == "답지" and t.number == 1]
     assert len(answers) == 5  # 5행 답지 줄마다
 

@@ -226,7 +226,7 @@ class _멈춤(Exception):
 
 
 def test_lint_warn이면_경고로_두고_조판한다(양식_hwpx, tmp_path):
-    md = _깨진_원고(tmp_path, "가장 적절한", "가장 적합한")  # E014 — 조판은 할 수 있는 규칙 오류
+    md = _깨진_원고(tmp_path, "이유로 알맞은", "이유로 적합한")  # E014 — 조판은 할 수 있는 규칙 오류
     out = tmp_path / "out"
 
     def 멈춤(hwpx, out_dir):
@@ -307,7 +307,7 @@ def test_단_나눔_pack은_settle의_balance로(양식_hwpx, tmp_path, monkeypa
     """(Task 30) build --pack — balanced면 균형 배치(⓪''), greedy면 앞에서부터 흐르는 대로(상한·꼬리·지시는 그대로)."""
     import exam_kit.build as b
 
-    md = _깨진_원고(tmp_path, "가장 적절한", "가장 적합한")
+    md = _깨진_원고(tmp_path, "이유로 알맞은", "이유로 적합한")
     seen = []
 
     def 가짜_settle(*args, balance=True, **kw):
