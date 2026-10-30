@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pymupdf
@@ -52,7 +53,7 @@ def test_머리_줄과_분할(tmp_path):
 
 
 def test_박스_찾기(tmp_path):
-    kit = load_kit(킷_디렉터리)
+    kit = replace(load_kit(킷_디렉터리), box_fit="sample")  # 견본 폭 박스(단 폭은 test_g5)
     doc = pymupdf.open()
     page = doc.new_page(width=kit.page["width"] / 100, height=kit.page["height"] / 100)
     cl, w = column_lefts(kit)[0], kit.columns["body_table_width"] / 100
@@ -129,7 +130,7 @@ def test_쪽_배치_측정(tmp_path):
 
 
 def test_박스와_격자표_가르기_빈_틀_버리기(tmp_path):
-    kit = load_kit(킷_디렉터리)
+    kit = replace(load_kit(킷_디렉터리), box_fit="sample")  # 견본 폭 박스(단 폭은 test_g5)
     doc = pymupdf.open()
     page = doc.new_page(width=kit.page["width"] / 100, height=kit.page["height"] / 100)
     cl, w = column_lefts(kit)[0], kit.columns["body_table_width"] / 100

@@ -63,6 +63,26 @@ def _박스(kit: Kit, kind: str) -> tuple[str, tuple[int, int], tuple[int, ...],
     return kind, tuple(b["content_cell"]), tuple(b["rails"]), b["style"]
 
 
+def _박스_넓히기(tbl: ET._Element, rails: tuple[int, ...], d: int) -> None:
+    """견본 박스 표를 d만큼 넓힌다(kit.box_fit = column, G5-1) — 레일(양 끝 세로 칸)은 그대로, 내용 칸 +d. 내용 칸이 셋으로
+    나뉜 줄(〈보기〉 제목 줄: 옆 칸·제목·옆 칸)은 제목을 가운데에 두고 양옆 칸이 d/2씩."""
+    ncols = int(tbl.get("colCnt"))
+    content = set(range(ncols)) - set(rails)
+    middle = sorted(content)[len(content) // 2] if len(content) == 3 else None
+    for tc in tbl.iter(q("hp", "tc")):
+        a, sp, sz = tc.find(q("hp", "cellAddr")), tc.find(q("hp", "cellSpan")), tc.find(q("hp", "cellSz"))
+        cols = set(range(int(a.get("colAddr")), int(a.get("colAddr")) + int(sp.get("colSpan"))))
+        if content <= cols:
+            add = d
+        elif middle is not None and cols & content and middle not in cols:
+            add = d // 2
+        else:
+            add = 0
+        sz.set("width", str(int(sz.get("width")) + add))
+    s = tbl.find(q("hp", "sz"))
+    s.set("width", str(int(s.get("width")) + d))
+
+
 _항목_박스 = ("보기", "조건")  # 항목(ㄱ.·∙) 박스 — 글만 받고, 항목 문단 모양(item_pr)을 쓴다
 
 
@@ -133,7 +153,9 @@ def _picture_attrs(block: Block) -> dict:
 def natural_width_cm(px: int) -> float:
     """그림 원본 폭(px)의 인쇄 크기(cm) — 그림_DPI 기준."""
     return px / 그림_DPI * 2.54
-_구분행 = re.compile(r"^\|?(\s*:?-{3,}:?\s*\|)+\s*(:?-{3,}:?\s*)?$")
+# 둘째 행에서만 본다 — 대시 하나 이상(GFM). `:-:`도 구분행(G5-4: 전에는 3개 미만이면 글자 행으로 찍혔다)
+_구분행 = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*(:?-+:?\s*)?$")
+_코드_번호 = re.compile(r"^(\d{2})  (.*)$")  # 코드 줄 번호 'NN␣␣' (kit.code_style = gutter, G5-2)
 # 새 id를 매길 때 겹치면 안 되는 개체 — 표·그림만이 아니라 도형·수식도 같은 id 공간을 쓴다
 _개체 = tuple(q("hp", t) for t in ("tbl", "pic", "rect", "ellipse", "line", "arc", "polygon", "curve", "connectLine",
                                   "container", "equation", "ole", "textart", "video", "chart"))
@@ -394,7 +416,7 @@ class _Para:
     left: int | None = None  # 왼여백을 바꿀 때만(〈보기〉 뒤 참고 줄 — 발문 이음 줄 자리)
     overlays: list[Overlay] = field(default_factory=list)  # obj(그림) 위에 얹을 글자·점 — 같은 문단에 떠 있는 개체로
     room: tuple[int, int] = (0, 0)  # 얹은 글자가 그림 위·아래로 나가는 만큼 문단 위·아래 간격을 더한다(HWPUNIT)
-    stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break를 받는다
+    stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break·stem_condense를 받는다
     drawing: object | None = None  # obj(보이지 않는 틀) 위에 그릴 :::도형(drawing.Drawing) — 선·면·곡선을 떠 있는 개체로
 
 
@@ -486,26 +508,39 @@ class _Composer:
                              align=align, break_setting={"keep_with_next": keep, "keep_lines": True},
                              margins=margins,
                              tab_pr=self.tab_pr(self.slots(role)[1:]) if role == "choice1" else None)
-        if stem and self.kit.stem_word_break:
-            pid = self._with_break(pid, STEM_WORD_BREAKS[self.kit.stem_word_break], fresh=pid not in before)
+        if stem and (self.kit.stem_word_break or self.kit.stem_condense is not None):
+            pid = self._with_break(pid, STEM_WORD_BREAKS[self.kit.stem_word_break] if self.kit.stem_word_break else None,
+                                   fresh=pid not in before, condense=self.kit.stem_condense)
         self._pp[key] = pid
         return pid
 
-    def _with_break(self, pid: str, non_latin: str, *, fresh: bool) -> str:
-        """pid paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)이 non_latin인 paraPr id. 이번에 새로 만든
+    def _with_break(self, pid: str, non_latin: str | None, *, fresh: bool, condense: int | None = None) -> str:
+        """pid paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)이 non_latin, 공백 최소값(condense 속성)이
+        condense인 paraPr id(None인 것은 그대로 — G5-8). 이번에 새로 만든
         paraPr(fresh)이면 그 자리에서 고치고, 양식 등에 있던 것을 재사용했으면 같은 모양을 찾거나 사본을 만든다(양식 문단까지
         바뀌지 않게). 공개 API(ensure_paragraph_format)의 break_setting은 줄 나눔 기준을 받지 않는다 — 고친 뒤에는 모양이
         달라, 같은 모양을 찾아 재사용하는 규칙이 글자 단위 문단과 섞지 않는다."""
         box = next(self.header.element.iter(q("hh", "paraProperties")))
         src = box.find(f"{q('hh', 'paraPr')}[@id='{pid}']")
-        if src.find(q("hh", "breakSetting")).get("breakNonLatinWord") == non_latin:
+
+        def 맞음(e) -> bool:
+            return (non_latin is None or e.find(q("hh", "breakSetting")).get("breakNonLatinWord") == non_latin) \
+                and (condense is None or e.get("condense") == str(condense))
+
+        def 고침(e) -> None:
+            if non_latin is not None:
+                e.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+            if condense is not None:
+                e.set("condense", str(condense))
+
+        if 맞음(src):
             return pid
         if fresh:
-            src.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+            고침(src)
             self.header.mark_dirty()
             return pid
         want = deepcopy(src)
-        want.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+        고침(want)
 
         def 모양(e) -> bytes:
             c = deepcopy(e)
@@ -585,10 +620,10 @@ class _Composer:
         self._ul[base] = cid
         return cid
 
-    def code_char_pr(self, role: str) -> str:
+    def code_char_pr(self, role: str, color: str | None = None) -> str:
         """코드 블록 글자 모양 — 역할 charPr 복제에서 글꼴만 킷 고정폭 글꼴(kit.code_font), 장평 100·자간 0(Task 30).
-        양식 fontface에 그 글꼴이 없으면 언어마다 덧붙인다. 같은 모양이 있으면 재사용."""
-        key = ("코드", role)
+        양식 fontface에 그 글꼴이 없으면 언어마다 덧붙인다. 같은 모양이 있으면 재사용. color면 글자색도(줄 번호·주석 회색)."""
+        key = ("코드", role, color)
         if key in self._ul:
             return self._ul[key]
         ids = code_font_ids(self.header, self.kit.code_font)
@@ -603,6 +638,10 @@ class _Composer:
 
         def 같다(c) -> bool:
             fr, ra, sp = c.find(q("hh", "fontRef")), c.find(q("hh", "ratio")), c.find(q("hh", "spacing"))
+            if color is not None:
+                return (fr is not None and all(fr.get(k) == v for k, v in ids.items()) and ra is not None
+                        and all(v == "100" for v in ra.attrib.values()) and sp is not None
+                        and all(v == "0" for v in sp.attrib.values()) and c.get("textColor") == color)
             return (fr is not None and all(fr.get(k) == v for k, v in ids.items()) and ra is not None
                     and all(v == "100" for v in ra.attrib.values()) and sp is not None
                     and all(v == "0" for v in sp.attrib.values()) and 모양(c) == want)
@@ -614,10 +653,49 @@ class _Composer:
                 el = c.find(q("hh", tag))
                 for k in el.attrib:
                     el.set(k, val)
+            if color is not None:
+                c.set("textColor", color)
 
         cid = self.header.ensure_char_property(predicate=같다, modifier=바꾸기, base_char_pr_id=base).get("id")
         self._ul[key] = cid
         return cid
+
+    def table_width(self) -> int:
+        """박스 밖 격자표·답항표 폭 — kit.box_fit = column이면 단 폭(박스와 같은 오른끝), 아니면 양식 견본 폭."""
+        return self.kit.columns["width"] if self.kit.box_fit == "column" else self.kit.columns["body_table_width"]
+
+    def code_segs(self, line: str, role: str, numbered: bool) -> list[tuple[str, str]]:
+        """코드 한 줄 → 조각. plain = 한 조각. gutter = 줄 번호(회색) + 세로줄, 주석(회색) — 번호 있는 블록에서만(G5-2)."""
+        line = line.replace("\t", "    ")
+        cp = self.code_char_pr(role)
+        if self.kit.code_style != "gutter" or not numbered:
+            return [(line, cp)]
+        grey = self.code_char_pr(role, "#666666")
+        m = _코드_번호.match(line)
+        if m:
+            head, body = [(m.group(1) + " ", grey), ("│ ", grey)], m.group(2)
+        elif line.startswith("    "):
+            head, body = [("   ", cp), ("│ ", grey)], line[4:]
+        else:
+            return [(line, cp)]
+        i = body.find("#")
+        if i >= 0:
+            return head + ([(body[:i], cp)] if body[:i] else []) + [(body[i:], grey)]
+        return head + [(body, cp)]
+
+    def code_overflow(self, lines: list[str], avail: int, role: str, where: str) -> None:
+        """코드 줄이 한 줄 칸 수를 넘으면 notes(G5-3) — 고정폭이라 반각 한 칸 = 글자 크기의 절반, 전각 두 칸.
+        한컴은 넘친 줄을 접어 들여쓰기·줄 번호가 흐트러진다. gutter면 번호 자리 '│'만큼 한 칸 더 센다."""
+        cp = self.header.element.find(f".//{q('hh', 'charPr')}[@id='{self.code_char_pr(role)}']")
+        cols = avail // (int(cp.get("height")) // 2)
+        numbered = any(_코드_번호.match(x) for x in lines)
+        for k, ln in enumerate(lines, 1):
+            ln = ln.replace("\t", "    ").rstrip()
+            w = sum(1 if ord(ch) < 0x1100 else 2 for ch in ln)
+            if self.kit.code_style == "gutter" and numbered and (_코드_번호.match(ln) or ln.startswith("    ")):
+                w += 1
+            if w > cols:
+                self.notes.append(f"{where} 코드 {k}째 줄 {w}칸 > 한 줄 {cols}칸 — 한컴이 줄을 접는다(주석을 윗줄로·줄 이음)")
 
     def code_para_pr(self, role: str) -> str:
         """코드 블록 문단 모양 — 역할 paraPr에서 왼쪽 정렬·들여쓰기 0(칸 안이면 여백도 그 역할 그대로)."""
@@ -791,7 +869,7 @@ class _Composer:
         if any(len(r) != len(head) + 1 for r in rows):
             raise ValueError(f"L{block.line_no} {qn.number}번 답항표 열 수 {[len(r) - 1 for r in rows]} ≠ 머리 {len(head)}")
         left = self._margins("choice5")["left"]
-        room = self.kit.columns["body_table_width"] - left - self.kit.metrics.mark_col  # 답지 자리(왼여백)에서 시작해 박스 오른끝까지
+        room = self.table_width() - left - self.kit.metrics.mark_col  # 답지 자리(왼여백)에서 시작해 박스 오른끝까지
         texts = [list(head)] + [r[1:] for r in rows]
         need = [max(_글폭(t[c].replace("__", ""), self.kit.metrics) for t in texts) + 282 for c in range(len(head))]  # 칸 좌우 여백 141×2
         if max(need) <= room // len(head):  # 균등 칸에 다 들어가면 균등(G2 판정 모양) — 아니면 글 길이에 맞춘다(Task 19)
@@ -942,6 +1020,8 @@ class _Composer:
         kind_ = box_kind(self.kit, block)
         attr, (cc, cr), rails, role = _박스(self.kit, kind_)
         tbl = deepcopy(self.samples.table(attr))
+        if self.kit.box_fit == "column":  # 단 폭 박스(G5-1) — 오른끝이 발문 오른끝과 맞는다
+            _박스_넓히기(tbl, rails, self.kit.columns["width"] - int(tbl.find(q("hp", "sz")).get("width")))
         if self.kit.boxes[kind_].get("inline"):  # 떠 있는 견본(학교 B 자료 상자) → 글자처럼 취급(다른 박스와 같게)
             pos = tbl.find(q("hp", "pos"))
             pos.attrib.update({"treatAsChar": "1", "vertRelTo": "PARA", "horzRelTo": "PARA", "vertOffset": "0",
@@ -962,10 +1042,11 @@ class _Composer:
             if kind != "글" and block.kind in _항목_박스:
                 raise ValueError(f"L{block.line_no} 〈{block.kind}〉 안의 {kind}는 조판하지 않는다 — 자료 박스로 옮긴다")
             if kind == "코드":  # 고정폭 글꼴·왼쪽 정렬, 줄마다 한 문단(공백 그대로) — 높이는 한 줄씩(렌더 뒤 resize_boxes가 맞춘다)
-                cp = self.code_char_pr(role)
+                numbered = any(_코드_번호.match(x) for x in part)
+                self.code_overflow(part, first, role, f"L{block.line_no} :::{block.kind} 안")
                 for code_line in part:
                     h += pitch
-                    sub.append(self._cell_p([(code_line.replace("\t", "    "), cp)], role, pid=self.code_para_pr(role)))
+                    sub.append(self._cell_p(self.code_segs(code_line, role, numbered), role, pid=self.code_para_pr(role)))
                 continue
             if kind == "글":
                 # 〈보기〉 항목은 앞 공백 없이 ㄱ을 x = 0에, 내어쓰기는 self.kit.bogi_hanging_indent(제출본 교사 다수 기하, Task 29)
@@ -1003,7 +1084,7 @@ class _Composer:
                 out.append(self._box(b))
             elif b.kind == "표":
                 out.append(_Para("normal", [("", None)],
-                                 obj=self.grid(b.lines, self.kit.columns["body_table_width"], f"L{b.line_no} {where}")))
+                                 obj=self.grid(b.lines, self.table_width(), f"L{b.line_no} {where}")))
             elif b.kind == "도형":  # 좌표로 그리는 그림 — 개체마다 따로(drawing)
                 d = drawing.parse(b)
                 if d.bad:
@@ -1033,8 +1114,11 @@ class _Composer:
                 else:
                     out.append(_Para("normal", [("", None)], obj=pic, align="CENTER", overlays=over, room=room))
             elif b.kind == "코드":  # 문항·세트의 코드 블록 — 줄마다 고정폭·왼쪽 정렬 문단(Task 30)
-                cp = self.code_char_pr("normal")
-                out += [_Para("normal", [(ln.replace("\t", "    "), cp)], align="LEFT") for ln in b.lines]
+                numbered = any(_코드_번호.match(x) for x in b.lines)
+                mg = self._margins("normal")
+                self.code_overflow(b.lines, self.kit.columns["width"] - mg.get("left", 0) - mg.get("right", 0), "normal",
+                                   f"L{b.line_no} {where}")
+                out += [_Para("normal", self.code_segs(ln, "normal", numbered), align="LEFT") for ln in b.lines]
             elif b.kind == "주":  # 〈보기〉 뒤 참고 줄 — 바탕글 문단, 발문 글자 모양, 발문 이음 줄 자리(09-29 결정)
                 cp = self.style["number"][2]
                 out += [_Para("normal", [(t, c or cp) for t, c in self._segs(ln, "number")], left=발문_이음_왼여백, stem=True)

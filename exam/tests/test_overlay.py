@@ -402,3 +402,44 @@ def test_발문은_기본이_왼쪽_어절(tmp_path):
     assert stem == {("LEFT", "BREAK_WORD")}  # 한/글 breakNonLatinWord는 이름과 거꾸로 — BREAK_WORD가 어절(렌더 10-27)
     assert choice == form_choice  # 답지는 양식 그대로
     assert ("LEFT", "BREAK_WORD") not in form_stem  # "양식"이면 양식 스타일
+
+
+def test_G5_8_발문_공백_최소값(tmp_path):
+    """G5-8(owner 10-29): 습관 stem_condense = 발문 paraPr condense(공백 최소값 %). 답지는 그대로, 키가 없으면 양식 값 그대로."""
+    import dataclasses
+
+    from hwpx.document import HwpxDocument
+    from exam_kit.kit import style_ids
+
+    def 공백(kit, name):
+        doc = HwpxDocument.open(str(rebuild(_md(), kit, 서식, 픽스처, tmp_path / name)))
+        sid = style_ids(doc)
+        pp = {e.get("id"): e for e in doc.oxml.headers[0].element.iter(q("hh", "paraPr"))}
+        def 값(style):
+            return {pp[p.element.get("paraPrIDRef")].get("condense")
+                    for p in doc.sections[0].paragraphs if p.element.get("styleIDRef") == sid[kit.styles[style]][0]}
+        return 값("number"), 값("choice2") | 값("choice3") | 값("choice5") | 값("choice1")
+
+    kit = load_kit(킷)  # 합성 킷 — habits.json에 stem_condense 없음
+    assert kit.stem_condense is None
+    form = HwpxDocument.open(str(서식))
+    form_pp = {e.get("id"): e for e in form.oxml.headers[0].element.iter(q("hh", "paraPr"))}
+    양식_발문 = form_pp[style_ids(form)[kit.styles["number"]][1]].get("condense")
+    stem0, choice0 = 공백(kit, "a.hwpx")
+    assert stem0 == {양식_발문}  # 키 없음 = 양식 값 그대로(엔진 기본 동작 불변)
+    stem, choice = 공백(dataclasses.replace(kit, stem_condense=50), "b.hwpx")
+    assert stem == {"50"}
+    assert choice == choice0  # 답지는 그대로
+
+
+def test_G5_8_공백_최소값_키_검사():
+    import pytest
+
+    from exam_kit.kit import _condense
+
+    assert _condense({}) is None
+    assert _condense({"stem_condense": 0}) == 0 and _condense({"stem_condense": 75}) == 75
+    for bad in (76, -1, "50", True, 50.0):
+        with pytest.raises(ValueError, match="stem_condense"):
+            _condense({"stem_condense": bad})
+
