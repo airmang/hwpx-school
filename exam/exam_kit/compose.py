@@ -416,7 +416,7 @@ class _Para:
     left: int | None = None  # 왼여백을 바꿀 때만(〈보기〉 뒤 참고 줄 — 발문 이음 줄 자리)
     overlays: list[Overlay] = field(default_factory=list)  # obj(그림) 위에 얹을 글자·점 — 같은 문단에 떠 있는 개체로
     room: tuple[int, int] = (0, 0)  # 얹은 글자가 그림 위·아래로 나가는 만큼 문단 위·아래 간격을 더한다(HWPUNIT)
-    stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break를 받는다
+    stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break·stem_condense를 받는다
     drawing: object | None = None  # obj(보이지 않는 틀) 위에 그릴 :::도형(drawing.Drawing) — 선·면·곡선을 떠 있는 개체로
 
 
@@ -508,26 +508,39 @@ class _Composer:
                              align=align, break_setting={"keep_with_next": keep, "keep_lines": True},
                              margins=margins,
                              tab_pr=self.tab_pr(self.slots(role)[1:]) if role == "choice1" else None)
-        if stem and self.kit.stem_word_break:
-            pid = self._with_break(pid, STEM_WORD_BREAKS[self.kit.stem_word_break], fresh=pid not in before)
+        if stem and (self.kit.stem_word_break or self.kit.stem_condense is not None):
+            pid = self._with_break(pid, STEM_WORD_BREAKS[self.kit.stem_word_break] if self.kit.stem_word_break else None,
+                                   fresh=pid not in before, condense=self.kit.stem_condense)
         self._pp[key] = pid
         return pid
 
-    def _with_break(self, pid: str, non_latin: str, *, fresh: bool) -> str:
-        """pid paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)이 non_latin인 paraPr id. 이번에 새로 만든
+    def _with_break(self, pid: str, non_latin: str | None, *, fresh: bool, condense: int | None = None) -> str:
+        """pid paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)이 non_latin, 공백 최소값(condense 속성)이
+        condense인 paraPr id(None인 것은 그대로 — G5-8). 이번에 새로 만든
         paraPr(fresh)이면 그 자리에서 고치고, 양식 등에 있던 것을 재사용했으면 같은 모양을 찾거나 사본을 만든다(양식 문단까지
         바뀌지 않게). 공개 API(ensure_paragraph_format)의 break_setting은 줄 나눔 기준을 받지 않는다 — 고친 뒤에는 모양이
         달라, 같은 모양을 찾아 재사용하는 규칙이 글자 단위 문단과 섞지 않는다."""
         box = next(self.header.element.iter(q("hh", "paraProperties")))
         src = box.find(f"{q('hh', 'paraPr')}[@id='{pid}']")
-        if src.find(q("hh", "breakSetting")).get("breakNonLatinWord") == non_latin:
+
+        def 맞음(e) -> bool:
+            return (non_latin is None or e.find(q("hh", "breakSetting")).get("breakNonLatinWord") == non_latin) \
+                and (condense is None or e.get("condense") == str(condense))
+
+        def 고침(e) -> None:
+            if non_latin is not None:
+                e.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+            if condense is not None:
+                e.set("condense", str(condense))
+
+        if 맞음(src):
             return pid
         if fresh:
-            src.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+            고침(src)
             self.header.mark_dirty()
             return pid
         want = deepcopy(src)
-        want.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
+        고침(want)
 
         def 모양(e) -> bytes:
             c = deepcopy(e)

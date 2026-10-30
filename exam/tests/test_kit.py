@@ -79,8 +79,9 @@ def test_habits_json이_없으면_엔진_기본을_쓰고_출처에_적는다(tm
     기본 = load_kit(_킷_사본(tmp_path, habits=False))
     assert 기본.habits_source.startswith("엔진 기본 — ")
     # 엔진 기본값 = 첫 등록 학교 1학기 실측(이 누름틀 양식 킷의 습관값) — 출처 표시만 다르고 값은 같다
+    # 선택 키 stem_condense는 1학기 실측이 아니라 학교 킷의 결정(G5-8)이라 비교에서 뺀다 — 엔진 기본은 None(양식 그대로)
     assert dataclasses.replace(기본, root=킷_디렉터리, habits_source="") == dataclasses.replace(
-        load_kit(킷_디렉터리), habits_source="")
+        load_kit(킷_디렉터리), habits_source="", stem_condense=None)
 
 
 def test_빠진_키와_모르는_키는_파일과_키를_적어_멈춘다(tmp_path):

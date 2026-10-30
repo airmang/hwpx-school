@@ -68,8 +68,14 @@ def 합성_md(n: int) -> str:
     return "\n".join(out)
 
 
+def _킷():
+    """발문 공백 최소값은 양식 값(1학기 모양)으로 — 이 파일의 렌더 원고는 넘침 양을 그 모양에 맞춰 짰다. 발문을 좁히는
+    습관(stem_condense, G5-8)이 켜지면 줄이 줄어 넘침 자체가 사라진다."""
+    return replace(load_kit(킷_디렉터리), stem_condense=None)
+
+
 def _마무리(양식_hwpx, md: str):
-    kit = load_kit(킷_디렉터리)
+    kit = _킷()
     scan = scan_markdown(md)
     doc, prepared = prepare_document(양식_hwpx, kit)
     fill_slots(doc, kit, scan.front, question_count=len(scan.questions),
@@ -223,7 +229,7 @@ def test_렌더_간격_줄이기로_쪽을_지킨다(양식_hwpx, 오라클, tmp
         out = tmp_path / f"{tag}.hwpx"
         return doc, out, settle(doc, kit, out, tmp_path / f"r_{tag}", render_fn=lambda h, d: render(h, d, oracle=오라클))
 
-    kit = load_kit(킷_디렉터리)
+    kit = _킷()
     _, _, off = 굳힘(replace(kit, question_gap_min=kit.question_gap), "끔")
     assert off.render.page_count == 3 and off.pages_added, off.notes  # 줄이기 없이는 쪽 추가
     doc, out, s = 굳힘(kit, "켬")
