@@ -369,6 +369,69 @@ def test_컨트롤_안의_표도_거부한다(tmp_path):
     assert not dest.exists()
 
 
+
+def test_컨트롤_안에서_탭_뒤에_든_글자도_거부한다(tmp_path):
+    """`<hp:t><hp:tab/>이름</hp:t>`처럼 글자가 탭 **뒤**(자식의 tail)에 있으면 hp:t 자신의
+    text는 비어 있다 — text만 보면 놓친다(core clear_body로 옮기기 전 이 도구가 그랬다)."""
+    dest_src = tmp_path / "컨트롤탭글자.hwpx"
+    doc = HwpxDocument.open(_표준_스켈레톤)
+    section = doc.sections[0]
+    ctrl = section.element.findall(_q("p"))[0].findall(_q("run"))[0].find(_q("ctrl"))
+    글자 = ctrl.makeelement(_q("t"), {})
+    탭 = 글자.makeelement(_q("tab"), {})
+    탭.tail = "유출될_머리말"
+    글자.append(탭)
+    ctrl.append(글자)
+    section.mark_dirty()
+    doc.save_to_path(dest_src)
+
+    dest = tmp_path / "skeleton.hwpx"
+    with pytest.raises(ValueError, match="첫 문단의 컨트롤 안에 내용이 있다.*hp:t"):
+        extract_skeleton(dest_src, dest)
+    assert not dest.exists()
+
+
+def _둘째_run에_컨트롤_사본을_둔_원본(tmp_path, 이름: str, 내용: str | None) -> Path:
+    """첫 문단 둘째 run에 첫 run의 ctrl 사본을 둔 원본 — 한글은 단·쪽 번호 같은 컨트롤을
+    둘째 run에 쓰기도 한다. *내용*을 주면 그 ctrl 안에 글자를 심는다."""
+    dest = tmp_path / 이름
+    doc = HwpxDocument.open(_표준_스켈레톤)
+    section = doc.sections[0]
+    첫_문단 = section.element.findall(_q("p"))[0]
+    첫_run = 첫_문단.findall(_q("run"))[0]
+    둘째_run = 첫_run.makeelement(_q("run"), dict(첫_run.attrib))
+    ctrl = copy.deepcopy(첫_run.find(_q("ctrl")))
+    if 내용 is not None:
+        글자 = ctrl.makeelement(_q("t"), {})
+        글자.text = 내용
+        ctrl.append(글자)
+    둘째_run.append(ctrl)
+    본문 = 둘째_run.makeelement(_q("t"), {})
+    본문.text = "지워질_본문"
+    둘째_run.append(본문)
+    첫_run.addnext(둘째_run)
+    section.mark_dirty()
+    doc.save_to_path(dest)
+    return dest
+
+
+def test_둘째_run의_컨트롤은_남기고_글자는_지운다(tmp_path):
+    원본 = _둘째_run에_컨트롤_사본을_둔_원본(tmp_path, "둘째run컨트롤.hwpx", None)
+    dest = tmp_path / "skeleton.hwpx"
+    extract_skeleton(원본, dest)
+
+    section0 = zipfile.ZipFile(dest).read("Contents/section0.xml").decode()
+    assert "지워질_본문" not in section0
+    assert section0.count("<hp:ctrl>") == 2
+
+
+def test_둘째_run의_컨트롤_안_내용도_거부한다(tmp_path):
+    원본 = _둘째_run에_컨트롤_사본을_둔_원본(tmp_path, "둘째run컨트롤글자.hwpx", "유출될_꼬리말")
+    dest = tmp_path / "skeleton.hwpx"
+    with pytest.raises(ValueError, match="첫 문단의 컨트롤 안에 내용이 있다.*hp:t"):
+        extract_skeleton(원본, dest)
+    assert not dest.exists()
+
 # --- font_map — kit.json이 준 글꼴 매핑을 header.xml에 적용한다 ------------------------
 # kits/standard/skeleton.hwpx는 기본 템플릿 글꼴만 써서 장식 글꼴이 없으므로, 여기서는
 # 합성으로 심는다(`_금칙장식체_심기`) — 목록 **중간**에 끼워 id 재부여가
