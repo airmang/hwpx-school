@@ -9,9 +9,9 @@ import zlib
 from pathlib import Path
 
 from hwpx import HwpxDocument, HwpxPackage
-from hwpx.oxml.body import INLINE_OBJECT_NAMES
+from hwpx.errors import HwpxValueError
 
-from worksheet.ns import HH, HP
+from worksheet.ns import HH
 
 _OPF = "http://www.idpf.org/2007/opf/"
 _OPF_NS = {"opf": _OPF}
@@ -21,12 +21,6 @@ _고정_시각 = "1970-01-01T00:00:00Z"
 # 끝나야 한다(fail closed). 사후조건이든 구조 거부든 원인은 전부 "원본의 구조" 이므로
 # 예외 타입과 문구 앞머리를 하나로 통일한다.
 _실패_머리말 = "스켈레톤을 안전하게 만들지 못했다"
-# hp:tbl은 표 자체가 태그 이름이라 "인라인 개체"로 안 묶인다 — 별도로 더한다.
-_금지된_로컬이름 = INLINE_OBJECT_NAMES | {"tbl"}
-
-
-def _q(tag: str) -> str:
-    return f"{{{HP}}}{tag}"
 
 
 def _hq(tag: str) -> str:
@@ -40,10 +34,6 @@ _FONTFACE_LANG_TO_ATTR = {
     "HANGUL": "hangul", "LATIN": "latin", "HANJA": "hanja", "JAPANESE": "japanese",
     "OTHER": "other", "SYMBOL": "symbol", "USER": "user",
 }
-
-
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
 
 
 def _흰_png(폭: int = 1, 높이: int = 1) -> bytes:
@@ -295,30 +285,6 @@ def _글꼴_사후조건_확인(
             )
 
 
-def _보존_run_안의_금지_태그(run) -> list[str]:
-    """보존하는 첫 run(secPr·ctrl)의 서브트리 전체에서 글자·표·그림·도형 자손을 찾는다.
-
-    ctrl은 머리말·꼬리말도 담는 범용 컨테이너다 — ctrl **자체**만 보존 대상인지 보는 것으로는
-    부족하다: 그 안쪽까지 봐야 한다. 다른 학교 원본이 머리말에 학교명·교사명을 넣어 뒀다면 바로 이
-    자리(첫 문단 첫 run의 ctrl 안)에 있다. 찾은 태그를 처음 나온 순서·중복 없이
-    `hp:` 접두사를 붙여 돌려준다 — 빈 리스트면 안전하다는 뜻이다.
-    """
-    찾음: list[str] = []
-    for 자손 in run.iter():
-        if 자손 is run:
-            continue
-        이름 = _local_name(자손.tag)
-        if 이름 == "t":
-            if not (자손.text or "").strip():
-                continue
-        elif 이름 not in _금지된_로컬이름:
-            continue
-        태그 = f"hp:{이름}"
-        if 태그 not in 찾음:
-            찾음.append(태그)
-    return 찾음
-
-
 def _사후조건_확인(
     saved: HwpxDocument,
     *,
@@ -368,45 +334,29 @@ def extract_skeleton(
             f"{_실패_머리말}: 섹션이 둘 이상인 원본은 지원하지 않는다: {len(doc.sections)}개"
         )
     section = doc.sections[0]
-    element = section.element
-
-    paragraphs = element.findall(_q("p"))
-    if not paragraphs:
+    if not section.paragraphs:
         raise ValueError(f"{_실패_머리말}: 본문 문단이 없다: {source}")
-    first = paragraphs[0]
-    if not first.findall(f".//{_q('secPr')}"):
-        raise ValueError(f"{_실패_머리말}: 첫 문단에 secPr이 없다 — 원본 구조가 예상과 다르다")
 
-    첫_문단 = section.paragraphs[0]
-    for run in 첫_문단.runs[1:]:
-        run.remove()
-    첫_run = first.find(_q("run"))
-
-    # 보존하는 첫 run에 secPr·ctrl 말고 글자(hp:t)·표·그림·도형이 같이 들어 있으면 그대로
-    # 새 나갔다 — 화이트리스트(secPr·ctrl만 남긴다)로 나머지 자식을 전부 지운다.
-    보존할_자식 = {_q("secPr"), _q("ctrl")}
-    first_run_stripped = 0
-    for child in list(첫_run):
-        if child.tag not in 보존할_자식:
-            첫_run.remove(child)
-            first_run_stripped += 1
-
-    # 보존한 secPr·ctrl **안쪽**까지 본다. ctrl은 머리말·꼬리말도 담는 범용
-    # 컨테이너라, 위 화이트리스트만으로는 그 안에 든 내용을 놓친다. 여기서 걸리면
-    # 자동으로 지우지 않고 통째로 거부한다 — 무엇을 지워도 되는지 이 함수가 판단할 만큼
-    # 확신할 수 없어서다.
-    금지_태그 = _보존_run_안의_금지_태그(첫_run)
-    if 금지_태그:
-        raise ValueError(
-            f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
-            f"(머리말·꼬리말일 수 있다) — {', '.join(금지_태그)}"
-        )
-
-    for cache in first.findall(_q("linesegarray")):
-        first.remove(cache)
-    for paragraph in section.paragraphs[1:]:
-        paragraph.remove()
-    section.mark_dirty()
+    # 본문 비우기는 core의 clear_body가 한다: 첫 문단 첫 run의 secPr(쪽 설정)과 첫 문단
+    # run들의 ctrl(단·머리말·꼬리말·쪽 번호)만 남기고 나머지 문단·글자·표·그림·도형과 줄
+    # 캐시를 지운다. ctrl은 머리말·꼬리말도 담는 범용 컨테이너라, 남기는 secPr·ctrl **안쪽**에
+    # 글자·표·개체가 있으면(다른 학교 원본의 머리말에 든 학교명·교사명 같은) 지우지 않고
+    # 통째로 거부한다("raise") — 무엇을 지워도 되는지 이 함수가 판단할 만큼 확신할 수
+    # 없어서다. 거부는 아무것도 바꾸기 전에 일어난다.
+    try:
+        보고 = section.clear_body(on_control_content="raise")
+    except HwpxValueError as exc:
+        if exc.code == "section-clear-no-section-properties":
+            raise ValueError(
+                f"{_실패_머리말}: 첫 문단 첫 run에 secPr이 없다 — 원본 구조가 예상과 다르다"
+            ) from exc
+        if exc.code == "section-clear-control-content":
+            raise ValueError(
+                f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
+                f"(머리말·꼬리말일 수 있다) — {', '.join(exc.context['tags'])}"
+            ) from exc
+        raise
+    first_run_stripped = 보고.stripped_run_children
 
     package = doc.package
     for item_id in _bindata_item_ids(package):
