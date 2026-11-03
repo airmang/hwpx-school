@@ -208,6 +208,48 @@ def test_font_map을_안_주면_보고서의_fonts_remapped는_0(합성_원본, 
     assert _원본_글꼴 in header  # font_map을 안 줬으니 원본 글꼴 이름은 그대로 남는다
 
 
+def test_font_map은_같은_이름으로_여러_번_선언된_원래_글꼴을_모두_지운다(합성_원본, 킷_루트, tmp_path):
+    """한컴이 저장한 양식은 한 글꼴을 한 목록에 두 번 적기도 한다 — 예전 구현은 첫 항목만
+    지워 사후조건에서 거부했다. 둘째 사본을 가리키는 참조도 대상 글꼴로 옮겨야 한다."""
+    원본 = tmp_path / "중복.hwpx"
+    with zipfile.ZipFile(합성_원본) as zin:
+        조각들 = [(정보, zin.read(정보.filename)) for 정보 in zin.infolist()]
+    with zipfile.ZipFile(원본, "w") as zout:
+        for 정보, 데이터 in 조각들:
+            if 정보.filename == "Contents/header.xml":
+                뿌리 = ET.fromstring(데이터)
+                for fontface in 뿌리.iter(f"{{{HH}}}fontface"):
+                    fonts = fontface.findall(f"{{{HH}}}font")
+                    fontface.append(fontface.makeelement(
+                        f"{{{HH}}}font",
+                        {"id": str(len(fonts)), "face": _원본_글꼴, "type": "TTF", "isEmbedded": "0"},
+                    ))
+                    fontface.set("fontCnt", str(len(fonts) + 1))
+                    if fontface.get("lang") == "HANGUL":
+                        사본_id = str(len(fonts))
+                첫_장식 = _장식_charPr_id(킷_루트)[0]
+                뿌리.find(f".//{{{HH}}}charPr[@id='{첫_장식}']/{{{HH}}}fontRef").set("hangul", 사본_id)
+                데이터 = ET.tostring(뿌리, encoding="utf-8", xml_declaration=True)
+            zout.writestr(정보, 데이터)
+
+    dest = tmp_path / "s.hwpx"
+    extract_skeleton(원본, dest, font_map={_원본_글꼴: _대상_글꼴})
+
+    header = zipfile.ZipFile(dest).read("Contents/header.xml")
+    assert _원본_글꼴 not in header.decode()
+    for cid in _장식_charPr_id(킷_루트):
+        for 속성 in _언어_속성:
+            assert _charPr_글꼴(header, cid, 속성) == _대상_글꼴, f"charPr {cid} {속성}"
+    assert HwpxDocument.open(dest).validate().ok
+
+
+def test_font_map에서_원래와_바꿀_글꼴이_같으면_파일을_안_남긴다(합성_원본, tmp_path):
+    dest = tmp_path / "s.hwpx"
+    with pytest.raises(ValueError, match=f"font_map 항목 '{_대상_글꼴}' → '{_대상_글꼴}'를 적용할 수 없다"):
+        extract_skeleton(합성_원본, dest, font_map={_대상_글꼴: _대상_글꼴})
+    assert not dest.exists()
+
+
 def test_커밋된_킷_스켈레톤은_기본_템플릿_글꼴만_쓴다(킷_루트):
     """씨앗은 기본 템플릿 글꼴(함초롬돋움·함초롬바탕)뿐이다 — 킷 역할 글자는 전부 함초롬돋움."""
     header = zipfile.ZipFile(킷_루트 / "skeleton.hwpx").read("Contents/header.xml")

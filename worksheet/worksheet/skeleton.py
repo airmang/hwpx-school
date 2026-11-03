@@ -121,96 +121,30 @@ def _charpr_글꼴_스냅샷(header) -> dict[tuple[str, str], str | None]:
     return 스냅샷
 
 
-def _글꼴_한쌍_다시가리키기(header, src_face: str, dst_face: str) -> tuple[int, bool]:
-    """`header`(hh:head 전체 element)에서 `src_face` → `dst_face` 매핑 하나를 7개 언어
-    각각에 적용한다. `(실제로 다시 가리킨 fontRef 속성 수, 무엇이든 바뀌었는가)`를 돌려준다
-    — 후자는 charPr 리다이렉트가 0건이어도 글꼴 목록 자체는 바뀌는 경우(그 글꼴을 쓰는
-    charPr이 하나도 없을 때)까지 포함해 `header.mark_dirty()`를 부를지 판단하는 신호다.
-
-    언어마다:
-    ① src의 id를 찾는다 — 그 목록에 없으면 이 언어는 건너뛴다(오류 아님 — 다른 학교
-       양식에 표준 씨앗의 fontMap이 딸려 와도 무해해야 한다).
-    ② dst의 id를 찾거나, 없으면 목록 끝에 새로 더한다.
-    ③ 이 언어를 쓰는 모든 charPr의 fontRef를 src→dst로 다시 가리킨다.
-    ④ src의 hh:font 항목을 지우고, 남은 항목의 id를 **문서 순서대로** 0부터 다시
-       붙인다(원래 id 값이 아니라 남은 요소의 상대 순서 기준이다 — 그래서 id가 애초에
-       0..N-1 연속이 아니었어도 항상 안전하다). 그 변화를 이 언어의 모든 fontRef 값에
-       반영하고 fontCnt를 맞춘다 — 공개 스켈레톤에 사용자가 갖지 못한 글꼴의 흔적을
-       남기지 않는다.
-    """
-    charprs = header.findall(f".//{_hq('charPr')}")
-    바뀐_참조_수 = 0
-    무언가_바뀜 = False
-
-    for fontface in header.findall(f".//{_hq('fontface')}"):
-        attr = _FONTFACE_LANG_TO_ATTR.get(fontface.get("lang", ""))
-        if attr is None:  # pragma: no cover - 방어적: 7개 밖의 lang 값은 실측된 적이 없다
-            continue
-
-        fonts = fontface.findall(_hq("font"))
-        face_to_id = {f.get("face"): f.get("id") for f in fonts}
-        if src_face not in face_to_id:
-            continue
-        무언가_바뀜 = True
-        src_id = face_to_id[src_face]
-
-        if dst_face in face_to_id:
-            dst_id = face_to_id[dst_face]
-        else:
-            dst_id = str(len(fonts))
-            새_font = fontface.makeelement(
-                _hq("font"),
-                {"id": dst_id, "face": dst_face, "type": "TTF", "isEmbedded": "0"},
-            )
-            fontface.append(새_font)
-            fonts = fontface.findall(_hq("font"))  # 새 항목을 포함해 다시 읽는다
-
-        for charpr in charprs:
-            fontref = charpr.find(_hq("fontRef"))
-            if fontref is not None and fontref.get(attr) == src_id:
-                fontref.set(attr, dst_id)
-                바뀐_참조_수 += 1
-
-        src_element = next(f for f in fonts if f.get("id") == src_id)
-        남은_것 = [f for f in fonts if f is not src_element]
-        새_id = {f.get("id"): str(idx) for idx, f in enumerate(남은_것)}
-
-        fontface.remove(src_element)
-        for f in 남은_것:
-            f.set("id", 새_id[f.get("id")])
-        fontface.set("fontCnt", str(len(남은_것)))
-
-        for charpr in charprs:
-            fontref = charpr.find(_hq("fontRef"))
-            if fontref is None:
-                continue
-            현재 = fontref.get(attr)
-            if 현재 in 새_id:
-                fontref.set(attr, 새_id[현재])
-
-    return 바뀐_참조_수, 무언가_바뀜
-
-
 def _글꼴_옮기기(doc: HwpxDocument, font_map: dict[str, str]) -> tuple[int, dict]:
     """`font_map`(`{원래 글꼴: 바꿀 글꼴}`)을 header.xml에 적용한다.
 
     `(re-point한 fontRef 속성 수, 적용 전 (charPr id, 언어)→글꼴이름 스냅샷)`을 돌려준다 —
     스냅샷은 적용 **전** 상태를 담아야 하므로 이 함수 맨 앞, 어떤 언어의 fontface도 아직
     안 건드린 시점에 찍는다(그래야 사후조건이 "바꾸기 전"을 정확히 안다).
+
+    교체는 항목마다 core의 `doc.styles.replace_font`가 7개 언어에 한다: 원래 글꼴이 없는
+    언어는 건너뛰고(다른 학교 양식에 표준 씨앗의 fontMap이 딸려 와도 무해해야 한다), 바꿀
+    글꼴을 찾거나 끝에 더하고, fontRef를 옮기고, 원래 글꼴을(같은 이름이 여러 번 선언됐으면
+    모두) 지운 뒤 id를 문서 순서대로 0..N-1로 다시 매기고 fontCnt를 맞춘다. 항목은
+    `font_map` 순서대로 적용한다 — 자기 자신·연쇄는 `kit.validate_font_map`이 이미 막는다.
     """
-    header_part = doc.parts.headers[0]
-    header = header_part.element
-    이전_스냅샷 = _charpr_글꼴_스냅샷(header)
+    이전_스냅샷 = _charpr_글꼴_스냅샷(doc.parts.headers[0].element)
 
     바뀐_참조_수 = 0
-    무언가_바뀜 = False
     for src_face, dst_face in font_map.items():
-        부분_카운트, 부분_바뀜 = _글꼴_한쌍_다시가리키기(header, src_face, dst_face)
-        바뀐_참조_수 += 부분_카운트
-        무언가_바뀜 = 무언가_바뀜 or 부분_바뀜
-
-    if 무언가_바뀜:
-        header_part.mark_dirty()
+        try:
+            보고 = doc.styles.replace_font(src_face, dst_face)
+        except HwpxValueError as exc:
+            raise ValueError(
+                f"{_실패_머리말}: font_map 항목 '{src_face}' → '{dst_face}'를 적용할 수 없다 — {exc}"
+            ) from exc
+        바뀐_참조_수 += 보고.repointed
 
     return 바뀐_참조_수, 이전_스냅샷
 

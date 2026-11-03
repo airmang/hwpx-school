@@ -2,7 +2,7 @@
 name = "assessment"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
-dependencies = ["python-hwpx[preview]>=6.4,<7", "lxml>=5,<7"]
+dependencies = ["python-hwpx[preview]>=6.6,<7", "lxml>=5,<7"]
 
 [dependency-groups]
 dev = [

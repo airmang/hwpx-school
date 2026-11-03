@@ -9,7 +9,7 @@ from hwpx.document import HwpxDocument
 from worksheet.ns import HH, HP
 from worksheet.skeleton import _사후조건_확인, extract_skeleton
 
-from _helpers import _charpr_글꼴이름_전부, _금칙장식체_심기, _png, _제목_charpr
+from _helpers import _LANG_TO_ATTR, _charpr_글꼴이름_전부, _금칙장식체_심기, _png, _제목_charpr
 
 _표준_스켈레톤 = Path(__file__).resolve().parents[1] / "kits" / "standard" / "skeleton.hwpx"
 _OPF_NS = {"opf": "http://www.idpf.org/2007/opf/"}
@@ -584,3 +584,101 @@ def test_font_map은_아무_charPr도_안_가리키는_글꼴도_목록에서_�
         assert 이전_이름 == 이후[키], f"{키}: {이전_이름} -> {이후[키]}"
 
     assert HwpxDocument.open(dest).validate().ok
+
+
+def _header_고쳐_쓰기(source: Path, dest: Path, 고치기) -> None:
+    """`source` 사본의 header.xml 뿌리에 `고치기`를 적용해 `dest`에 쓴다 — 한컴이 저장한
+    양식에서 볼 수 있는 망가진 글꼴 목록을 합성하는 데 쓴다."""
+    with zipfile.ZipFile(source) as zin:
+        parts = [(info, zin.read(info.filename)) for info in zin.infolist()]
+    with zipfile.ZipFile(dest, "w") as zout:
+        for info, data in parts:
+            if info.filename == "Contents/header.xml":
+                root = ET.fromstring(data)
+                고치기(root)
+                data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            zout.writestr(info, data)
+
+
+def test_font_map은_같은_이름으로_여러_번_선언된_원래_글꼴을_모두_지운다(장식_글꼴_심은_원본, tmp_path):
+    """한컴이 저장한 양식은 한 글꼴을 한 목록에 두 번 적기도 한다. 예전 구현은 첫 항목만
+    지워 사후조건에서 거부했다 — 이제 core `replace_font`가 사본을 모두 지우고, 두 사본을
+    가리키던 참조를 모두 옮긴다."""
+    dirty = tmp_path / "dirty.hwpx"
+
+    def 사본_더하기(root: ET.Element) -> None:
+        for fontface in root.findall(f".//{{{HH}}}fontface"):
+            fonts = fontface.findall(f"{{{HH}}}font")
+            사본_id = str(len(fonts))
+            fontface.append(fontface.makeelement(
+                f"{{{HH}}}font", {"id": 사본_id, "face": "금칙장식체", "type": "TTF", "isEmbedded": "0"},
+            ))
+            fontface.set("fontCnt", str(len(fonts) + 1))
+        # 본문 charPr의 한글은 둘째 사본을 가리키게 한다
+        본문 = root.find(f".//{{{HH}}}charPr[@id='0']/{{{HH}}}fontRef")
+        본문.set("hangul", str(len(root.find(f".//{{{HH}}}fontface[@lang='HANGUL']")) - 1))
+
+    _header_고쳐_쓰기(장식_글꼴_심은_원본, dirty, 사본_더하기)
+    font_map = {"금칙장식체": "함초롬돋움"}
+    이전 = _charpr_글꼴이름_전부(dirty)
+    assert 이전[("0", "hangul")] == "금칙장식체"
+
+    dest = tmp_path / "skeleton.hwpx"
+    extract_skeleton(dirty, dest, font_map=font_map)
+
+    assert "금칙장식체" not in zipfile.ZipFile(dest).read("Contents/header.xml").decode()
+    이후 = _charpr_글꼴이름_전부(dest)
+    assert set(이전) == set(이후)
+    for 키, 이전_이름 in 이전.items():
+        assert font_map.get(이전_이름, 이전_이름) == 이후[키], f"{키}: {이전_이름} -> {이후[키]}"
+    assert HwpxDocument.open(dest).validate().ok
+
+
+def test_font_map은_id가_불연속인_목록도_0부터_다시_매긴다(장식_글꼴_심은_원본, tmp_path):
+    dirty = tmp_path / "dirty.hwpx"
+
+    def id_벌리기(root: ET.Element) -> None:
+        for fontface in root.findall(f".//{{{HH}}}fontface"):
+            attr = _LANG_TO_ATTR[fontface.get("lang")]
+            for font in fontface.findall(f"{{{HH}}}font"):
+                font.set("id", str(int(font.get("id")) * 2 + 1))
+            for fontref in root.iter(f"{{{HH}}}fontRef"):
+                fontref.set(attr, str(int(fontref.get(attr)) * 2 + 1))
+
+    _header_고쳐_쓰기(장식_글꼴_심은_원본, dirty, id_벌리기)
+    font_map = {"금칙장식체": "함초롬돋움"}
+    이전 = _charpr_글꼴이름_전부(dirty)
+
+    dest = tmp_path / "skeleton.hwpx"
+    extract_skeleton(dirty, dest, font_map=font_map)
+
+    root = ET.fromstring(zipfile.ZipFile(dest).read("Contents/header.xml"))
+    for fontface in root.findall(f".//{{{HH}}}fontface"):
+        fonts = fontface.findall(f"{{{HH}}}font")
+        assert [f.get("id") for f in fonts] == [str(i) for i in range(len(fonts))]
+        assert fontface.get("fontCnt") == str(len(fonts))
+    이후 = _charpr_글꼴이름_전부(dest)
+    for 키, 이전_이름 in 이전.items():
+        assert font_map.get(이전_이름, 이전_이름) == 이후[키], f"{키}: {이전_이름} -> {이후[키]}"
+
+
+def test_font_map은_아무_글꼴도_안_가리키던_참조가_있으면_파일을_안_남긴다(장식_글꼴_심은_원본, tmp_path):
+    dirty = tmp_path / "dirty.hwpx"
+
+    def 참조_망가뜨리기(root: ET.Element) -> None:
+        root.find(f".//{{{HH}}}charPr[@id='0']/{{{HH}}}fontRef").set("latin", "999")
+
+    _header_고쳐_쓰기(장식_글꼴_심은_원본, dirty, 참조_망가뜨리기)
+    dest = tmp_path / "skeleton.hwpx"
+    with pytest.raises(ValueError, match="fontRef latin='999'가 유효한 id 범위"):
+        extract_skeleton(dirty, dest, font_map={"금칙장식체": "함초롬돋움"})
+    assert not dest.exists()
+
+
+def test_font_map에서_원래와_바꿀_글꼴이_같으면_파일을_안_남긴다(장식_글꼴_심은_원본, tmp_path):
+    """CLI는 `validate_font_map`이 먼저 막지만, `extract_skeleton`을 직접 부르는 쪽도
+    영어 core 오류가 아니라 이 도구의 문구로 거부돼야 한다."""
+    dest = tmp_path / "skeleton.hwpx"
+    with pytest.raises(ValueError, match="font_map 항목 '함초롬돋움' → '함초롬돋움'를 적용할 수 없다"):
+        extract_skeleton(장식_글꼴_심은_원본, dest, font_map={"함초롬돋움": "함초롬돋움"})
+    assert not dest.exists()
