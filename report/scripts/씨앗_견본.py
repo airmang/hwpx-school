@@ -26,6 +26,18 @@ DOTUM, BATANG = "0", "1"  # 기본 템플릿 글꼴 id
 띠색 = "#2E4A7D"  # 합성 씨앗의 남색 — 실제 색은 각 견본이 정한다
 선색 = "#2E4A7D"
 
+# 글자 크기(pt) — 학교 내부 운영·추진 계획서 기준(본문 ㅇ 12pt). 결재용 대외 보고서처럼 더 큰 글씨가
+# 필요하면 이 값을 키우거나 자기 학교 견본을 등록한다. 내어쓰기는 아래 _내어()가 크기에 맞춰 다시 잰다.
+크기 = {"표제": 18, "날짜": 13, "띠": 14, "1단계": 13, "2단계": 12, "3단계": 11, "참고": 10}
+
+# 부호+빈칸 폭(HWPUNIT, 실렌더로 맞춘 값)과 그때의 글자 크기 — 크기를 바꾸면 비례해 줄인다.
+_내어기준 = {"2단계": (2000, 14), "3단계": (1100, 13), "참고": (1600, 12)}
+
+
+def _내어(역할: str) -> int:
+    폭, 기준 = _내어기준[역할]
+    return round(폭 * 크기[역할] / 기준)
+
 
 def _문단모양(doc: HwpxDocument, 왼쪽: int, 내어: int, 줄: int, 위: int = 0, 정렬: str = "JUSTIFY") -> str:
     """기본 문단 모양을 복제해 정렬·왼쪽 여백·내어쓰기·줄간격·문단 위 간격을 정한다 (HWPUNIT)."""
@@ -65,25 +77,25 @@ def _칸(table, 행: int, 열: int, 글: str, 글자: str, 문단: str | None = 
 def main() -> None:
     doc = HwpxDocument.new()
     글자 = {
-        "표제": doc.styles.ensure_run(bold=True, size=20, font="함초롬돋움"),
-        "날짜": doc.styles.ensure_run(bold=True, size=15, font="함초롬바탕"),
-        "띠번호": doc.styles.ensure_run(bold=True, size=16, color="#FFFFFF", font="함초롬돋움"),
-        "띠제목": doc.styles.ensure_run(bold=True, size=16, font="함초롬돋움"),
-        "1단계": doc.styles.ensure_run(bold=True, size=15, font="함초롬돋움"),
-        "2단계": doc.styles.ensure_run(size=14, font="함초롬바탕"),
-        "3단계": doc.styles.ensure_run(size=13, font="함초롬바탕"),
-        "참고": doc.styles.ensure_run(size=12, font="함초롬바탕"),
+        "표제": doc.styles.ensure_run(bold=True, size=크기["표제"], font="함초롬돋움"),
+        "날짜": doc.styles.ensure_run(bold=True, size=크기["날짜"], font="함초롬바탕"),
+        "띠번호": doc.styles.ensure_run(bold=True, size=크기["띠"], color="#FFFFFF", font="함초롬돋움"),
+        "띠제목": doc.styles.ensure_run(bold=True, size=크기["띠"], font="함초롬돋움"),
+        "1단계": doc.styles.ensure_run(bold=True, size=크기["1단계"], font="함초롬돋움"),
+        "2단계": doc.styles.ensure_run(size=크기["2단계"], font="함초롬바탕"),
+        "3단계": doc.styles.ensure_run(size=크기["3단계"], font="함초롬바탕"),
+        "참고": doc.styles.ensure_run(size=크기["참고"], font="함초롬바탕"),
         "간격": doc.styles.ensure_run(size=6),
-        "띠간격": doc.styles.ensure_run(size=12),
+        "띠간격": doc.styles.ensure_run(size=10),
     }
     문단 = {
         "가운데": _문단모양(doc, 0, 0, 160, 0, "CENTER"),
         "1단계": _문단모양(doc, 0, 0, 160, 400),
         # 한/글은 첫 줄을 left에서, 둘째 줄부터 left+|내어쓰기|에서 시작한다(실렌더 확인).
         # 내어쓰기 = 부호와 뒤 빈칸 폭 → 둘째 줄이 내용 첫 글자에 맞는다. -·※ 는 ㅇ 내용 아래에서 시작.
-        "2단계": _문단모양(doc, 700, -2000, 160, 200),
-        "3단계": _문단모양(doc, 2700, -1100, 160, 100),
-        "참고": _문단모양(doc, 2700, -1600, 150, 0),
+        "2단계": _문단모양(doc, 700, -_내어("2단계"), 160, 200),
+        "3단계": _문단모양(doc, 700 + _내어("2단계"), -_내어("3단계"), 160, 100),
+        "참고": _문단모양(doc, 700 + _내어("2단계"), -_내어("참고"), 150, 0),
     }
     띠채움 = doc.styles.ensure_border_fill(border_color=띠색, fill_color=띠색)
     띠선 = doc.styles.ensure_border_fill(border_color=선색, active_borders=("top", "bottom"))
