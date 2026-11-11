@@ -52,7 +52,7 @@
       "bottom": 4252
     }
   },
-  "char_pr_count": 16,
+  "char_pr_count": 15,
   "style_coverage_threshold": 0.98,
   "source_basename": "견본.hwpx",
   "ignored_static_paragraphs": 0
