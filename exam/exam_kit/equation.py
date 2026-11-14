@@ -48,6 +48,16 @@ class Math:
 _붙은_rm = re.compile(r"(?<![A-Za-z])rm(?=[A-Z])")
 
 
+# 원고 LaTeX에 쓴 점 이름 `rmA`·`rmPQ`(한/글 표기를 그대로 옮긴 것)는 LaTeX가 아니다 — python-hwpx 6.11.0부터 변환기가 모르는
+# 낱말을 글로 보고 따옴표를 쳐(`"rmA"`) 한/글이 글자 rmA를 찍는다. 변환기에 넘기기 전에 `\mathrm{A}`로 바꾼다.
+_원고_rm = re.compile(r"(?<![A-Za-z\\])rm([A-Z]+)(?![A-Za-z])")
+
+
+def upright_names(latex: str) -> str:
+    """원고 LaTeX의 `rmA` → `\\mathrm{A}`(대문자 점 이름만 — `rm`만 쓴 낱말과 소문자는 그대로 두어 to_script가 알린다)."""
+    return _원고_rm.sub(lambda m: "\\mathrm{" + m.group(1) + "}", latex)
+
+
 def spaced(script: str) -> str:
     """한/글 수식 문자열의 붙은 글꼴 명령을 띄운다(`rmA` → `rm A`) — 한/글 렌더는 같고 폭 어림·LaTeX 되돌림이 맞는다."""
     return _붙은_rm.sub("rm ", script)
@@ -136,7 +146,7 @@ def to_script(latex: str) -> str:
                         "`\\mathrm{…}`(점 이름은 `rmA`도 된다), 기울임은 명령 없이, 굵게는 `\\mathbf{…}`로 쓴다(한/글 원안지를 "
                         "되돌린 수식이면 상류 python-hwpx 글꼴 명령 되돌림 문제)")
     try:
-        return comma_spaced(spaced(latex_to_eqedit(stretched(latex))))
+        return comma_spaced(spaced(latex_to_eqedit(stretched(upright_names(latex)))))
     except EquationConversionError as e:  # UnsupportedLatexError도 이 갈래다
         raise MathError(f"한/글 수식으로 바꿀 수 없다 ${latex}$ — {e}") from e
 

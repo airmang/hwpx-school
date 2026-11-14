@@ -319,8 +319,10 @@ def test_붙은_rm은_띄워서_문서에_넣고_띄워서_되돌린다():
     0.30cm 밀렸다(10-26 렌더). 문서에는 `rm A`(폭이 맞는다). 역변환도 띄워서 넘기면 6.10.0이 `\\mathrm{A}`로 되돌린다(#582)."""
     from exam_kit import equation
 
-    assert equation.to_script("rmA") == "rm A"
-    assert equation.box("rm A", 1100)[0] < equation.box("rmA", 1100)[0] / 2
+    assert equation.to_script("rmA") == equation.to_script("\\mathrm{A}") == '{rm "A" it}'  # 글자 rmA로 찍히지 않는다
+    assert equation.to_script("rmPQ = 2") == '{rm "PQ" it} = 2'
+    assert equation.spaced("rmA") == "rm A"  # 역변환 입력(교사 원안지)
+    assert equation.box("rm A", 1100)[0] == equation.box("rmA", 1100)[0]  # 6.11.0부터 폭 어림도 붙은 꼴을 정자 A로 읽는다
     import lxml.etree as ET
     from exam_kit import HP
     from exam_kit.reverse import _수식_원고
