@@ -360,11 +360,12 @@ def test_E028_선분_길이_막대():
 
 
 @pytest.mark.parametrize("latex, want", [
-    (r"(4, 1)", "( 4 ,`` 1 )"), (r"\alpha, \beta", "alpha ,`` beta"), (r"x,", "x ,"), (r"\text{a, b}", '{rm "a , b" it}'),
+    (r"(4, 1)", "( 4 ,`` 1 )"), (r"\alpha, \beta", "alpha ,`` beta"), (r"x,", "x ,"), (r"\text{a, b}", '{rm "a, b" it}'),
 ])
 def test_수식_안_쉼표_뒤는_2분의1칸(latex, want):
     """교사 기하 원안지 실측(10-29): 수식 안 쉼표 뒤에 이어지는 것이 있는 27곳 모두 `` — 수식 끝 쉼표·따옴표 글은 그대로."""
-    assert eq.to_script(latex) == want
+    # 따옴표 글 안의 띄어쓰기: python-hwpx 6.12.0까지는 낱말마다 띄워 `a , b`, 그 뒤는 원고 그대로 `a, b` — 어느 쪽이든 ``는 없다
+    assert eq.to_script(latex).replace('"a , b"', '"a, b"') == want
 
 
 def test_역변환은_쉼표_뒤_띄움을_걷는다():
