@@ -320,7 +320,8 @@ def column_widths(rows: list[list[str]], total: int, minimum: int, pad: int = 0,
 
 
 def derive_para_pr(header, base: str, *, prev: int | None = None, align: str | None = None,
-                   break_setting: dict | None = None, tab_pr: str | None = None, margins: dict | None = None) -> str:
+                   break_setting: dict | None = None, tab_pr: str | None = None, margins: dict | None = None,
+                   condense: int | None = None) -> str:
     """base paraPr의 복제 id — prev·margins(intent·left·right·next)면 그 여백을 case 분기 = 값, default 분기 = 2배로(양식 실측).
 
     값이 None인 여백은 base 그대로 둔다. tab_pr면 탭 정의(tabPrIDRef)도 바꾼다. python-hwpx 7.0의
@@ -330,7 +331,7 @@ def derive_para_pr(header, base: str, *, prev: int | None = None, align: str | N
     if prev is not None:
         want["prev"] = prev
     return header.ensure_paragraph_format(base_para_pr_id=base, alignment=align, margins=want or None,
-                                          break_setting=break_setting, tab_pr_id_ref=tab_pr)
+                                          break_setting=break_setting, tab_pr_id_ref=tab_pr, condense=condense)
 
 
 def case_prev(header, pid: str) -> int:
@@ -463,59 +464,17 @@ class _Composer:
             # 발문이 다음 줄로 넘어가면 번호 자릿수와 무관하게 공백 한 칸만 들여 쓴다(학교 B 결정표 6) — 첫 줄은 그대로.
             # 한글 문단: 왼여백은 모든 줄, 음수 intent(내어쓰기)는 둘째 줄부터 |intent|만큼 더 들어간다(09-29 렌더 실측)
             margins = {"intent": -self.kit.metrics.space}
-        before = {pp.get("id") for pp in self.header.element.iter(q("hh", "paraPr"))}
+        breaks: dict = {"keep_with_next": keep, "keep_lines": True}
+        condense = None
+        if stem:  # 발문의 한글 줄 나눔 기준·공백 최소값(G5-8) — 한 모양으로 함께 정한다
+            if self.kit.stem_word_break:
+                breaks["break_non_latin_word"] = STEM_WORD_BREAKS[self.kit.stem_word_break]
+            condense = self.kit.stem_condense
         pid = derive_para_pr(self.header, base, prev=self.kit.question_gap if gap else None,
-                             align=align, break_setting={"keep_with_next": keep, "keep_lines": True},
-                             margins=margins,
+                             align=align, break_setting=breaks, margins=margins, condense=condense,
                              tab_pr=self.tab_pr(self.slots(role)[1:]) if role == "choice1" else None)
-        if stem and (self.kit.stem_word_break or self.kit.stem_condense is not None):
-            pid = self._with_break(pid, STEM_WORD_BREAKS[self.kit.stem_word_break] if self.kit.stem_word_break else None,
-                                   fresh=pid not in before, condense=self.kit.stem_condense)
         self._pp[key] = pid
         return pid
-
-    def _with_break(self, pid: str, non_latin: str | None, *, fresh: bool, condense: int | None = None) -> str:
-        """pid paraPr과 같되 한글 줄 나눔 기준(breakSetting breakNonLatinWord)이 non_latin, 공백 최소값(condense 속성)이
-        condense인 paraPr id(None인 것은 그대로 — G5-8). 이번에 새로 만든
-        paraPr(fresh)이면 그 자리에서 고치고, 양식 등에 있던 것을 재사용했으면 같은 모양을 찾거나 사본을 만든다(양식 문단까지
-        바뀌지 않게). 공개 API(ensure_paragraph_format)의 break_setting은 줄 나눔 기준을 받지 않는다 — 고친 뒤에는 모양이
-        달라, 같은 모양을 찾아 재사용하는 규칙이 글자 단위 문단과 섞지 않는다."""
-        box = next(self.header.element.iter(q("hh", "paraProperties")))
-        src = box.find(f"{q('hh', 'paraPr')}[@id='{pid}']")
-
-        def 맞음(e) -> bool:
-            return (non_latin is None or e.find(q("hh", "breakSetting")).get("breakNonLatinWord") == non_latin) \
-                and (condense is None or e.get("condense") == str(condense))
-
-        def 고침(e) -> None:
-            if non_latin is not None:
-                e.find(q("hh", "breakSetting")).set("breakNonLatinWord", non_latin)
-            if condense is not None:
-                e.set("condense", str(condense))
-
-        if 맞음(src):
-            return pid
-        if fresh:
-            고침(src)
-            self.header.mark_dirty()
-            return pid
-        want = deepcopy(src)
-        고침(want)
-
-        def 모양(e) -> bytes:
-            c = deepcopy(e)
-            c.attrib.pop("id", None)
-            return ET.tostring(c, method="c14n")
-
-        key = 모양(want)
-        for pp in box.findall(q("hh", "paraPr")):
-            if 모양(pp) == key:
-                return pp.get("id")
-        want.set("id", str(max(int(pp.get("id")) for pp in box.findall(q("hh", "paraPr"))) + 1))
-        box.append(want)
-        box.set("itemCnt", str(len(box.findall(q("hh", "paraPr")))))
-        self.header.mark_dirty()
-        return want.get("id")
 
     def tab_pr(self, positions: list[int]) -> str:
         """왼쪽 탭 positions(단 왼끝 기준 HWPUNIT)의 tabPr id — 1행답항 스타일 tabPr을 본뜬다: 탭마다 hp:switch 하나,
