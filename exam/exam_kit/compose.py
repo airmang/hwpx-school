@@ -1492,19 +1492,20 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
     sec.mark_dirty()
 
 
-def _mark_at(t: ET._Element, anchor, mark: str) -> None:
-    """t 안에서 anchor(None = t.text, 아니면 그 자식의 tail) 앞머리 mark를 <markpenBegin/>mark<markpenEnd/>로 감싼다."""
-    rest = (t.text if anchor is None else anchor.tail)[len(mark):]
-    if anchor is None:
-        t.text = None
-    else:
-        anchor.tail = None
-    at = 0 if anchor is None else list(t).index(anchor) + 1
-    begin = ET.SubElement(t, q("hp", "markpenBegin"), {"color": 형광})  # SubElement — 부모의 hp 접두를 물려받는다
-    end = ET.SubElement(t, q("hp", "markpenEnd"))
-    t.insert(at, begin)
-    t.insert(at + 1, end)
-    begin.tail, end.tail = mark, rest or None
+def _mark_spot(paragraphs, mark: str):
+    """정답 형광펜을 칠할 문단 — 런 글(hp:t)이 정답 원문자로 시작하거나 탭 바로 뒤가 정답 원문자인 런이 있는 첫 문단.
+    그 문단에서 원문자가 처음 나오는 곳이 그 자리여야 한다(paragraph.add_highlight는 처음 나오는 곳을 칠한다)."""
+    for p in paragraphs:
+        for r in p.runs:
+            text = r.text
+            if not (text.startswith(mark) or "	" + mark in text):
+                continue
+            first = next(x for x in p.runs if mark in x.text)
+            at = first.text.index(mark)
+            if first != r or not (at == 0 or first.text[at - 1] == "	"):
+                raise ValueError(f"정답 {mark}가 칠할 자리보다 앞에도 있다 — 형광펜을 엉뚱한 곳에 칠하지 않게 멈춘다")
+            return p
+    return None
 
 
 def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, draft: bool = False) -> None:
@@ -1512,8 +1513,12 @@ def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, dr
 
     자리 = 그 문항 답지 줄 문단(답항표면 그 표의 칸)에서 조각 첫머리가 정답 원문자인 곳(줄 첫머리 또는 탭 뒤).
     draft(초안)면 정답 표시 없는 문항은 칠하지 않고 넘어간다(한/글 초안을 되돌린 원고 — 10-01). 최종판은 멈춘다.
+    칠하기는 공개 API(paragraph.add_highlight — <markpenBegin/>①<markpenEnd/>)로.
     """
+    from .fit import inner_paragraphs
+
     ps = list(doc.sections[0].paragraphs)
+    inner = inner_paragraphs(doc)
     n = len(question_heads(doc))
     missing = [k for k in range(1, n + 1) if not answers.get(str(k))]
     if missing and not draft:  # 칠하기 전에 — 반쯤 칠한 문서를 남기지 않게
@@ -1522,21 +1527,10 @@ def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, dr
         if k in missing:
             continue
         mark = answers[str(k)]
-        spot = None
-        for i in choice_paragraphs(doc, kit, k):
-            for t in ps[i].element.iter(q("hp", "t")):
-                if (t.text or "").startswith(mark):
-                    spot = (t, None)
-                else:
-                    spot = next(((t, ch) for ch in t if ch.tag == q("hp", "tab") and (ch.tail or "").startswith(mark)), None)
-                if spot:
-                    break
-            if spot:
-                break
+        spot = _mark_spot((x for i in choice_paragraphs(doc, kit, k) for x in (ps[i], *inner[i])), mark)
         if spot is None:
             raise ValueError(f"{k}번 정답 {mark}를 칠할 자리가 답지 줄에 없다")
-        _mark_at(*spot, mark)
-    doc.sections[0].mark_dirty()
+        spot.add_highlight(color=형광, match=mark)
 
 
 def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
