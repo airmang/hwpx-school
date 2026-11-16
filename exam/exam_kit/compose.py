@@ -1547,37 +1547,37 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
     내용 셀 글 문단 가운데 하나라도 lines에 없으면 그 박스는 그대로 둔다. 높이는 kit.box_min_height(양식 견본 내용 셀)
     밑으로 내리지 않는다 — 교사도 양식 박스에서 시작하고 한글은 셀을 늘리기만 해서 제출본 세 줄 박스는 모두 이 높이다.
     """
+    from .fit import inner_paragraphs
+
     ids = style_ids(doc)
     c = _Composer(doc, kit, Samples(None, None, None), answer_key=False)
-    shapes = {tuple(str(n) for n in spec["shape"]): k for k, spec in kit.boxes.items() if isinstance(spec, dict)}
+    shapes = {tuple(int(n) for n in spec["shape"]): k for k, spec in kit.boxes.items() if isinstance(spec, dict)}
     changed = 0
     paras = list(doc.sections[0].paragraphs)
+    inner = inner_paragraphs(doc)
     for i, p in enumerate(paras):
         if i == 0 or i == len(paras) - 1:  # 관리박스·꼬리 박스 문단의 표는 박스가 아니다(학교 B 꼬리 박스도 1×1)
             continue
-        subs = list(p.element.iter(q("hp", "p")))[1:]  # 키의 둘째 값 = 이 목록의 차례(fit.read_lines와 같다)
-        for tbl in _top_tables(p.element):
-            kind = shapes.get((tbl.get("rowCnt"), tbl.get("colCnt")))
+        subs = inner[i]  # 키의 둘째 값 = 이 목록의 차례(fit.read_lines와 같다)
+        for tbl in p.tables:
+            kind = shapes.get((tbl.row_count, tbl.column_count))
             if kind is None:
                 continue
             _, (cc, cr), rails, role = _박스(kit, kind)
-            cells = {(int(a.get("colAddr")), int(a.get("rowAddr"))): tc
-                     for tc in tbl.iter(q("hp", "tc")) for a in [tc.find(q("hp", "cellAddr"))]}
-            content = cells.get((cc, cr))
+            content = next((x.cell for x in tbl.iter_grid() if x.is_anchor and (x.column, x.row) == (cc, cr)), None)
             if content is None:
                 continue
-            paras = content.find(q("hp", "subList")).findall(q("hp", "p"))
-            if not paras or ids[kit.styles[role]][0] not in {x.get("styleIDRef") for x in paras}:
+            cell_ps = content.paragraphs
+            if not cell_ps or ids[kit.styles[role]][0] not in {str(x.style_id_ref) for x in cell_ps}:
                 continue  # 박스 모양이지만 우리 박스가 아니다(양식 견본 등)
             pitch, h, ok = c._line_pitch(role), 0, True
-            for para in paras:
-                obj = next((x for r in para.findall(q("hp", "run")) for x in r
-                            if x.tag in (q("hp", "tbl"), q("hp", "pic"))), None)
+            for para in cell_ps:
+                obj = next((it.object for r in para.runs for it in r.content if it.kind in ("table", "picture")), None)
                 if obj is not None:
-                    osz, om = obj.find(q("hp", "sz")), obj.find(q("hp", "outMargin"))
-                    h += int(osz.get("height")) + int(om.get("top")) + int(om.get("bottom")) + pitch - kit.metrics.char_height
+                    om = obj.out_margins
+                    h += obj.height + om.top + om.bottom + pitch - kit.metrics.char_height
                     continue
-                j = next((n for n, e in enumerate(subs) if e is para), None)
+                j = next((n for n, e in enumerate(subs) if e == para), None)
                 got = None if j is None else lines.get((i, j))
                 if got is None:
                     ok = False
@@ -1588,14 +1588,9 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
             h += kit.metrics.box_extra - pitch
             if kit.box_min_height is not None:
                 h = max(h, kit.box_min_height)  # 양식 견본 내용 셀 높이 밑으로 내리지 않는다
-            old = int(content.find(q("hp", "cellSz")).get("height"))
-            if old == h:
+            if content.height == h:
                 continue
-            for col in (cc, *rails):
-                if (col, cr) in cells:
-                    cells[(col, cr)].find(q("hp", "cellSz")).set("height", str(h))
-            sz = tbl.find(q("hp", "sz"))
-            sz.set("height", str(int(sz.get("height")) - old + h))
+            tbl.set_row_height(cr, h)  # 그 행을 지나는 칸(내용 칸·레일)과 표 높이가 함께 바뀐다
             changed += 1
     if changed:
         doc.sections[0].mark_dirty()
