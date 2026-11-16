@@ -1434,15 +1434,17 @@ def compose(doc: HwpxDocument, scan: Scan, kit: Kit, *, answer_key: bool, image_
 LOOSER = {"1행": "2행", "2행": "3행", "3행": "5행"}  # 답지가 접히면 한 단계 느슨한 형으로(렌더 루프)
 
 
-def _문단_글(el) -> str:
-    """문단 글(hp:t) — 수식은 그 한/글 수식 문자열로(수식 설명 글 '수식입니다.'는 넣지 않는다)."""
+def _문단_글(paragraphs) -> str:
+    """문단들(최상위 문단과 그 안 문단)의 글(hp:t의 글자) — 수식은 그 한/글 수식 문자열로(수식 설명 글 '수식입니다.'는
+    넣지 않는다). 탭·줄바꿈 같은 글자 요소는 글로 세지 않는다."""
     out = []
-    for node in el.iter(q("hp", "t"), q("hp", "equation")):
-        if node.tag == q("hp", "equation"):
-            s = node.find(q("hp", "script"))
-            out.append("" if s is None else s.text or "")
-        else:
-            out.append("".join(node.itertext()))
+    for p in paragraphs:
+        for r in p.runs:
+            for it in r.content:
+                if it.kind == "equation":
+                    out.append(it.object.script or "")
+                elif it.container == "t" and it.kind == "text":
+                    out.append(it.text)
     return "".join(out)
 
 
@@ -1469,10 +1471,13 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
     old = choice_paragraphs(doc, kit, int(qn.number))
     if not old:
         raise ValueError(f"{qn.number}번 답지 줄 문단이 없다")
+    from .fit import inner_paragraphs
+
     sec = doc.sections[0]
     ps = list(sec.paragraphs)
+    inner = inner_paragraphs(doc)
     victims = [ps[i] for i in old]
-    have = re.sub(r"\s", "", "".join(_문단_글(v.element) for v in victims))
+    have = re.sub(r"\s", "", _문단_글(x for i in old for x in (ps[i], *inner[i])))
     want = re.sub(r"\s", "", "".join(_원고_글(f"{c.mark}{c.text}".replace("__", "")) for c in qn.choices))
     if have != want:  # 원고가 이 문서와 다르다 — 다른 문항의 답지로 덮어쓰지 않게 멈춘다
         raise ValueError(f"{qn.number}번 답지가 원고와 다르다: 문서 {have!r} ≠ 원고 {want!r}")
