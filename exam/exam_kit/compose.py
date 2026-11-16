@@ -579,28 +579,7 @@ class _Composer:
         """base charPr와 밑줄(BOTTOM)만 다른 charPr — 있으면 재사용, 없으면 복제."""
         if base in self._ul:
             return self._ul[base]
-        hdr = self.header.element
-        src = hdr.find(f".//{q('hh', 'charPr')}[@id='{base}']")
-
-        def 모양(c) -> tuple:
-            속성 = tuple(sorted((k, v) for k, v in c.attrib.items() if k != "id"))
-            자식 = tuple((x.tag, tuple(sorted(x.attrib.items()))) for x in c if x.tag != q("hh", "underline"))
-            return 속성, 자식
-
-        want = 모양(src)
-
-        def 같다(c) -> bool:
-            u = c.find(q("hh", "underline"))
-            return u is not None and u.get("type") == "BOTTOM" and u.get("shape") == "SOLID" and 모양(c) == want
-
-        def 긋기(c) -> None:
-            u = c.find(q("hh", "underline"))
-            if u is None:
-                raise ValueError(f"charPr {base}에 hh:underline 자식이 없다 — 밑줄 모양을 복제할 수 없다")
-            u.set("type", "BOTTOM")
-            u.set("shape", "SOLID")
-
-        cid = self.header.ensure_char_property(predicate=같다, modifier=긋기, base_char_pr_id=base).get("id")
+        cid = self.doc.styles.ensure_run(base_char_pr_id_ref=base, underline=True, underline_shape="SOLID")
         self._ul[base] = cid
         return cid
 
