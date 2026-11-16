@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 
 루트 = Path(__file__).resolve().parents[1]
+# 재현 빌드 시각 — 정답 메모 날짜가 시험 때마다 흔들리지 않게(backends/hwpx.py `_만든_시각`).
+os.environ.setdefault("SOURCE_DATE_EPOCH", "1767225600")  # 2026-01-01 00:00 UTC
 킷 = 루트 / "kits" / "standard"
 
 

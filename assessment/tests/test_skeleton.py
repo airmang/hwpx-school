@@ -8,7 +8,7 @@ from hwpx.document import HwpxDocument
 from lxml import etree
 
 from assessment.kit import load_kit
-from assessment.memo import append_memo_run
+from assessment.memo import add_answer_memo
 from assessment.ns import HH, HP
 from assessment.skeleton import extract_skeleton
 from test_hwpx import _png
@@ -57,7 +57,7 @@ def 합성_원본(킷_루트, tmp_path_factory) -> Path:
 
     doc.add_paragraph("1. 합성 문제 본문")
     메모_문단 = doc.add_paragraph("[2점]")
-    append_memo_run(메모_문단.runs[0].element, "", ("합성 정답",), number=1, kit=load_kit(킷_루트))
+    add_answer_memo(doc, 메모_문단, "", ("합성 정답",), kit=load_kit(킷_루트))
     표 = doc.add_table(2, 2, width=25229)
     표.set_cell_text(0, 0, "표 안 내용")
     doc.add_picture(_png(20, 20), "png", width_mm=10, height_mm=10)

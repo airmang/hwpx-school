@@ -1,45 +1,26 @@
-"""정답 메모 — 한컴이 쓰는 인라인 fieldBegin(type=MEMO) 모양을 그대로 만든다.
-python-hwpx 의 memogroup API 는 이 모양을 만들지 않아 직접 짓는다(실한컴에서 메모 표시를 확인했다)."""
+"""정답 메모 — python-hwpx 의 `doc.notes.add_memo` 로 단다.
+
+python-hwpx 7.0 은 메모를 한/글 2024 가 저장하는 꼴(MEMO 누름틀 안 글, 매개변수 일곱)로 쓴다.
+메모 문단의 모양·스타일은 킷의 메모 역할로 주고, 정답 한 줄을 메모 문단 하나로 둔다."""
 
 from __future__ import annotations
 
-from lxml import etree
+from typing import Any
 
 from assessment.kit import Kit
-from assessment.ns import HP
-
-_SUBLIST = {"id": "", "textDirection": "HORIZONTAL", "lineWrap": "BREAK", "vertAlign": "TOP",
-            "linkListIDRef": "0", "linkListNextIDRef": "0", "textWidth": "0", "textHeight": "0",
-            "hasTextRef": "0", "hasNumRef": "0"}
-
-_PARAMS = (
-    ("integerParam", "Prop", "0"),
-    ("stringParam", "ID", "memo{number}"),
-    ("integerParam", "Number", "{number}"),
-    ("stringParam", "Author", "assessment"),
-    ("stringParam", "MemoShapeIDRef", "65535"),
-)
 
 
-def _q(tag: str) -> str:
-    return f"{{{HP}}}{tag}"
+def add_answer_memo(doc: Any, paragraph: Any, anchor: str, lines: tuple[str, ...], *, kit: Kit) -> Any:
+    """paragraph 안 글 anchor(한 run 안에 있어야 한다)에 정답 메모를 단다 — 줄마다 메모 문단 하나.
 
-
-def append_memo_run(run_element: etree._Element, anchor: str, lines: tuple[str, ...], *, number: int, kit: Kit) -> None:
-    begin_id, field_id = str(1_000_000_000 + number), str(600_000_000 + number)
-    fb = etree.SubElement(etree.SubElement(run_element, _q("ctrl")), _q("fieldBegin"), {
-        "id": begin_id, "type": "MEMO", "name": "", "editable": "1", "dirty": "1",
-        "zorder": str(number), "fieldid": field_id, "metaTag": "",
-    })
-    params = etree.SubElement(fb, _q("parameters"), {"cnt": str(len(_PARAMS)), "name": ""})
-    for kind, name, value in _PARAMS:
-        etree.SubElement(params, _q(kind), {"name": name}).text = value.format(number=number)
-    sub = etree.SubElement(fb, _q("subList"), _SUBLIST)
-    for line in lines:
-        p = etree.SubElement(sub, _q("p"), {
-            "id": "2147483648", "paraPrIDRef": str(kit.para_pr["memo"]), "styleIDRef": str(kit.memo_style),
-            "pageBreak": "0", "columnBreak": "0", "merged": "0",
-        })
-        etree.SubElement(etree.SubElement(p, _q("run"), {"charPrIDRef": str(kit.char_pr["body"])}), _q("t")).text = line
-    etree.SubElement(run_element, _q("t")).text = anchor
-    etree.SubElement(etree.SubElement(run_element, _q("ctrl")), _q("fieldEnd"), {"beginIDRef": begin_id, "fieldid": field_id})
+    메모 문단은 킷의 메모 문단 모양(`para_pr["memo"]`)·메모 스타일(`memo_style`)·본문 글자 모양
+    (`char_pr["body"]`)이다. 돌려주는 값은 python-hwpx 메모 객체다."""
+    memo = doc.notes.add_memo(lines[0] if lines else "", paragraph=paragraph, match=anchor or None,
+                              author="assessment", char_pr_id_ref=str(kit.char_pr["body"]))
+    first = memo.paragraphs[0]
+    first.para_pr_id_ref = kit.para_pr["memo"]
+    first.style_id_ref = kit.memo_style
+    last = first
+    for line in lines[1:]:
+        last = last.insert_after(line)  # 문단 모양·스타일·첫 run 글자 모양을 잇는다
+    return memo

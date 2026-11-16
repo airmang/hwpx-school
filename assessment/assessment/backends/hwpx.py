@@ -3,6 +3,8 @@ worksheet/backends/hwpx.py 의 `_셀` 순서 규칙(내용 먼저, 서식 나중
 
 from __future__ import annotations
 
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hwpx.document import HwpxDocument
@@ -10,7 +12,7 @@ from lxml import etree
 
 from assessment.blocks import InputError
 from assessment.kit import Kit
-from assessment.memo import append_memo_run
+from assessment.memo import add_answer_memo
 from assessment.ns import HP
 from assessment.plan import CELL_ROLES, CellPlan, ColumnBreakPlan, ParaPlan, Plan, TablePlan, TitlePlan
 
@@ -19,10 +21,20 @@ def _q(tag: str) -> str:
     return f"{{{HP}}}{tag}"
 
 
+#: 새로 생기는 문단·개체·메모 id 의 씨앗 — 같은 원고는 같은 id 로 만든다(python-hwpx `open(seed=)`).
+_ID_SEED = 0
+
+
+def _만든_시각() -> datetime | None:
+    """메모 날짜. 재현 빌드(`SOURCE_DATE_EPOCH`)면 그 시각으로 고정하고, 아니면 None(지금 시각)."""
+    값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    return datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else None
+
+
 class HwpxWriter:
     def __init__(self, kit: Kit) -> None:
         self.kit = kit
-        self.doc = HwpxDocument.open(kit.skeleton)
+        self.doc = HwpxDocument.open(kit.skeleton, seed=_ID_SEED, now=_만든_시각())
         self.section = self.doc.sections[0]
         문단 = self.section.paragraphs
         assert len(문단) == 2, "스켈레톤은 문단 2개(1단 머리 + 2단 전환)여야 한다"
@@ -71,16 +83,13 @@ class HwpxWriter:
         첫 = plan.runs[0]
         p = self.doc.add_paragraph(첫.text, para_pr_id_ref=k.para_pr[plan.para], char_pr_id_ref=k.char_pr[첫.char])
         for r in plan.runs[1:]:
+            앞_글 = p.text
+            p.add_run(r.text, char_pr_id_ref=k.char_pr[r.char])
             if r.memo:
-                run = p.add_run("", char_pr_id_ref=k.char_pr[r.char])
-                # add_run("") 이 만든 빈 t 를 지우고 메모 구조로 채운다.
-                for t in run.element.findall(_q("t")):
-                    run.element.remove(t)
+                if r.text and r.text in 앞_글:
+                    raise InputError(f"정답 메모를 달 글 {r.text!r}이 문단 앞쪽에도 있다 — 메모 자리를 가를 수 없다")
                 self._메모_번호 += 1
-                append_memo_run(run.element, r.text, r.memo, number=self._메모_번호, kit=k)
-                self.section.mark_dirty()
-            else:
-                p.add_run(r.text, char_pr_id_ref=k.char_pr[r.char])
+                add_answer_memo(self.doc, p, r.text, r.memo, kit=k)
 
     def _그림_id(self, path: Path) -> str:
         if path not in self._그림_캐시:
