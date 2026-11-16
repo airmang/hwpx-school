@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-import lxml.etree as ET
 from hwpx.document import HwpxDocument
 from hwpx.model import Paragraph
 
@@ -265,52 +264,31 @@ class Spacer:
 
     def __init__(self, doc: HwpxDocument):
         self.doc = doc
-        self.box = doc.parts.headers[0].element.find(f".//{q('hh', 'charProperties')}")
-        if self.box is None:
-            raise ValueError("양식이 바뀌었다: hh:charProperties 없음")
         self.orig: dict[Key, list[str]] = {}   # 문단 → run charPr id(처음 값)
         self.made: list[ET._Element] = []      # 이번 set이 만든 charPr(목록 끝에 붙는다)
 
     def charpr(self, base: str, s: int) -> str:
-        src = self.box.find(f"{q('hh', 'charPr')}[@id='{base}']")
+        """base charPr에서 자간(7개 언어)만 s로 바꾼 charPr id — 같은 모양이 있으면 재사용
+        (doc.styles.ensure_run(base_char_pr_id_ref=, letter_spacing=)). 새 정의는 스키마 차례로 쓴다."""
+        styles = self.doc.styles
+        src = styles.char_property(base)
         if src is None:
             raise ValueError(f"charPr {base}가 없다")
-        if src.find(q("hh", "spacing")) is None:
+        if "spacing" not in src.child_attributes:
             raise ValueError(f"charPr {base}에 hh:spacing이 없다 — 자간을 바꿀 수 없다")
-
-        def 모양(c) -> tuple:
-            속성 = tuple(sorted((k, v) for k, v in c.attrib.items() if k != "id"))
-            자식 = tuple((x.tag, tuple(sorted(x.attrib.items()))) for x in c if x.tag != q("hh", "spacing"))
-            return 속성, 자식
-
-        want = 모양(src)
-
-        def 같다(c) -> bool:
-            sp = c.find(q("hh", "spacing"))
-            return sp is not None and all(sp.get(k) == str(s) for k in _언어) and 모양(c) == want
-
-        def 조이기(c) -> None:
-            for k in _언어:
-                c.find(q("hh", "spacing")).set(k, str(s))
-
-        before = len(self.box)
-        el = self.doc.parts.headers[0].ensure_char_property(predicate=같다, modifier=조이기, base_char_pr_id=base)
-        if len(self.box) > before:
-            self.made.append(el)
-        return el.get("id")
+        before = len(styles.char_properties)
+        cid = styles.ensure_run(base_char_pr_id_ref=base, letter_spacing=s)
+        if len(styles.char_properties) > before:
+            self.made += 1
+        return str(cid)
 
     def _drop_made(self) -> None:
-        for el in reversed(self.made):
-            if self.box[-1] is not el:  # 걷어 낼 것은 늘 끝에 있다 — 아니면 id에 틈이 생긴다
-                raise RuntimeError(f"자간 charPr {el.get('id')}가 목록 끝에 있지 않아 걷어 낼 수 없다")
-            self.box.remove(el)
+        """이번 set이 만든 charPr를 걷어 낸다 — 런을 원래 id로 되돌린 뒤라 목록 끝의 쓰이지 않는 정의다
+        (doc.styles.remove_unused_definitions). 그 앞에 원래 쓰이지 않던 정의가 목록 끝에 붙어 있었으면 그것도 함께 걷힌다
+        (한/글도 저장할 때 쓰이지 않는 정의를 지운다 — compose-x)."""
         if self.made:
-            self.box.set("itemCnt", str(len(self.box.findall(q("hh", "charPr")))))
-            header = self.doc.parts.headers[0]
-            header.mark_dirty()
-            if header.document is not None:
-                header.document.invalidate_char_property_cache()
-        self.made = []
+            self.doc.styles.remove_unused_definitions(["char_properties"])
+        self.made = 0
 
     def set(self, decisions: dict[Key, int]) -> None:
         """decisions 밖 문단은 원래 charPr로, 안의 문단은 run마다 원래 charPr의 자간 s 복제로."""
