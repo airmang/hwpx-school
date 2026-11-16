@@ -59,7 +59,7 @@ def _조판(answer_key: bool, tmp_path: Path) -> HwpxDocument:
     compose(doc, s, kit, answer_key=answer_key, image_root=원고.parent)
     finalize_form(doc, kit, prep)
     out = tmp_path / f"합성_{answer_key}.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     return HwpxDocument.open(str(out))
 
 

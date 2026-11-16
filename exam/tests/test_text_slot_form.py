@@ -108,7 +108,7 @@ def test_글자자리_합성_원고_두_판_조판(학교B_양식, tmp_path):
         compose(doc, s, kit, answer_key=key, image_root=tmp_path)
         finalize_form(doc, kit, prep)
         out = tmp_path / f"b_{key}.hwpx"
-        doc.save_to_path(str(out))
+        doc.save(str(out))
         d2 = HwpxDocument.open(str(out))
         assert len(question_heads(d2)) == 4  # 글자 번호 문항 머리
         assert extract_answers(d2) == (정답 if key else {})

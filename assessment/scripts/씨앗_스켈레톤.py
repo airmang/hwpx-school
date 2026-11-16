@@ -136,7 +136,7 @@ def _2단_전환_문단(doc: HwpxDocument) -> None:
 
 
 def main() -> None:
-    doc = HwpxDocument.new()
+    doc = HwpxDocument.new(empty_first_line=True)
     머리 = doc.oxml.headers[0]
     번호 = _모양들(머리.element)
     머리.mark_dirty()  # 요소를 직접 고쳤다 — 저장 때 다시 쓰게 한다
@@ -147,7 +147,7 @@ def main() -> None:
     _2단_전환_문단(doc)
     with tempfile.TemporaryDirectory() as tmp:
         원형 = Path(tmp) / "seed.hwpx"
-        doc.save_to_path(str(원형))
+        doc.save(str(원형))
         보고 = extract_skeleton(원형, 킷 / "skeleton.hwpx")
         print(보고)
     번호["borderFill"]["underline"] = 보고["underline_border_fill"]

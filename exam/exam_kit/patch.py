@@ -284,10 +284,10 @@ def patch(md_path: Path, prev: Path, kit: Kit | Path, *, form: Path, out_dir: Pa
 
     out_dir.mkdir(parents=True, exist_ok=True)
     plain_path, key_path = work / old_plain_path.name, work / old_key_path.name
-    old.save_to_path(str(plain_path))
+    old.save(str(plain_path))
     key = HwpxDocument.open(str(plain_path))
     add_answer_marks(key, kit, res.answers, draft=draft)
-    key.save_to_path(str(key_path))
+    key.save(str(key_path))
 
     # 확인 — 배치가 그대로인가, 그다음 기계 검사
     before = render_fn(old_plain_path, work / "기존_렌더")

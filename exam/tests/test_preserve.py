@@ -36,7 +36,7 @@ def _원안지(tmp_path: Path) -> Path:
         sec.remove_paragraph(p)
     sec.mark_dirty()
     out = tmp_path / "원안지.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     return out
 
 

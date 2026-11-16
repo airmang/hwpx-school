@@ -32,7 +32,7 @@ def errors(fs: list[Finding]) -> list[Finding]:
 
 def _numbered_para_prs(doc: HwpxDocument) -> set[str]:
     out = set()
-    for pp in doc.headers[0].element.iter(q("hh", "paraPr")):
+    for pp in doc.parts.headers[0].element.iter(q("hh", "paraPr")):
         h = pp.find(q("hh", "heading"))
         if h is not None and h.get("type") == "NUMBER":
             out.add(pp.get("id"))
@@ -120,7 +120,7 @@ def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, st
         sid = str(ps[i].style_id_ref or "0")
         if sid not in allowed:
             fs.append(_f("M7b", f"양식 스타일 밖의 문단 (index {i}, style {sid})"))
-    values = {f.field_id: f.value for f in doc.list_form_fields()}
+    values = {f.field_id: f.value for f in doc.fields.all}
     for slot, fid in kit.slot_ids().items():
         v = values.get(fid, "")
         ph = kit.placeholders.get(slot)

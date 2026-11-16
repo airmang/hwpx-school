@@ -82,7 +82,8 @@ def test_M7a_빈문단(준비):
     # 꼬리 검사(M7a)는 조판·마무리가 끝난 뒤 상태만 본다 — 빈 문단은 finalize_form 뒤에 끼워 넣는다.
     sec = doc.sections[0]
     normal = style_ids(doc)[kit.styles["normal"]]
-    blank = sec.add_paragraph("", para_pr_id_ref=normal[1], style_id_ref=normal[0], char_pr_id_ref=normal[2], inherit_style=False)
+    blank = sec.add_paragraph("", para_pr_id_ref=normal[1], char_pr_id_ref=normal[2], inherit_style=False)
+    blank.style_id_ref = normal[0]
     idx = question_heads(doc)[1]  # 2번 문항 머리 앞
     sec.insert_paragraphs(idx, [blank.element])
     sec.remove_paragraph(blank)  # add_paragraph가 끝에 붙인 원본을 걷어낸다(insert_paragraphs는 복제본을 넣는다)
@@ -97,7 +98,7 @@ def test_M7b_스타일_밖(준비):
     # 이 문서에 실재하는 스타일은 정확히 킷의 8종뿐이라(style_ids로 실측 확인) '8종 밖'을
     # 재현하려면 header의 styles 표에 9번째 스타일을 하나 복제해 심어야 한다 — 바탕글(id 0)의
     # paraPr·charPr을 그대로 물려받는 새 style id를 등록한다.
-    styles_el = doc.headers[0].element.find(f".//{q('hh', 'styles')}")
+    styles_el = doc.parts.headers[0].element.find(f".//{q('hh', 'styles')}")
     새_id = str(len(styles_el))
     복제 = ET.SubElement(styles_el, q("hh", "style"))
     복제.set("id", 새_id)
@@ -111,7 +112,8 @@ def test_M7b_스타일_밖(준비):
     styles_el.set("itemCnt", str(int(styles_el.get("itemCnt")) + 1))
 
     sec = doc.sections[0]
-    outlier = sec.add_paragraph("범위 밖 스타일 문단", para_pr_id_ref=0, style_id_ref=새_id, char_pr_id_ref=8, inherit_style=False)
+    outlier = sec.add_paragraph("범위 밖 스타일 문단", para_pr_id_ref=0, char_pr_id_ref=8, inherit_style=False)
+    outlier.style_id_ref = 새_id
     idx = question_heads(doc)[1]  # 2번 문항 머리 앞
     sec.insert_paragraphs(idx, [outlier.element])
     sec.remove_paragraph(outlier)

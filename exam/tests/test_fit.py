@@ -37,18 +37,18 @@ settle = partial(_settle, balance=False)
 
 
 def _charprs(doc) -> dict[str, bytes]:
-    box = doc.headers[0].element.find(f".//{q('hh', 'charProperties')}")
+    box = doc.parts.headers[0].element.find(f".//{q('hh', 'charProperties')}")
     return {c.get("id"): ET.tostring(c, method="c14n") for c in box.findall(q("hh", "charPr"))}
 
 
 def _spacing_of(doc, cid) -> dict[str, str]:
-    c = doc.headers[0].element.find(f".//{q('hh', 'charPr')}[@id='{cid}']")
+    c = doc.parts.headers[0].element.find(f".//{q('hh', 'charPr')}[@id='{cid}']")
     return dict(c.find(q("hh", "spacing")).attrib)
 
 
 def _used_charprs(doc) -> set[str]:
     return {el.get("charPrIDRef") for s in doc.sections for el in s.element.iter() if el.get("charPrIDRef")} | {
-        el.get("charPrIDRef") for el in doc.headers[0].element.iter() if el.get("charPrIDRef")}
+        el.get("charPrIDRef") for el in doc.parts.headers[0].element.iter() if el.get("charPrIDRef")}
 
 
 # ---- 대상 문단 -----------------------------------------------------------------
@@ -106,7 +106,7 @@ def test_자간_charPr_파생·재사용·걷어내기(견본):
     sp.set({})  # 되돌림: 원래 run·원래 charPr 목록 그대로(만든 것은 걷어 낸다)
     assert _charprs(doc) == before
     assert element_at(doc, a.key).find(q("hp", "run")).get("charPrIDRef") == base
-    box = doc.headers[0].element.find(f".//{q('hh', 'charProperties')}")
+    box = doc.parts.headers[0].element.find(f".//{q('hh', 'charProperties')}")
     assert box.get("itemCnt") == str(len(before))
     sp.set({a.key: -3})
     assert set(_charprs(doc)) - set(before) <= _used_charprs(doc)  # 만든 것은 모두 쓰인다
@@ -153,7 +153,7 @@ def _가짜_측정(kit, spec: dict, calls: list | None = None, *, bad_text: bool
 
 def _저장(doc, path: Path):
     def save():
-        doc.save_to_path(str(path))
+        doc.save(str(path))
         return path
     return save
 
@@ -306,7 +306,7 @@ def test_렌더_자간_맞춤으로_발문을_한_줄로(양식_hwpx, 오라클,
     assert now[s1.key].n == 1 and now[s2.key].n == first[s2.key].n
     if least > 1:  # 가장 작은 자간 — 한 단계 덜 줄이면 두 줄
         Spacer(doc).set({s1.key: -(least - 1)})
-        doc.save_to_path(str(out))
+        doc.save(str(out))
         assert hancom_lines(out, work / "덜", oracle=오라클)[s1.key].n == 2
 
 
@@ -364,7 +364,7 @@ def test_가짜_settle_자간이_배치를_바꾼다(양식_hwpx, tmp_path):
                render_fn=_가짜_렌더(kit, lambda d: 한쪽 if current_spacing(d, s1.key) else 두쪽),
                lines_fn=lambda p, work: (Path(work).mkdir(parents=True), _가짜_측정(kit, spec)(p, work))[1])  # 측정 사본 폴더 흉내
     assert s.render.page_count == 1 and s.first_pages == 2 and not s.pages_added
-    assert {f.field_id: f.value for f in HwpxDocument.open(str(tmp_path / "x.hwpx")).list_form_fields()}[
+    assert {f.field_id: f.value for f in HwpxDocument.open(str(tmp_path / "x.hwpx")).fields.all}[
         kit.slots["총쪽수"]] == "1"
     assert not [n for n in s.notes if "꼬리" in n or "넘겼다" in n], s.notes
     assert sorted(p.name for p in (tmp_path / "r" / "자간").iterdir()) == [f"m{s.measures}"]  # 측정 사본은 마지막 것만(M-7)
@@ -413,7 +413,7 @@ def test_렌더_보기_항목_자리는_제출본_다수_기하(양식_hwpx, 오
 
     kit, doc = _마무리(양식_hwpx, 보기_md)
     out = tmp_path / "b.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     pdf = render(out, tmp_path / "r", oracle=오라클).pdf
     import pymupdf
 
@@ -671,7 +671,7 @@ def test_렌더_넘치는_표는_낱말_사이에서만_접힌다(양식_hwpx, �
 
     kit, doc = _마무리(양식_hwpx, 표_넘침_md)
     out = tmp_path / "t.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     lines = hancom_lines(out, tmp_path / "m", oracle=오라클)
     cells = []
     ps = 최상위(doc)

@@ -155,7 +155,7 @@ def _굳힘(양식_hwpx, n: int, tmp_path, gap: str, 오라클):
 
 
 def _총쪽수(doc, kit) -> str:
-    return {f.field_id: f.value for f in doc.list_form_fields()}[kit.slots["총쪽수"]]
+    return {f.field_id: f.value for f in doc.fields.all}[kit.slots["총쪽수"]]
 
 
 def test_렌더_오른쪽_단이_빈_경우(양식_hwpx, 오라클, tmp_path):
@@ -292,7 +292,7 @@ def _나눔(doc, k: int) -> tuple[str, str]:
 
 
 def _간격(doc, k: int) -> int:
-    return case_prev(doc.headers[0], 최상위_문단(doc)[group_starts(doc)[k]].element.get("paraPrIDRef"))
+    return case_prev(doc.parts.headers[0], 최상위_문단(doc)[group_starts(doc)[k]].element.get("paraPrIDRef"))
 
 
 @pytest.fixture
@@ -600,7 +600,7 @@ def test_답지_다시_쓰기는_마지막_줄_보호를_따른다(배치):
     from exam_kit.compose import choice_paragraphs, derive_para_pr, relayout_choices
 
     kit, doc, scan = 배치
-    header = doc.headers[0]
+    header = doc.parts.headers[0]
 
     def 마지막_keep(n):
         el = 최상위_문단(doc)[choice_paragraphs(doc, kit, n)[-1]].element

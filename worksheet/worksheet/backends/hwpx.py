@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from hwpx import HwpxDocument
+from hwpx.oxml.shape_position import line_width_mm_for_units
 
 from worksheet.blocks import plan_node
 from worksheet.furniture import plan_band, plan_heading, plan_keyword_page
@@ -265,7 +266,7 @@ def draw_heading(doc: HwpxDocument, kit: Kit, plan: HeadingPlan):
         원["curSz"][0],
         원["curSz"][1],
         line_color=원["line"],
-        line_width=원["lineWidth"],
+        line_width_mm=line_width_mm_for_units(원["lineWidth"]),
         fill_color=원["fill"],
         treat_as_char=True,
         char_pr_id_ref=kit.char_pr["headline"],
@@ -290,7 +291,7 @@ def draw_heading(doc: HwpxDocument, kit: Kit, plan: HeadingPlan):
             도장["curSz"][0],
             도장["curSz"][1],
             line_color=도장["line"],
-            line_width=도장["lineWidth"],
+            line_width_mm=line_width_mm_for_units(도장["lineWidth"]),
             fill_color=도장["fill"],
             treat_as_char=False,
             char_pr_id_ref=kit.char_pr["headline"],
@@ -371,4 +372,4 @@ class HwpxWriter:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.doc.save_to_path(path)
+        self.doc.save(path)

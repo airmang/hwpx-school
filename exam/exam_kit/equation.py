@@ -1,8 +1,8 @@
 """원고의 인라인 수식 `$…$`(LaTeX) — 한/글 수식(hp:equation)으로 조판한다. 1차는 인라인 수식만이다.
 
 - 표기: `$…$` 안이 LaTeX다. 달러 글자는 `\\$`로 쓴다. `$$…$$`(한 줄 가운데 블록 수식)는 아직 조판하지 않는다.
-- 변환: python-hwpx `hwpx.experimental.latex_to_eqedit`(LaTeX → 한/글 수식 문자열). 바꿀 수 없는 LaTeX는 조용히 넘기지 않고
-  오류다(원고 규칙 E025). experimental 표면이라 계약이 바뀔 수 있다 — 엔진 테스트가 동작을 고정한다.
+- 변환: python-hwpx `hwpx.equation.latex_to_eqedit`(LaTeX → 한/글 수식 문자열). 바꿀 수 없는 LaTeX는 조용히 넘기지 않고
+  오류다(원고 규칙 E025). 7.0부터 안정 계약이다 — 엔진 테스트도 동작을 고정한다.
 - 크기: `estimate_equation_size`(수식 구조로 잰 상자, python-hwpx 6.6.0). 조판은 문단 래퍼 `add_equation`이 같은 측정으로
   hp:sz를 적는다. 줄에서 수식이 차지하는 폭 = 상자 폭 + 좌우 바깥 여백(add_equation의 hp:outMargin).
 - 가린 글(mask): 수식 하나를 사용자 영역 글자 하나(U+F0000 + 차례)로 바꾼 글이다. 밑줄 `__…__`·낱말 나누기·폭 추정이
@@ -17,8 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 
-from hwpx.equation import EquationConversionError
-from hwpx.experimental import estimate_equation_size, latex_to_eqedit
+from hwpx.equation import EquationConversionError, estimate_equation_size, latex_to_eqedit
 
 바깥_여백 = 56  # add_equation이 적는 hp:outMargin left·right(HWPUNIT)
 TEXTPOS = 8     # 한/글 줄 캐시에서 수식 하나가 차지하는 글자 자리
@@ -300,8 +299,8 @@ def split_cells(row: str) -> list[str]:
 
 @lru_cache(maxsize=4096)
 def box(script: str, base_unit: int) -> tuple[int, int]:
-    """수식 상자 (폭, 높이) HWPUNIT — add_equation이 hp:sz에 적는 것과 같은 측정."""
-    return estimate_equation_size(script, base_unit=base_unit)
+    """수식 상자 (폭, 높이) HWPUNIT — add_equation이 hp:sz에 적는 것과 같은 측정. base_unit은 글자 크기(HWPUNIT, 1100 = 11pt)."""
+    return estimate_equation_size(script, font_size=base_unit / 100)
 
 
 def width(m: Math, base_unit: int) -> int:

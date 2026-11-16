@@ -222,7 +222,7 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
     # 답 표시본: 굳힌 문항지 파일 + 형광펜만
     key = HwpxDocument.open(str(plain_path))
     add_answer_marks(key, kit, res.answers, draft=r.draft)
-    key.save_to_path(str(key_path))
+    key.save(str(key_path))
     key_rr = render_fn(key_path, work / "답표시본")
     r.renders["답표시본"] = 1
 

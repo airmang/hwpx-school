@@ -65,7 +65,7 @@ def test_고친_문단만_바뀌고_나머지는_바이트_그대로(tmp_path):
                                        tmp_path / "new.hwpx")))
     old = HwpxDocument.open(str(old_path))
     assert apply_patch(old, new, kit) == ["1번 문단 1"]
-    old.save_to_path(str(tmp_path / "patched.hwpx"))
+    old.save(str(tmp_path / "patched.hwpx"))
     a, b = _top(old_path), _top(tmp_path / "patched.hwpx")
     assert len(a) == len(b) and [i for i, (x, y) in enumerate(zip(a, b)) if x != y] == [1]
     texts = ["".join(t.text or "" for t in p.element.iter("{*}t"))

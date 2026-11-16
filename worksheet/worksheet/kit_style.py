@@ -60,13 +60,13 @@ def _글자(cp: RunStyle, 글꼴: dict[str, str], 역할: str) -> CharStyle:
         face=글꼴[글꼴_id],
         size_pt=_정수(cp.attributes.get("height", "1000"), "height", _머리, f"charPr.{역할}") / 100,
         bold="bold" in cp.child_attributes,
-        underline=cp.underline_type() not in (None, "NONE"),
+        underline=cp.underline_type not in (None, "NONE"),
         color=cp.attributes.get("textColor", "#000000"),
     )
 
 
 def _문단(pp: ParagraphProperty, 역할: str) -> ParaStyle:
-    al = pp.align.horizontal if pp.align is not None and pp.align.horizontal else "LEFT"
+    al = pp.alignment.horizontal if pp.alignment is not None and pp.alignment.horizontal else "LEFT"
     # hp:switch 의 case 가 한글이 읽는 값이다
     vs = pp.version_switch
     ls = vs.case.line_spacing if vs is not None and vs.case is not None and vs.case.line_spacing else pp.line_spacing
@@ -89,7 +89,7 @@ def _테두리(doc: HwpxDocument, 역할: str) -> Callable[[int], BorderFillInfo
     # 굵기를 수로 못 읽으면 core 가 영어 오류를 낸다 — 어느 역할의 어느 변인지 밝혀 다시 던진다
     def 찾기(번호: int) -> BorderFillInfo | None:
         try:
-            return doc.styles.border_fill_info(번호)
+            return doc.styles.border_fill(번호)
         except HwpxValueError as e:
             if e.code != "style-border-fill-width-invalid":
                 raise

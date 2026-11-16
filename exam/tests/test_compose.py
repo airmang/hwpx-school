@@ -45,7 +45,7 @@ def 조판(request, 양식_hwpx):
 
 
 def _헤더(doc):
-    return doc.headers[0].element
+    return doc.parts.headers[0].element
 
 
 def _para_pr(doc, pid):
@@ -269,7 +269,7 @@ def test_렌더_번호_글리프와_분할(양식_hwpx, 오라클, tmp_path):
     kit, doc, prepared, _ = _조판(양식_hwpx, md, answer_key=True)
     finalize_form(doc, kit, prepared)
     out = tmp_path / "기본_5문항.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     r = render(out, tmp_path / "r", oracle=오라클)
     lines = column_lines(r.pdf, kit)
     # 머리 줄 = 단 왼끝에서 시작하는 줄(답지는 왼여백 1000 ≈ 10pt, 발문 이음 줄은 번호 폭만큼 들어간다)
@@ -450,7 +450,7 @@ def test_렌더_박스_높이와_제목(양식_hwpx, 오라클, tmp_path):
     kit, doc, prepared, _ = _조판(양식_hwpx, md, answer_key=False)
     finalize_form(doc, kit, prepared)
     out = tmp_path / "박스_4문항.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     try:
         r = render(out, tmp_path / "r", oracle=오라클)
     except RenderUnavailable:  # 다른 에이전트와 렌더가 겹칠 수 있다 — 한 번 더
@@ -594,7 +594,7 @@ def test_그림은_회색조_사본이_가운데_문단에_앉는다(표그림, 
     assert hgt == round(w * src.height / src.width)  # 원본 비율
     ref = pic.find(f".//{q('hc', 'img')}").get("binaryItemIDRef")
     out = tmp_path / "그림.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     with zipfile.ZipFile(out) as z:
         [name] = [n for n in z.namelist() if n.startswith("BinData/") and ref in n]
         img = Image.open(io.BytesIO(z.read(name)))
@@ -673,7 +673,7 @@ def test_표그림_검사와_마무리(표그림, tmp_path):
     assert errors(fs) == []
     finalize_form(doc, kit, prepared)
     out = tmp_path / "표그림.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     with zipfile.ZipFile(out) as z:
         assert [n for n in z.namelist() if n.startswith("BinData/")]  # 문항 그림은 마무리 뒤에도 남는다
 
@@ -795,7 +795,7 @@ def test_렌더_격자표_그림_답항표(양식_hwpx, 오라클, tmp_path):
     kit, doc, prepared, _ = _조판(양식_hwpx, md, answer_key=False)
     finalize_form(doc, kit, prepared)
     out = tmp_path / "표그림_3문항.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     try:
         r = render(out, tmp_path / "r", oracle=오라클)
     except RenderUnavailable:  # 다른 에이전트와 렌더가 겹칠 수 있다 — 한 번 더
@@ -881,7 +881,7 @@ def test_그림_생성기_폴백과_EXIF_회전(양식_hwpx, tmp_path, monkeypat
                                                   p.element.find(f".//{q('hp', 'pic')}") is None
                                                   and p.element.find(f".//{q('hp', 'tbl')}") is None]  # 임시 문단 없음
     out = tmp_path / "사진.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     ref = pic.find(f".//{q('hc', 'img')}").get("binaryItemIDRef")
     with zipfile.ZipFile(out) as z:
         [name] = [n for n in z.namelist() if n.startswith("BinData/") and ref in n]
@@ -1024,7 +1024,7 @@ def test_렌더_배치형_칸_자리(양식_hwpx, 오라클, tmp_path):
     kit, doc, prepared, res = _조판(양식_hwpx, md, answer_key=False)
     finalize_form(doc, kit, prepared)
     out = tmp_path / "답항배치_7문항.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     try:
         r = render(out, tmp_path / "r", oracle=오라클)
     except RenderUnavailable:
@@ -1344,7 +1344,7 @@ def test_렌더_코드_블록은_열이_맞는다(양식_hwpx, 오라클, tmp_pa
     kit, doc, prepared, _ = _조판(양식_hwpx, md, answer_key=False)
     finalize_form(doc, kit, prepared)
     out = tmp_path / "code.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     pdf = render(out, tmp_path / "r", oracle=오라클).pdf
     with pymupdf.open(str(pdf)) as d:
         lines = [(sp["font"], [(c["c"], c["bbox"][0]) for c in sp["chars"]])

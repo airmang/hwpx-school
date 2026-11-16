@@ -81,7 +81,7 @@ def 합성_원본(킷_루트, tmp_path_factory) -> Path:
 
     doc.package.set_document_metadata(creator="합성작성자", title="합성제목")
     doc.package.write("Preview/PrvText.txt", "합성학교 합성교사")
-    doc.save_to_path(dest)
+    doc.save(dest)
 
     # 픽스처가 실제로 채워졌는지 먼저 확인한다 — 안 그러면 세척 검사가 공허해진다.
     z = zipfile.ZipFile(dest)
@@ -112,18 +112,22 @@ def _전환_문단에_금지_요소를_주입한_변형본(원본_경로, 저장
     보고 있는지(화이트리스트만 보고 안쪽 내용을 놓치지 않는지)를 증명하는 데는 이걸로
     충분하다 — P0의 같은 검사(`_보존_run_안의_금지_태그`)와 대칭이어야 한다.
     """
-    doc = HwpxDocument.open(원본_경로)
-    section = doc.sections[0]
-    element = section.element
-    paragraphs = element.findall(_q("p"))
-    전환_run = next(
-        r for r in paragraphs[2].findall(_q("run"))
-        if r.findall(f".//{_q('colPr')}[@colCount='2']")
-    )
-    ctrl = 전환_run.find(_q("ctrl"))
-    etree.SubElement(ctrl, _q("pic"))
-    section.mark_dirty()
-    doc.save_to_path(저장할_곳)
+    # 빈 hp:pic은 한/글이 열지 못하는 꼴이라 python-hwpx의 저장(열기 안전 검사)이 거부한다 —
+    # 변형 원본은 zip의 구역 XML을 직접 고쳐 쓴다.
+    with zipfile.ZipFile(원본_경로) as z:
+        부품들 = [(정보, z.read(정보.filename)) for 정보 in z.infolist()]
+    with zipfile.ZipFile(저장할_곳, "w") as 새것:
+        for 정보, 데이터 in 부품들:
+            if 정보.filename == "Contents/section0.xml":
+                element = etree.fromstring(데이터)
+                paragraphs = element.findall(_q("p"))
+                전환_run = next(
+                    r for r in paragraphs[2].findall(_q("run"))
+                    if r.findall(f".//{_q('colPr')}[@colCount='2']")
+                )
+                etree.SubElement(전환_run.find(_q("ctrl")), _q("pic"))
+                데이터 = etree.tostring(element, xml_declaration=True, encoding="UTF-8", standalone=True)
+            새것.writestr(정보, 데이터)
     return 저장할_곳
 
 

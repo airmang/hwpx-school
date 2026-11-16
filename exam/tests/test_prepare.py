@@ -42,7 +42,7 @@ def test_관리박스_정리(준비, 양식_hwpx):
     assert 유의.find(q("hp", "sz")).get("height") == str(kit.notice_box_height)
     assert all(tc.find(q("hp", "cellSz")).get("height") == str(kit.notice_box_height)
                for tr in 유의.findall(q("hp", "tr")) for tc in tr.findall(q("hp", "tc")))
-    assert len(doc.list_form_fields()) == 18
+    assert len(doc.fields.all) == 18
     assert p0.find(q("hp", "linesegarray")) is None  # 규격표 높이를 기억하던 줄 캐시 제거(Task 22 렌더 실측)
     form = HwpxDocument.open(str(양식_hwpx))
     for tag in ("header", "footer"):
@@ -92,7 +92,7 @@ def test_조판_뒤_마무리(준비, tmp_hwpx):
     assert len(heads) == 3
     assert 텍스트(ps[-2].element).strip() != "" or ps[-2].element.find(f".//{q('hp', 'tbl')}") is not None  # 꼬리 앞 빈 문단 0
     out = tmp_hwpx("final.hwpx")
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     assert HwpxDocument.open(str(out)).validate().ok
 
 
@@ -147,7 +147,7 @@ def test_삽입_그림_생존(준비):
 def test_사이드카(준비, tmp_hwpx):
     kit, doc, prepared = 준비
     p = tmp_hwpx("prep.hwpx")
-    doc.save_to_path(str(p))
+    doc.save(str(p))
     prepared.save(p)
     assert prepared_for(p) == prepared
 

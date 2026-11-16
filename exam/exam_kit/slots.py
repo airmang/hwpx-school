@@ -47,7 +47,7 @@ def _black_twin(doc: HwpxDocument, charpr_id: str, *, upright: bool = False) -> 
     "정자체"로 만든다. 이미 같은 모양(기울임 제외)·검정인 charPr이 있으면 그걸 재사용하고,
     없을 때만 ensure_char_property로 복제해 새 id를 발급한다.
     """
-    header = doc.headers[0]
+    header = doc.parts.headers[0]
     src = header.element.find(f".//{q('hh', 'charPr')}[@id='{charpr_id}']")
     if src is None or not _needs_black_twin(src, upright=upright):
         return charpr_id
@@ -260,7 +260,7 @@ def _text_values(fm: FrontMatter, *, question_count: int, total_points: float, p
 def read_total_pages(doc: HwpxDocument, kit: Kit) -> str:
     """문서에 적힌 총쪽수 — 누름틀(kit.slots) 또는 글자 자리 슬롯 '총쪽수'의 read 정규식."""
     if "총쪽수" in kit.slots:
-        return {f.field_id: f.value for f in doc.list_form_fields()}.get(kit.slots["총쪽수"], "")
+        return {f.field_id: f.value for f in doc.fields.all}.get(kit.slots["총쪽수"], "")
     slot = next(s for s in kit.text_slots if s["name"] == "총쪽수")
     rx = re.compile(slot["read"])
     for p in _slot_paragraphs(doc, kit, slot["where"]):
@@ -282,7 +282,7 @@ def fill_slots(doc: HwpxDocument, kit: Kit, fm: FrontMatter, *, question_count: 
         v = values.get(slot)
         if v is None:
             continue
-        doc.fill_form_field(v, field_id=fid)
+        doc.fields.fill(v, field_id=fid)
         채움[slot] = v
         # fill_form_field는 값 run의 charPr을 감싸는 run에 맞추는데, 원본 양식에서 감싸는
         # run 자체가 빨강인 슬롯(선택형_문항수·선택형_만점·총쪽수)은 채워도 빨강으로 남는다.
@@ -309,7 +309,7 @@ def fill_total_pages(doc: HwpxDocument, kit: Kit, pages: int) -> None:
         doc.sections[0].mark_dirty()
         return
     fid = kit.slots["총쪽수"]
-    doc.fill_form_field(str(pages), field_id=fid)
+    doc.fields.fill(str(pages), field_id=fid)
     fb = _find_fieldbegin(doc.sections[0].paragraphs[0].element, fid)
     if fb is not None:
         for run in _field_value_runs(fb):

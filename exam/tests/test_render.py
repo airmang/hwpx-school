@@ -16,7 +16,7 @@ def 준비된_양식(양식_hwpx, tmp_path):
     kit = load_kit(킷_디렉터리)
     doc, _ = prepare_document(양식_hwpx, kit)
     p = tmp_path / "prepared.hwpx"
-    doc.save_to_path(str(p))
+    doc.save(str(p))
     return p
 
 

@@ -75,7 +75,7 @@ def 원본_hwpx(tmp_path_factory) -> Path:
     doc.package.set_part("Preview/PrvImage.png", _더러운_미리보기_png())
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    doc.save_to_path(dest)
+    doc.save(dest)
 
     # 픽스처가 실제로 더러운지 먼저 확인한다 — 안 그러면 세척 테스트가 공허해진다.
     z = zipfile.ZipFile(dest)

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from docx import Document
 from hwpx import HwpxDocument, HwpxPackage
-from hwpx.experimental import render_layout_preview
+from hwpx_automation.preview import render_layout_preview
 
 from worksheet.blocks import SPECS, STRUCTURAL, fence_problems, png_size, 그림_폭_문제
 from worksheet.kit import DEFAULT_RESIDUE_MARKERS, Kit, effective_slots, parse_slot_fields

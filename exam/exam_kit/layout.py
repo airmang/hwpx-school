@@ -85,7 +85,7 @@ class Settled:
 
 def _keep_next_ids(doc: HwpxDocument) -> set[str]:
     out = set()
-    for pp in doc.headers[0].element.iter(q("hh", "paraPr")):
+    for pp in doc.parts.headers[0].element.iter(q("hh", "paraPr")):
         b = pp.find(q("hh", "breakSetting"))
         if b is not None and b.get("keepWithNext") == "1":
             out.add(pp.get("id"))
@@ -334,7 +334,7 @@ class _Loop:
     # ⓪' 자간 맞춤
     def fit(self, rr, lay):
         def save() -> Path:
-            self.doc.save_to_path(str(self.hwpx))
+            self.doc.save(str(self.hwpx))
             return self.hwpx
 
         work = self.out_dir / "자간"
@@ -375,7 +375,7 @@ class _Loop:
 
     def render(self) -> tuple[RenderResult, list[PageLayout]]:
         self.n += 1
-        self.doc.save_to_path(str(self.hwpx))
+        self.doc.save(str(self.hwpx))
         rr = self.render_fn(self.hwpx, self.out_dir / f"r{self.n}")
         lay = measure(rr.pdf, self.kit)
         heads = head_places(lay)
@@ -386,7 +386,7 @@ class _Loop:
 
     def _set_prev(self, index: int, base: str, prev: int) -> bool:
         el = self.ps[index].element
-        pid = derive_para_pr(self.doc.headers[0], base, prev=prev)
+        pid = derive_para_pr(self.doc.parts.headers[0], base, prev=prev)
         if el.get("paraPrIDRef") == pid:
             return False
         el.set("paraPrIDRef", pid)
@@ -525,7 +525,7 @@ class _Loop:
         right_ks = _by_col(places).get((last.page, right.col), [])
         if len(right_ks) < 2:
             return None
-        header, ps = self.doc.headers[0], self.ps
+        header, ps = self.doc.parts.headers[0], self.ps
         need = (right.bottom - _limit(self.kit)) * 100
         room = sum(max(0, case_prev(header, ps[starts[k]].element.get("paraPrIDRef")) - gmin) for k in right_ks[1:])
         if need + SQUEEZE_SAFETY > room:
@@ -613,7 +613,7 @@ class _Loop:
     # ④ 간격 나눔
     def distribute(self, rr, lay, rounds: int):
         ps = self.ps
-        header = self.doc.headers[0]
+        header = self.doc.parts.headers[0]
         starts, places = group_starts(self.doc), head_places(lay)
         split_cols = {(p, c) for p, c, _ in splits(rr.pdf, self.kit)}
         by_col = _by_col(places)

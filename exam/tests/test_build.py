@@ -93,15 +93,15 @@ def test_빈_형광펜은_정답이_아니다(양식_hwpx):
 def test_두_판_꾸러미_대조(양식_hwpx, tmp_path):
     kit, doc, res = _조판(양식_hwpx, answer_key=False)
     plain, key, other = tmp_path / "p.hwpx", tmp_path / "k.hwpx", tmp_path / "o.hwpx"
-    doc.save_to_path(str(plain))
+    doc.save(str(plain))
     k = HwpxDocument.open(str(plain))
     add_answer_marks(k, kit, res.answers)
-    k.save_to_path(str(key))
+    k.save(str(key))
     assert same_package(plain, key) == []
     t = next(t for t in k.sections[0].element.iter(q("hp", "t")) if (t.text or "").strip())
     t.text = t.text + "x"  # 형광펜 말고 글자 하나
     k.sections[0].mark_dirty()
-    k.save_to_path(str(other))
+    k.save(str(other))
     assert same_package(plain, other) == ["Contents/section0.xml가 다르다(형광펜을 빼고도)"]
 
 

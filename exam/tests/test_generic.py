@@ -39,7 +39,7 @@ def test_킷으로_읽은_것과_같은_원고(tmp_path):
 
 
 def _doc(texts: list[str]) -> HwpxDocument:
-    doc = HwpxDocument.new()
+    doc = HwpxDocument.new(empty_first_line=True)
     for t in texts:
         doc.add_paragraph(t)
     return doc

@@ -68,7 +68,7 @@ def write_region(src: Path, start: int, end: int, out: Path) -> None:
             sec.remove_paragraph(ps[i])
     sec.mark_dirty()
     out.parent.mkdir(parents=True, exist_ok=True)
-    doc.save_to_path(str(out))
+    doc.save(str(out))
 
 
 def _empty(p_el) -> bool:

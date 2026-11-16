@@ -99,7 +99,7 @@ def main() -> None:
     }
     띠채움 = doc.styles.ensure_border_fill(border_color=띠색, fill_color=띠색)
     띠선 = doc.styles.ensure_border_fill(border_color=선색, active_borders=("top", "bottom"))
-    표제선 = doc.styles.ensure_border_fill(border_color=선색, border_width="0.7 mm", active_borders=("top", "bottom"))
+    표제선 = doc.styles.ensure_border_fill(border_color=선색, border_width_mm=0.7, active_borders=("top", "bottom"))
     빈칸 = doc.styles.ensure_border_fill(border_color="#FFFFFF", active_borders=())
 
     # 제목표 — 위아래 굵은 선 사이에 두 줄 제목
@@ -137,7 +137,7 @@ def main() -> None:
     _문단(doc, "※ {{참고}}", 글자["참고"], 문단["참고"])
 
     킷.mkdir(parents=True, exist_ok=True)
-    doc.save_to_path(str(킷 / "견본.hwpx"))
+    doc.save(str(킷 / "견본.hwpx"))
     doc.close()
     print(킷 / "견본.hwpx")
 

@@ -158,7 +158,7 @@ def _조판(answer_key: bool, tmp_path: Path, md: str | None = None) -> tuple[Hw
     finalize_form(doc, kit, prep)
     tmp_path.mkdir(parents=True, exist_ok=True)
     out = tmp_path / f"수식_{answer_key}.hwpx"
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     return HwpxDocument.open(str(out)), out
 
 
@@ -178,7 +178,7 @@ def test_합성_수학_두_판_조판(answer_key, tmp_path):
     sec = doc.sections[0].element
     eqs = list(sec.iter(q("hp", "equation")))
     assert [e.find(q("hp", "script")).text for e in eqs] == [m.script for m in _원고_수식()]
-    hdr = doc.headers[0].element
+    hdr = doc.parts.headers[0].element
     for e in eqs:
         run = e.getparent()
         cp = hdr.find(f".//{q('hh', 'charPr')}[@id='{run.get('charPrIDRef')}']")

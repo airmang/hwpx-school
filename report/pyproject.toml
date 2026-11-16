@@ -3,7 +3,7 @@ name = "report"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
 # design.marked(자리표시 견본 수확)는 python-hwpx-automation 7.4.0부터 공개 모듈이다.
-dependencies = ["python-hwpx>=6.8,<7", "python-hwpx-automation>=7.4,<8"]
+dependencies = ["python-hwpx>=7.0,<8", "python-hwpx-automation>=8.0,<9"]
 
 [dependency-groups]
 dev = [

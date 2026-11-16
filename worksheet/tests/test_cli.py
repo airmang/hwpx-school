@@ -63,7 +63,7 @@ def test_안전하지_않은_원본으로_extract_kit을_하면_코드_2고_skel
     글자.text = "유출될_머리말"
     ctrl.append(글자)
     section.mark_dirty()
-    doc.save_to_path(안전하지_않은_원본)
+    doc.save(안전하지_않은_원본)
 
     dest = tmp_path / "새킷"
     코드 = cli_main(["extract-kit", str(안전하지_않은_원본), str(dest)])

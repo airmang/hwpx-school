@@ -318,18 +318,18 @@ def extract_skeleton(
     if font_map:
         fonts_remapped, 이전_글꼴 = _글꼴_옮기기(doc, font_map)
 
-    # save_to_path(dest)를 바로 부르면, 그 뒤 사후조건이 실패했을 때 dest에 이미
+    # save(dest)를 바로 부르면, 그 뒤 사후조건이 실패했을 때 dest에 이미
     # "중립처럼 보이지만 아닌" 완전한 zip이 남는다. 같은 디렉터리의 임시 경로에 먼저 쓰고,
     # 사후조건까지 통과한 뒤에만 os.replace로 원자적 교체한다 — 실패하면 임시 파일을 지우고
     # 그대로 다시 던진다(기존 dest가 있었다면 손대지 않은 채 그대로 남는다).
     dest.parent.mkdir(parents=True, exist_ok=True)
     fd, 임시_경로_문자열 = tempfile.mkstemp(
-        prefix=dest.name + ".", suffix=".tmp", dir=str(dest.parent),
+        prefix=dest.name + ".", suffix=".tmp.hwpx", dir=str(dest.parent),
     )
     os.close(fd)
     임시_경로 = Path(임시_경로_문자열)
     try:
-        doc.save_to_path(임시_경로)
+        doc.save(임시_경로)
         saved = HwpxDocument.open(임시_경로)
         _사후조건_확인(saved, font_map=font_map, 이전_글꼴=이전_글꼴)
     except BaseException:

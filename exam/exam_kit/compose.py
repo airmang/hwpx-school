@@ -443,7 +443,7 @@ def harvest_samples(doc: HwpxDocument, kit: Kit) -> Samples:
     실패 = [what for what, v in (("〈보기〉 견본", 보기), ("자료 견본", 자료), ("세트 표지 [a∼b]", 표지)) if v is None]
     if 실패:
         raise ValueError("양식이 바뀌었다: 샘플 구역에 " + ", ".join(실패) + " 없음")
-    cp = doc.headers[0].element.find(f".//{q('hh', 'charPr')}[@id='{표지}']")
+    cp = doc.parts.headers[0].element.find(f".//{q('hh', 'charPr')}[@id='{표지}']")
     if cp is None or cp.get("height") != str(sm["char_height"]) or (cp.find(q("hh", "bold")) is not None) != sm["bold"]:
         raise ValueError(f"양식이 바뀌었다: 세트 표지 charPr {표지}가 킷 set_marker(높이 {sm['char_height']}, 굵게 {sm['bold']})와 다르다")
     번호 = None
@@ -469,7 +469,7 @@ class _Composer:
                  image_root: Path | None = None):
         self.doc, self.kit, self.samples, self.answer_key = doc, kit, samples, answer_key
         self.image_root = image_root
-        self.header = doc.headers[0]
+        self.header = doc.parts.headers[0]
         ids = style_ids(doc)
         self.style = {role: ids[name] for role, name in kit.styles.items()}  # role → (style, paraPr, charPr)
         self._pp: dict[tuple, str] = {}
@@ -785,7 +785,7 @@ class _Composer:
     def _수식(self, p, script: str, cp: str) -> ET._Element:
         """문단 끝에 한/글 수식 run을 붙인다(공개 API add_equation) — 그 자리 글자 크기, 글꼴은 킷 typeset.equation_font
         (없으면 수식_글꼴). 수식 요소를 돌려준다."""
-        el = p.add_equation(script, base_unit=self.글자_크기(cp), char_pr_id_ref=cp).element
+        el = p.add_equation(script, font_size=self.글자_크기(cp) / 100, char_pr_id_ref=cp).element
         el.set("font", self.kit.typeset.get("equation_font", 수식_글꼴))
         return el
 
@@ -1240,7 +1240,8 @@ class _Composer:
         pid = self.para_pr(spec.role, keep=spec.keep, gap=spec.gap, align=spec.align, left=spec.left, room=spec.room,
                            stem=spec.stem)
         sec = self.doc.sections[0]
-        p = sec.add_paragraph("", para_pr_id_ref=pid, style_id_ref=sid, char_pr_id_ref=cp, inherit_style=False)
+        p = sec.add_paragraph("", para_pr_id_ref=pid, char_pr_id_ref=cp, inherit_style=False)
+        p.style_id_ref = sid
         if spec.brk:
             p.element.set("columnBreak", "1" if spec.brk == "column" else "0")
             p.element.set("pageBreak", "1" if spec.brk == "page" else "0")
@@ -1269,7 +1270,7 @@ class _Composer:
         """도형 자리를 잡는 보이지 않는 틀 — 글자처럼 취급한 선·채움 없는 사각형(그림 자리와 같은 구실)."""
         sec = self.doc.sections[0]
         tmp = sec.add_paragraph("")
-        el = tmp.add_rectangle(w, h, line_width="0", treat_as_char=True).element
+        el = tmp.add_rectangle(w, h, line_width_mm=0, treat_as_char=True).element
         el.find(q("hp", "lineShape")).set("style", "NONE")
         el.getparent().remove(el)
         sec.remove_paragraph(tmp)
@@ -1349,7 +1350,7 @@ class _Composer:
 
         for ns, color in d.faces:
             (x, y), pts = hw([d.points[n] for n in ns])
-            el = p.add_polygon(pts, line_width="0", fill_color=color, treat_as_char=False).element
+            el = p.add_polygon(pts, line_width_mm=0, fill_color=color, treat_as_char=False).element
             el.find(q("hp", "lineShape")).set("style", "NONE")
             self._float(el, x, y)
         for a, b, dash in d.lines:
@@ -1619,7 +1620,7 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
         raise ValueError(f"{qn.number}번 답지가 원고와 다르다: 문서 {have!r} ≠ 원고 {want!r}")
     c = _Composer(doc, kit, Samples(None, None, None), answer_key=answer_key)  # 답지 조판은 견본을 쓰지 않는다
     _, specs = c._choices(dataclasses.replace(qn, override=kind))
-    last_pp = doc.headers[0].element.find(f".//{q('hh', 'paraPr')}[@id='{victims[-1].element.get('paraPrIDRef')}']")
+    last_pp = doc.parts.headers[0].element.find(f".//{q('hh', 'paraPr')}[@id='{victims[-1].element.get('paraPrIDRef')}']")
     last_bs = None if last_pp is None else last_pp.find(q("hh", "breakSetting"))
     for s in specs[:-1]:
         s.keep = True  # 묶음 안 답지 줄은 keepWithNext

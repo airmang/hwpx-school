@@ -30,7 +30,7 @@ def output_paths(out: Path) -> tuple[Path, Path]:
 
 
 def _임시_경로(대상: Path) -> Path:
-    fd, 이름 = tempfile.mkstemp(prefix=대상.name + ".", suffix=".tmp", dir=str(대상.parent))
+    fd, 이름 = tempfile.mkstemp(prefix=대상.name + ".", suffix=".tmp.hwpx", dir=str(대상.parent))
     os.close(fd)
     return Path(이름)
 

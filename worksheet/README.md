@@ -33,9 +33,10 @@ ID를 직접 찾아 `kit.json`의 매핑을 손으로 고쳐야 한다(스타일
 
 ## 개발 환경
 
-`python-hwpx[preview]>=6.6,<7` · `python-docx>=1.2,<2` · Python 3.13 · uv로 프로젝트를
-격리한다(시스템 python에는 이 둘이 없다). 하한 6.6은 스켈레톤이 쓰는 `Section.clear_body`와
-`doc.styles.replace_font` 때문이다. 하드 고정(`==6.6.0`) 대신 범위 고정이다 —
+`python-hwpx>=7.0,<8` · `python-hwpx-automation[preview]>=8.0,<9` · `python-docx>=1.2,<2` · Python 3.13 ·
+uv로 프로젝트를 격리한다(시스템 python에는 이것들이 없다). 7.0부터 python-hwpx는 엔진만 남기고
+레이아웃 미리보기(`hwpx_automation.preview`)는 python-hwpx-automation 8.0으로 옮겼다 — 그래서 둘 다
+쓴다. 하드 고정(`==7.0.0`) 대신 범위 고정이다 —
 재현성은 커밋된 `uv.lock`이 맡고, 버전을 올릴 때의 회귀 검사는 로컬 전용 재현 테스트
 (`tests_local`)와 실물 렌더가 맡는다.
 

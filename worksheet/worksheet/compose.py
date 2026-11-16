@@ -7,7 +7,7 @@ from pathlib import Path
 
 from docx import Document
 from hwpx import HwpxDocument
-from hwpx.experimental import render_layout_preview
+from hwpx_automation.preview import render_layout_preview
 
 from worksheet.backends.docx import DocxWriter
 from worksheet.backends.hwpx import HwpxWriter

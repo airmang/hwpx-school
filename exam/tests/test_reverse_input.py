@@ -38,7 +38,7 @@ def _가짜_hwp(monkeypatch, report: Hwp5ConversionReport):
 
     def fake(path, *a, **k):
         if str(path).endswith(".hwp"):
-            doc = HwpxDocument.new()
+            doc = HwpxDocument.new(empty_first_line=True)
             doc._hwp5_report = report
             return doc
         return real(path, *a, **k)

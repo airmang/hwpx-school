@@ -214,7 +214,7 @@ def test_참고_줄은_스캔_규칙_조판까지(양식_hwpx):
     note = ps[i]
     assert note.get("styleIDRef") == str(ids[kit.styles["normal"]][0])
     assert note.find(".//{*}run").get("charPrIDRef") == str(ids[kit.styles["number"]][2])
-    pp = doc.headers[0].element.find(f".//{{*}}paraPr[@id='{note.get('paraPrIDRef')}']")
+    pp = doc.parts.headers[0].element.find(f".//{{*}}paraPr[@id='{note.get('paraPrIDRef')}']")
     assert pp.find(".//{*}case//{*}left").get("value") == str(발문_이음_왼여백)
 
 
@@ -254,7 +254,7 @@ def test_참고_줄은_역변환에서도_보기_아래로(양식_hwpx, tmp_path
     prepared = prepared.refresh(doc)
     compose(doc, s, kit, answer_key=False, image_root=픽스처)
     finalize_form(doc, kit, prepared)
-    doc.save_to_path(str(tmp_path / "x.hwpx"))
+    doc.save(str(tmp_path / "x.hwpx"))
     back = reverse(tmp_path / "x.hwpx", kit, image_dir=tmp_path)
     assert "ㄴ. NOT은 입력을 뒤집는다.\n:::\n※ 단, 입력은 0 또는 1이다.\n" in back
     assert [b.kind for b in scan_markdown(back).questions[0].blocks] == ["보기", "주"]

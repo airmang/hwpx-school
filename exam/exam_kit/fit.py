@@ -128,7 +128,7 @@ def element_at(doc: HwpxDocument, key: Key) -> ET._Element:
 
 def code_char_prs(doc: HwpxDocument, kit: Kit) -> set[str]:
     """코드 블록 글자 모양 id — 한글 글꼴이 kit.code_font인 charPr(자간 맞춤·양쪽 정렬 대상이 아니다, Task 30)."""
-    hdr = doc.headers[0].element
+    hdr = doc.parts.headers[0].element
     ff = next((f for f in hdr.iter(q("hh", "fontface")) if f.get("lang") == "HANGUL"), None)
     fid = None if ff is None else next((f.get("id") for f in ff.findall(q("hh", "font")) if f.get("face") == kit.code_font), None)
     if fid is None:
@@ -234,7 +234,7 @@ class Spacer:
 
     def __init__(self, doc: HwpxDocument):
         self.doc = doc
-        self.box = doc.headers[0].element.find(f".//{q('hh', 'charProperties')}")
+        self.box = doc.parts.headers[0].element.find(f".//{q('hh', 'charProperties')}")
         if self.box is None:
             raise ValueError("양식이 바뀌었다: hh:charProperties 없음")
         self.orig: dict[Key, list[str]] = {}   # 문단 → run charPr id(처음 값)
@@ -263,7 +263,7 @@ class Spacer:
                 c.find(q("hh", "spacing")).set(k, str(s))
 
         before = len(self.box)
-        el = self.doc.headers[0].ensure_char_property(predicate=같다, modifier=조이기, base_char_pr_id=base)
+        el = self.doc.parts.headers[0].ensure_char_property(predicate=같다, modifier=조이기, base_char_pr_id=base)
         if len(self.box) > before:
             self.made.append(el)
         return el.get("id")
@@ -275,7 +275,7 @@ class Spacer:
             self.box.remove(el)
         if self.made:
             self.box.set("itemCnt", str(len(self.box.findall(q("hh", "charPr")))))
-            header = self.doc.headers[0]
+            header = self.doc.parts.headers[0]
             header.mark_dirty()
             if header.document is not None:
                 header.document.invalidate_char_property_cache()
@@ -298,7 +298,7 @@ class Spacer:
 
 def current_spacing(doc: HwpxDocument, key: Key) -> int:
     """문단 run들의 자간 가운데 절댓값이 가장 큰 값(부호 그대로) — 이미 맞춘 문단(≠ 0)은 다시 맞추지 않는다."""
-    box = doc.headers[0].element.find(f".//{q('hh', 'charProperties')}")
+    box = doc.parts.headers[0].element.find(f".//{q('hh', 'charProperties')}")
     vals = [_spacing(box.find(f"{q('hh', 'charPr')}[@id='{r.get('charPrIDRef')}']"))
             for r in element_at(doc, key).findall(q("hp", "run"))]
     return max(vals, key=abs, default=0)

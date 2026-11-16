@@ -60,7 +60,7 @@ class ReverseStop(ValueError):
 def mono_char_prs(doc: HwpxDocument) -> set[str]:
     """고정폭 글꼴 charPr — 한글 글꼴의 typeInfo proportion 9(고정폭) 또는 이름이 '…체'(굴림체·돋움체·바탕체·궁서체).
     이 글꼴로만 된 문단은 코드 블록으로 되돌린다(Task 30)."""
-    hdr = doc.headers[0].element
+    hdr = doc.parts.headers[0].element
     ff = next((f for f in hdr.iter(q("hh", "fontface")) if f.get("lang") == "HANGUL"), None)
     mono = set() if ff is None else {
         f.get("id") for f in ff.findall(q("hh", "font"))
@@ -84,7 +84,7 @@ def code_text(p_el) -> str:
 
 def underlined_char_prs(doc: HwpxDocument) -> set[str]:
     out = set()
-    for c in doc.headers[0].element.iter(q("hh", "charPr")):
+    for c in doc.parts.headers[0].element.iter(q("hh", "charPr")):
         u = c.find(q("hh", "underline"))
         if u is not None and (u.get("type") or "NONE") != "NONE":
             out.add(c.get("id"))
@@ -507,7 +507,7 @@ def kit_front(doc: HwpxDocument, kit: Kit) -> dict[str, str | None]:
     """학교 킷으로 읽은 머리 값 — 누름틀(kit.slots)에서, 누름틀이 없으면 글자 자리(kit.text_slots, slots.read_text_slots)에서.
     읽지 못한 키는 None(누름틀이 없다 — 양식이 바뀌었거나 교사가 누름틀을 지우고 글로 썼다). 비었으면 자리표시를 둘 수 있는
     키(시행·대상의 반·인쇄)는 `__`·`_`로 남긴다(초안). 숫자여야 하는 키(학년도·학년·학기·차)는 숫자가 아니면 모름."""
-    v = {f.field_id: f.value for f in doc.list_form_fields()}
+    v = {f.field_id: f.value for f in doc.fields.all}
     ts = read_text_slots(doc, kit) if kit.text_slots else {}
 
     def g(slot: str) -> str | None:

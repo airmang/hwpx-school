@@ -51,7 +51,7 @@ exam_kit/
   convert.py       지필 원고(문제지·정답키 형식) → 원고 md + 문항 내용 불변 검사
   _png.py          합성 PNG(세척·픽스처)
 kits/synthetic/     합성 서식(synthetic_form.hwpx) + 합성 킷 — 학교 무관, 테스트·예시용
-tools/              make_synthetic_form.py — 합성 서식 생성기(python-hwpx 6.6.0)
+tools/              make_synthetic_form.py — 합성 서식 생성기(python-hwpx 7.0)
 (학교 킷)          저장소 밖 사용자 로컬 — 폴더 하나 = 학교 하나: kit.json·rules.json·habits.json·README·결정표·SKILL.md
 tests/             pytest — 픽스처는 합성 문항만(fixtures/*.md, 그림.png)
 ```

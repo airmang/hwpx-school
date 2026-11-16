@@ -371,7 +371,7 @@ def test_제출본_역변환(제출본_hwpx, tmp_path):
     kinds = {b.kind for q in s.questions for b in q.blocks}
     assert {"보기", "자료", "표", "답항표"} <= kinds
     assert abs(sum(q.points for q in s.questions) - s.front.만점) < 1e-9
-    v = {f.field_id: f.value for f in doc.list_form_fields()}
+    v = {f.field_id: f.value for f in doc.fields.all}
     assert s.front.시행_분해() == {k: v[kit.slots[k]] for k in ("월", "일", "요일", "교시")}
     assert s.front.과목 == v[kit.slots["과목"]]
     e = errors(lint(md, md_dir=tmp_path))

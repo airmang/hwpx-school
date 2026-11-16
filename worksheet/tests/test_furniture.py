@@ -61,7 +61,7 @@ def test_머리띠_칸마다_킷_서식이_입혀진다(문서):
     doc, kit, tmp_path = 문서
     add_band(doc, kit, title="인공지능")
     out = tmp_path / "bandstyle.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     첫표 = xml[xml.index("<hp:tbl") : xml.index("</hp:tbl>")]
@@ -84,7 +84,7 @@ def test_머리띠_제목칸만_음영이다(문서):
     doc, kit, tmp_path = 문서
     add_band(doc, kit, title="인공지능")
     out = tmp_path / "band.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     첫표 = xml[xml.index("<hp:tbl") : xml.index("</hp:tbl>")]
@@ -103,7 +103,7 @@ def test_키워드면_줄_테두리가_머리_본문_끝으로_나뉜다(문서)
     doc, kit, tmp_path = 문서
     add_keyword_page(doc, kit)
     out = tmp_path / "kw.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     표 = xml.rsplit("<hp:tbl", 1)[1]
@@ -124,7 +124,7 @@ def test_키워드면_문단_서식이_머리칸과_줄칸으로_갈린다(문�
     doc, kit, tmp_path = 문서
     add_keyword_page(doc, kit)
     out = tmp_path / "kwstyle.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     표 = xml.rsplit("<hp:tbl", 1)[1]
@@ -164,7 +164,7 @@ def test_제목은_타원_텍스트_순서로_놓인다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=1, text="탐색 알고리즘 종류", textbook="33-35P")
     out = tmp_path / "head.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     assert _마지막_문단_자식(out) == ["ellipse", "t", "t"]
     assert HwpxDocument.open(out).validate().ok
@@ -174,7 +174,7 @@ def test_첫_제목에는_확인도장이_붙는다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=1, text="인간의 지능", with_stamp=True)
     out = tmp_path / "stamp.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     assert _마지막_문단_자식(out) == ["ellipse", "t", "rect"]
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
@@ -186,7 +186,7 @@ def test_타원_속성이_킷_규격을_따른다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=3, text="맹목적 탐색")
     out = tmp_path / "circle.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     타원 = xml[xml.index("<hp:ellipse") : xml.index("</hp:ellipse>")]
@@ -202,7 +202,7 @@ def test_교과서_쪽은_제목과_별도_run으로_붙는다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=2, text="A* 알고리즘", textbook="40P")
     out = tmp_path / "tb.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     문단 = xml[xml.rindex("<hp:p ") :]
@@ -221,7 +221,7 @@ def test_교과서_쪽이_없으면_제목_run_하나뿐이다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=1, text="제목")
     out = tmp_path / "notb.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     문단 = xml[xml.rindex("<hp:p ") :]
@@ -242,7 +242,7 @@ def test_킷의_textbookFormat을_바꾸면_교과서_문구가_안_나온다(�
     )
     add_heading(doc, 바뀐_킷, number=1, text="제목", textbook="40P")
     out = tmp_path / "customfmt.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     assert xml.count("교과서") == 0
@@ -263,7 +263,7 @@ def test_타원은_글자처럼_놓여_제목과_같은_줄에_온다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=1, text="제목")
     out = tmp_path / "inline.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     assert _pos(xml, "ellipse")["treatAsChar"] == "1"
@@ -274,7 +274,7 @@ def test_확인도장은_용지_기준_오른쪽_위에_고정된다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=1, text="제목", with_stamp=True)
     out = tmp_path / "stamppos.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     pos = _pos(zipfile.ZipFile(out).read("Contents/section0.xml").decode(), "rect")
     assert pos["treatAsChar"] == "0"
@@ -287,7 +287,7 @@ def test_두_도형의_선과_채움이_킷에서_온다(문서):
     doc, kit, tmp_path = 문서
     add_heading(doc, kit, number=1, text="제목", with_stamp=True)
     out = tmp_path / "shapestyle.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     타원 = xml[xml.index("<hp:ellipse") : xml.index("</hp:ellipse>")]

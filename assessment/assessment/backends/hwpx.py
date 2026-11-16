@@ -164,4 +164,4 @@ class HwpxWriter:
     def save(self, path: Path) -> None:
         if self._단나눔_대기:
             raise InputError(":::단나눔 뒤에 아무 내용이 없다 — 마지막 단나눔을 지운다")
-        self.doc.save_to_path(path)
+        self.doc.save(path)

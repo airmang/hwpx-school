@@ -112,7 +112,7 @@ def rebuild(md: str, kit: Kit, form: Path, image_root: Path, out: Path) -> Path:
     compose(doc, s, kit, answer_key=True, image_root=image_root)
     finalize_form(doc, kit, prepared)
     out.parent.mkdir(parents=True, exist_ok=True)
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     return out
 
 

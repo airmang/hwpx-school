@@ -55,5 +55,5 @@ def open_source(path: Path, work: Path) -> Source:
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
     copy = work / f"{path.stem}_변환.hwpx"
-    doc.save_to_path(str(copy))
+    doc.save(str(copy))
     return Source(HwpxDocument.open(str(copy)), path, copy, notes)

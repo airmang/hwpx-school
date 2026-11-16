@@ -92,7 +92,7 @@ def 두_섹션_원본(tmp_path) -> Path:
     dest = tmp_path / "두섹션.hwpx"
     doc = HwpxDocument.open(_표준_스켈레톤)
     doc.add_section()
-    doc.save_to_path(dest)
+    doc.save(dest)
     return dest
 
 
@@ -120,7 +120,7 @@ def 첫_run에_글자가_든_원본(tmp_path) -> Path:
     글자.text = "유출될_글자"
     첫_run.append(글자)
     section.mark_dirty()
-    doc.save_to_path(dest)
+    doc.save(dest)
     return dest
 
 
@@ -161,7 +161,7 @@ def 메타데이터_심은_원본(tmp_path) -> Path:
     )
     _메타_심기(doc.package, "lastsaveby", "김금칙")
     _메타_심기(doc.package, "date", "2020년 1월 1일 수요일 오전 12:00:00")
-    doc.save_to_path(dest)
+    doc.save(dest)
     return dest
 
 
@@ -205,7 +205,7 @@ def 모르는_메타_심은_원본(tmp_path) -> Path:
     dest = tmp_path / "모르는메타.hwpx"
     doc = HwpxDocument.open(_표준_스켈레톤)
     _새_메타_심기(doc.package, "금칙필드", "금칙작성자")
-    doc.save_to_path(dest)
+    doc.save(dest)
     return dest
 
 
@@ -243,7 +243,7 @@ def test_사후조건은_물리_BinData_부품이_남아있으면_거부한다(t
     doc = HwpxDocument.open(_표준_스켈레톤)
     doc.add_picture(_png(5, 5), "png", width_mm=5, height_mm=5)
     dirty = tmp_path / "dirty.hwpx"
-    doc.save_to_path(dirty)
+    doc.save(dirty)
 
     with pytest.raises(ValueError, match="BinData"):
         _사후조건_확인(HwpxDocument.open(dirty))
@@ -256,7 +256,7 @@ def test_사후조건은_끊어진_BinData_참조가_남아있으면_거부한�
     doc = HwpxDocument.open(_표준_스켈레톤)
     doc.add_picture(_png(5, 5), "png", width_mm=5, height_mm=5)
     src = tmp_path / "src.hwpx"
-    doc.save_to_path(src)
+    doc.save(src)
 
     broken = tmp_path / "broken.hwpx"
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(broken, "w") as zout:
@@ -274,7 +274,7 @@ def test_사후조건은_끊어진_BinData_참조가_남아있으면_거부한�
 
 
 # --- 사후조건이 실패해도 dest에 "중립처럼 보이지만 아닌" 파일이 안 남는다 -------
-# save_to_path(dest)가 먼저고 사후조건 확인이 나중이면, 실패해도 dest에는 이미 완전한 zip이
+# save(dest)가 먼저고 사후조건 확인이 나중이면, 실패해도 dest에는 이미 완전한 zip이
 # 쓰여 있다 — 임시 경로에 저장 → 사후조건 통과 시에만 os.replace로 원자적 교체해야 한다.
 
 
@@ -329,7 +329,7 @@ def 컨트롤_안에_글자가_든_원본(tmp_path) -> Path:
     글자.text = "유출될_머리말"
     ctrl.append(글자)
     section.mark_dirty()
-    doc.save_to_path(dest)
+    doc.save(dest)
     return dest
 
 
@@ -359,7 +359,7 @@ def test_컨트롤_안의_표도_거부한다(tmp_path):
     ctrl = 첫_run.find(_q("ctrl"))
     ctrl.append(표_사본)
     section.mark_dirty()
-    doc.save_to_path(dest_src)
+    doc.save(dest_src)
 
     dest = tmp_path / "skeleton.hwpx"
     with pytest.raises(
@@ -383,7 +383,7 @@ def test_컨트롤_안에서_탭_뒤에_든_글자도_거부한다(tmp_path):
     글자.append(탭)
     ctrl.append(글자)
     section.mark_dirty()
-    doc.save_to_path(dest_src)
+    doc.save(dest_src)
 
     dest = tmp_path / "skeleton.hwpx"
     with pytest.raises(ValueError, match="첫 문단의 컨트롤 안에 내용이 있다.*hp:t"):
@@ -411,7 +411,7 @@ def _둘째_run에_컨트롤_사본을_둔_원본(tmp_path, 이름: str, 내용:
     둘째_run.append(본문)
     첫_run.addnext(둘째_run)
     section.mark_dirty()
-    doc.save_to_path(dest)
+    doc.save(dest)
     return dest
 
 

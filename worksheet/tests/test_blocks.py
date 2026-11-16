@@ -60,7 +60,7 @@ def test_정의빈칸은_본문폭_1열표다(문서):
     doc, kit, tmp_path = 문서
     render_node(doc, kit, Body("■ 정렬: 자료를 정해진 ________에 따라"), base_dir=tmp_path)
     out = tmp_path / "def.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     표 = doc.tables.all[-1]
     assert 표.row_count == 1 and 표.column_count == 1
@@ -104,7 +104,7 @@ def test_그림칸은_비율을_지키고_그림을_넣는다(문서, tmp_path):
 
     render_node(doc, kit, Figure("그림/트리.png", width_mm=80.0), base_dir=tmp_path)
     out = tmp_path / "fig.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     saved = HwpxDocument.open(out)
     assert saved.validate().ok
@@ -143,7 +143,7 @@ def test_라벨설명은_좁은_음영_라벨칸과_넓은_설명칸이다(문�
     assert 표.cell(1, 1).text.strip() == "설명 B"
 
     out = tmp_path / "label.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     마지막표 = xml[xml.rindex("<hp:tbl") :]
     assert 마지막표.count(f'borderFillIDRef="{kit.border_fill["shade"]}"') == 2
@@ -187,7 +187,7 @@ def test_비교표는_머리행과_머리열이_음영이다(문서):
     assert 표.cell(2, 1).text.strip() == ""
 
     out = tmp_path / "cmp.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     마지막표 = zipfile.ZipFile(out).read("Contents/section0.xml").decode().rsplit("<hp:tbl", 1)[1]
     assert 마지막표.count(f'borderFillIDRef="{kit.border_fill["shade"]}"') == 6  # 머리행 3 + 머리열 3
     assert HwpxDocument.open(out).validate().ok
@@ -243,7 +243,7 @@ def test_답칸은_라벨_음영칸과_빈_답칸이다(문서):
     assert 표.cell(1, 0).text.strip() == ""
 
     out = tmp_path / "ans.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     마지막표 = zipfile.ZipFile(out).read("Contents/section0.xml").decode().rsplit("<hp:tbl", 1)[1]
     assert f'borderFillIDRef="{kit.border_fill["shade"]}"' in 마지막표
     assert f'borderFillIDRef="{kit.border_fill["answer"]}"' in 마지막표
@@ -269,7 +269,7 @@ def test_강조박스는_제목칸과_중첩표를_갖는다(문서):
         base_dir=tmp_path,
     )
     out = tmp_path / "box.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     saved = HwpxDocument.open(out)
     assert saved.validate().ok
@@ -457,7 +457,7 @@ def test_라벨설명_labelWidth는_저장_XML의_칸_폭에_그대로_쓰인다
         base_dir=tmp_path,
     )
     out = tmp_path / "labelwidth.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     환산값 = round(30 * 7200 / 25.4)  # 3cm = 30mm
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
@@ -548,7 +548,7 @@ def test_셀_헬퍼는_역할별_서식과_높이를_입힌다(문서):
     assert 표.cell(0, 1).text.strip() == "본문"
 
     out = tmp_path / "cell.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     칸들 = xml[xml.index("<hp:tbl") : xml.index("</hp:tbl>")].split("<hp:tc ")[1:]
     assert len(칸들) == 3
@@ -597,7 +597,7 @@ def test_블록은_표_안의_모든_문단에_킷_값과_같은_서식을_입�
     doc, kit, tmp_path = 문서
     render_node(doc, kit, 노드, base_dir=tmp_path)
     out = tmp_path / f"{이름}.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     허용_para = {str(kit.para_pr[k]) for k in ("label", "cell")}
     허용_char = {str(kit.char_pr[k]) for k in ("label", "cell")}
@@ -788,7 +788,7 @@ def test_강조박스는_제목칸_label_안쪽칸_cell_역할이고_중첩칸_�
     assert 안쪽_문단.char_pr_id_ref == str(kit.char_pr["cell"])
 
     out = tmp_path / "box2.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     안쪽표 = xml.rsplit("<hp:tbl", 1)[1]
     assert f'borderFillIDRef="{kit.border_fill["grid"]}"' in 안쪽표
@@ -822,7 +822,7 @@ def test_모든_블록은_한_행_안에서_셀_높이가_같다(문서, 이름,
     doc, kit, tmp_path = 문서
     render_node(doc, kit, 노드, base_dir=tmp_path)
     out = tmp_path / f"{이름}-rowheight.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     root = ET.fromstring(xml)
@@ -920,7 +920,7 @@ def test_나란히는_머리행_label_본문행_cell_역할이다(문서):
     assert 본문_문단.char_pr_id_ref == str(kit.char_pr["cell"])
 
     out = tmp_path / "narrahi.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     assert HwpxDocument.open(out).validate().ok
 
 
@@ -995,7 +995,7 @@ def test_나란히는_저장_XML에서_열_폭이_균등하다(문서):
     doc, kit, tmp_path = 문서
     render_node(doc, kit, Fence("나란히", {"cols": "가|나|다"}, "1|2|3"), base_dir=tmp_path)
     out = tmp_path / "narrahi_width.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     표 = list(ET.fromstring(xml).iter(f"{{{HP}}}tbl"))[-1]
     행들 = 표.findall(f"{{{HP}}}tr")
@@ -1046,7 +1046,7 @@ def test_칸_안_그림은_실제로_hp_pic으로_들어간다(문서, 블록):
     fence = _그림_지원_블록[블록]("![](그림.png){width=3cm}")
     render_node(doc, kit, fence, base_dir=tmp_path)
     out = tmp_path / f"{블록}-그림.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     saved = HwpxDocument.open(out)
     assert saved.validate().ok
@@ -1100,7 +1100,7 @@ def test_칸_안_그림은_비율을_유지한다(문서):
         doc, kit, _나란히_그림칸_펜스("![](그림.png){width=4cm}"), base_dir=tmp_path,
     )
     out = tmp_path / "비율.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     pic = next(ET.fromstring(xml).iter(f"{{{HP}}}pic"))
@@ -1120,7 +1120,7 @@ def test_라벨설명_그림_폭은_labelWidth_기본값에서_계산한_설명_
     (tmp_path / "그림.png").write_bytes(_png(300, 120))
     render_node(doc, kit, _라벨설명_그림칸_펜스("![](그림.png)"), base_dir=tmp_path)
     out = tmp_path / "labelwidth_기본_그림.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     pic = next(ET.fromstring(xml).iter(f"{{{HP}}}pic"))
@@ -1141,7 +1141,7 @@ def test_라벨설명_그림_폭은_labelWidth_명시값에서도_계산한_설�
         base_dir=tmp_path,
     )
     out = tmp_path / "labelwidth_명시_그림.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     pic = next(ET.fromstring(xml).iter(f"{{{HP}}}pic"))
@@ -1156,7 +1156,7 @@ def test_칸_안_그림_폭_생략시_칸_폭에_맞춘다(문서):
     (tmp_path / "그림.png").write_bytes(_png(300, 120))
     render_node(doc, kit, _나란히_그림칸_펜스("![](그림.png)"), base_dir=tmp_path)
     out = tmp_path / "생략폭.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     pic = next(ET.fromstring(xml).iter(f"{{{HP}}}pic"))
@@ -1172,7 +1172,7 @@ def test_칸_안_그림_폭이_칸보다_넓으면_칸_폭으로_줄인다(문�
         doc, kit, _나란히_그림칸_펜스("![](그림.png){width=15cm}"), base_dir=tmp_path,
     )
     out = tmp_path / "초과폭.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     xml = zipfile.ZipFile(out).read("Contents/section0.xml").decode()
     pic = next(ET.fromstring(xml).iter(f"{{{HP}}}pic"))
@@ -1263,7 +1263,7 @@ def test_같은_그림_파일을_두_칸에_쓰면_BinData가_하나다(문서, 
     fence = _그림_두칸_지원_블록[블록]("![](그림.png)")
     render_node(doc, kit, fence, base_dir=tmp_path)
     out = tmp_path / f"{블록}-dedupe.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
 
     saved = HwpxDocument.open(out)
     assert saved.validate().ok
@@ -1288,7 +1288,7 @@ def test_그림_캐시를_공유하면_여러_render_node_호출도_한_번만_�
         base_dir=tmp_path, 그림_캐시=캐시,
     )
     out = tmp_path / "공유캐시.hwpx"
-    doc.save_to_path(out)
+    doc.save(out)
     saved = HwpxDocument.open(out)
     assert len(saved.media.images) == 1
 

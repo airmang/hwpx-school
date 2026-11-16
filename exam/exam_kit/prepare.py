@@ -213,7 +213,7 @@ def _check_form(doc: HwpxDocument, kit: Kit) -> None:
     for name in kit.styles.values():
         if name not in names:
             실패.append(f"스타일 없음: {name}")
-    ids = {f.field_id for f in doc.list_form_fields()}
+    ids = {f.field_id for f in doc.fields.all}
     for slot, fid in kit.slots.items():
         if fid not in ids:
             실패.append(f"누름틀 없음: {slot}")
@@ -373,7 +373,7 @@ def _postcheck(doc: HwpxDocument, kit: Kit, prepared: Prepared) -> None:
             실패.append(f"금지 문구 잔존: {w!r}")
     if _header_footer_xml(doc) != prepared.header_footer:
         실패.append("머리말/꼬리말 ctrl이 양식과 다르다")
-    n = len(doc.list_form_fields())
+    n = len(doc.fields.all)
     if n != len(kit.slot_ids()):
         실패.append(f"누름틀 {n}개 (기대 {len(kit.slot_ids())})")
     names = set(style_ids(doc))

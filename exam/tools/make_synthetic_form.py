@@ -1,6 +1,6 @@
 """합성 원안지 서식 — 학교와 무관한 시험지 빈 서식을 python-hwpx 기본 템플릿에서 새로 만든다.
 
-    uv run --no-project --with "python-hwpx==6.6.0" --with lxml python tools/make_synthetic_form.py kits/synthetic/synthetic_form.hwpx
+    uv run --no-project --with "python-hwpx>=7.0,<8" --with lxml python tools/make_synthetic_form.py kits/synthetic/synthetic_form.hwpx
 
 실제 학교 서식을 가공하지 않는다(구조·디자인도 학교 것이 아니다). 엔진 테스트가 학교 킷 없이 돌도록
 kits/synthetic(킷)과 짝을 이룬다. 서식을 다시 만들면 킷의 form.sha256을 갱신한다.
@@ -77,7 +77,7 @@ def _para(h, *, line: int, left: int = 0, intent: int = 0, tab: str | None = Non
 
 
 def build(out: Path) -> None:
-    doc = HwpxDocument.new()
+    doc = HwpxDocument.new(empty_first_line=True)  # 7.0: 6.x처럼 빈 첫 줄(구역 설정)에서 시작한다
     h = doc.oxml.headers[0]
     sec = doc.sections[0]
 
@@ -88,7 +88,7 @@ def build(out: Path) -> None:
     for k, v in M.items():
         mg.set(k, str(v))
     mg.set("gutter", "0")
-    doc.set_columns(2, same_gap=GAP, separator_type="SOLID", separator_width="0.12 mm")
+    doc.page.set_columns(2, same_gap=GAP, separator_type="SOLID", separator_width_mm=0.12)
 
     # ---- 글자·문단·스타일 ----
     body = _char(h, height=1100, font=BATANG)
@@ -110,8 +110,9 @@ def build(out: Path) -> None:
 
     def p(text_runs, st=normal, pid=None):
         """문단 하나 — text_runs = [(글, charPr)]."""
-        par = doc.add_paragraph("", style_id_ref=style.get(st, st), para_pr_id_ref=pid or roles.get(st, "0"),
+        par = doc.add_paragraph("", para_pr_id_ref=pid or roles.get(st, "0"),
                                 char_pr_id_ref=body, include_run=False, inherit_style=False)
+        par.style_id_ref = style.get(st, st)
         for t, cp in text_runs:
             run = ET.SubElement(par.element, HP + "run", {"charPrIDRef": cp})
             te = ET.SubElement(run, HP + "t")
@@ -201,11 +202,11 @@ def build(out: Path) -> None:
     cell_text(꼬리, 0, 0, ["※ 확인 사항", "∘ 합성 확인 문구 — 답안지 기입을 확인하시오."], admin)
 
     # ---- 꼬리말 ----
-    doc.set_footer_content([{"align": "CENTER", "children": [
+    doc.page.set_footer(content=[{"align": "CENTER", "children": [
         {"type": "run", "text": "과목명 1학년 (1쪽 중 "}, {"page_number": "page"}, {"type": "run", "text": "쪽)"}]}])
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    doc.save_to_path(str(out))
+    doc.save(str(out))
     print(f"wrote {out}")
 
 
