@@ -520,36 +520,17 @@ class _Composer:
     def tab_pr(self, positions: list[int]) -> str:
         """왼쪽 탭 positions(단 왼끝 기준 HWPUNIT)의 tabPr id — 1행답항 스타일 tabPr을 본뜬다: 탭마다 hp:switch 하나,
         case 분기 = pos(unit HWPUNIT), default 분기 = 2배(양식 실측 6000 → 12000). 같은 모양이 있으면 재사용."""
-        hdr = self.header.element
-        pp = hdr.find(f".//{q('hh', 'paraPr')}[@id='{self.style['choice1'][1]}']")
-        src = hdr.find(f".//{q('hh', 'tabPr')}[@id='{pp.get('tabPrIDRef')}']")
-        sw = None if src is None else src.find(q("hp", "switch"))
-        if sw is None or sw.find(f"{q('hp', 'case')}/{q('hh', 'tabItem')}") is None \
-                or sw.find(f"{q('hp', 'default')}/{q('hh', 'tabItem')}") is None:
+        styles = self.doc.styles
+        shape = styles.paragraph_property(self.style["choice1"][1])
+        src = styles.tab_property(shape.tab_pr_id_ref) if shape is not None else None
+        switch = None if src is None else src.version_switch
+        if switch is None or switch.case is None or not switch.case.tab_stops \
+                or switch.default is None or not switch.default.tab_stops:
             raise ValueError(f"양식이 바뀌었다: {self.kit.styles['choice1']} tabPr에 hp:switch case/default tabItem이 없다")
-        want = deepcopy(src)
-        for old in want.findall(q("hp", "switch")):
-            want.remove(old)
-        for pos in positions:
-            new = deepcopy(sw)
-            new.find(f"{q('hp', 'case')}/{q('hh', 'tabItem')}").set("pos", str(pos))
-            new.find(f"{q('hp', 'default')}/{q('hh', 'tabItem')}").set("pos", str(2 * pos))
-            want.append(new)
-
-        def 모양(t) -> bytes:
-            c = deepcopy(t)
-            c.attrib.pop("id", None)
-            return ET.tostring(c, method="c14n")
-
-        box = src.getparent()
-        found = next((t.get("id") for t in box.findall(q("hh", "tabPr")) if 모양(t) == 모양(want)), None)
-        if found is None:
-            found = str(max(int(t.get("id")) for t in box.findall(q("hh", "tabPr"))) + 1)
-            want.set("id", found)
-            box.append(want)
-            box.set("itemCnt", str(len(box.findall(q("hh", "tabPr")))))
-            self.header.mark_dirty()
-        return found
+        item = switch.case.tab_stops[0]  # 탭 종류·채울 모양은 양식 탭 그대로
+        return styles.ensure_tab_definition(
+            tab_stops=[{"pos": pos, "type": item.type or "LEFT", "leader": item.leader or "NONE"} for pos in positions],
+            auto_tab_left=src.auto_tab_left, auto_tab_right=src.auto_tab_right)
 
     def underline(self, base: str) -> str:
         """base charPr와 밑줄(BOTTOM)만 다른 charPr — 있으면 재사용, 없으면 복제."""
