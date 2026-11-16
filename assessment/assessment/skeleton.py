@@ -31,7 +31,7 @@ _금지된_로컬이름 = INLINE_OBJECT_NAMES | {"tbl"}
 
 # 밑줄 답칸은 칸 아래 테두리로 그린다 — 밑줄 길이 = 칸 폭이라 글꼴과 무관하다(0.12 mm 검정).
 # 양식 header 에 "아래 테두리만" 인 borderFill 이 흔히 없어서 추출이 이것을 보장한다.
-_밑줄_테두리 = {"border_color": "#000000", "border_width": "0.12 mm", "active_borders": ("bottom",)}
+_밑줄_테두리 = {"border_color": "#000000", "border_width_mm": 0.12, "active_borders": ("bottom",)}
 
 # hh:fontface/@lang 7개 값 ↔ hh:fontRef·hh:charPr가 쓰는 속성 이름. 언어마다 글꼴 id
 # 채번이 독립이라(HANGUL 목록의 id=3과 LATIN 목록의 id=3이 다른 글꼴일 수 있다), 글꼴을
@@ -244,19 +244,18 @@ def _밑줄_borderFill_더하기(doc: HwpxDocument) -> int:
     만든다 — 같은 원본이면 늘 같은 id 가 나온다(결정적). kit.json `borderFill.underline` 이
     이 id 를 가리킨다.
     """
-    return int(doc.oxml.ensure_border_fill(**_밑줄_테두리))
+    return int(doc.styles.ensure_border_fill(**_밑줄_테두리))
 
 
 def _밑줄_borderFill_확인(saved: HwpxDocument, bid: int) -> None:
-    header = saved.parts.headers[0].element
-    bf = next((e for e in header.iter(_hq("borderFill")) if e.get("id") == str(bid)), None)
+    bf = saved.styles.border_fill(bid)
     if bf is None:
         raise ValueError(f"{_실패_머리말}: 밑줄 borderFill {bid} 이 저장 뒤 header 에 없다")
     변 = {}
     for 이름 in ("left", "right", "top", "bottom"):
-        e = bf.find(_hq(f"{이름}Border"))
-        변[이름] = None if e is None else (e.get("type"), e.get("width"), e.get("color"))
-    기대 = ("SOLID", _밑줄_테두리["border_width"], _밑줄_테두리["border_color"])
+        선 = getattr(bf, 이름)
+        변[이름] = None if 선 is None else (선.type, 선.width_mm, 선.color)
+    기대 = ("SOLID", _밑줄_테두리["border_width_mm"], _밑줄_테두리["border_color"])
     if 변["bottom"] != 기대 or any(변[k] is None or 변[k][0] != "NONE" for k in ("left", "right", "top")):
         raise ValueError(f"{_실패_머리말}: 밑줄 borderFill {bid} 이 아래 테두리만이 아니다 — {변}")
 

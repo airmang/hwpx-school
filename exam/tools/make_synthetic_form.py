@@ -82,12 +82,8 @@ def build(out: Path) -> None:
     sec = doc.sections[0]
 
     # ---- 쪽·단 ----
-    pp = sec.element.find(f".//{HP}secPr/{HP}pagePr")
-    pp.set("width", str(W)), pp.set("height", str(H)), pp.set("landscape", "WIDELY")
-    mg = pp.find(HP + "margin")
-    for k, v in M.items():
-        mg.set(k, str(v))
-    mg.set("gutter", "0")
+    doc.page.set_size(width=W, height=H, orientation="PORTRAIT")
+    doc.page.set_margins(**M, gutter=0)
     doc.page.set_columns(2, same_gap=GAP, separator_type="SOLID", separator_width_mm=0.12)
 
     # ---- 글자·문단·스타일 ----

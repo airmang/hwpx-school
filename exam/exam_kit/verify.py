@@ -31,12 +31,8 @@ def errors(fs: list[Finding]) -> list[Finding]:
 
 
 def _numbered_para_prs(doc: HwpxDocument) -> set[str]:
-    out = set()
-    for pp in doc.parts.headers[0].element.iter(q("hh", "paraPr")):
-        h = pp.find(q("hh", "heading"))
-        if h is not None and h.get("type") == "NUMBER":
-            out.add(pp.get("id"))
-    return out
+    return {pid for pid, pp in doc.styles.paragraph_properties.items()
+            if pp.heading is not None and pp.heading.type == "NUMBER"}
 
 
 _글자_번호 = re.compile(r"^\d{1,3}\.\s?$")
@@ -59,7 +55,7 @@ def question_heads(doc: HwpxDocument) -> list[int]:
     nums = _numbered_para_prs(doc)
     spans = ranges(doc)
     return [i for i, p in enumerate(doc.sections[0].paragraphs)
-            if (str(p.element.get("paraPrIDRef")) in nums or (i > 0 and _literal_head(p.element))) and not inside(i, spans)]
+            if (str(p.para_pr_id_ref) in nums or (i > 0 and _literal_head(p.element))) and not inside(i, spans)]
 
 
 def _tail_index(doc: HwpxDocument, marker: str | None = None) -> int:

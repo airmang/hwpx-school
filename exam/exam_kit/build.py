@@ -130,7 +130,7 @@ def final_layouts(doc: HwpxDocument, kit: Kit) -> dict[str, str]:
         if len(rows) == 1 and ps[rows[0]].element.find(f".//{q('hp', 'tbl')}") is not None:
             out[str(k)] = "답항표"
         elif rows:
-            out[str(k)] = kinds.get(str(ps[rows[0]].element.get("styleIDRef")), "?")
+            out[str(k)] = kinds.get(str(ps[rows[0]].style_id_ref), "?")
     return out
 
 

@@ -12,14 +12,10 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 
 from hwpx import HwpxDocument
 
-HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
-HC = "{http://www.hancom.co.kr/hwpml/2011/core}"
-HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 킷 = Path(__file__).resolve().parents[1] / "kits" / "standard"
 
 DOTUM, BATANG = "0", "1"  # 기본 템플릿 글꼴 id
@@ -40,25 +36,11 @@ def _내어(역할: str) -> int:
 
 
 def _문단모양(doc: HwpxDocument, 왼쪽: int, 내어: int, 줄: int, 위: int = 0, 정렬: str = "JUSTIFY") -> str:
-    """기본 문단 모양을 복제해 정렬·왼쪽 여백·내어쓰기·줄간격·문단 위 간격을 정한다 (HWPUNIT)."""
+    """기본 문단 모양(0번)에서 정렬·왼쪽 여백·내어쓰기·줄간격·문단 위 간격을 바꾼 모양 (HWPUNIT)."""
 
-    머리 = doc.oxml.headers[0]
-    paraprs = next(머리.element.iter(HH + "paraProperties"))
-    원형 = next(e for e in paraprs if e.get("id") == "0")
-    새것 = deepcopy(원형)
-    새것.set("id", str(max(int(e.get("id")) for e in paraprs) + 1))
-    새것.find(HH + "align").set("horizontal", 정렬)
-    case, default = 새것.find(HP + "switch")
-    for 가지, 배 in ((case, 1), (default, 2)):  # case = HWPUNIT, default = 그 2배
-        여백 = 가지.find(HH + "margin")
-        여백.find(HC + "left").set("value", str(왼쪽 * 배))
-        여백.find(HC + "intent").set("value", str(내어 * 배))
-        여백.find(HC + "prev").set("value", str(위 * 배))
-        가지.find(HH + "lineSpacing").set("value", str(줄))
-    paraprs.append(새것)
-    paraprs.set("itemCnt", str(len(paraprs)))
-    머리.mark_dirty()
-    return 새것.get("id")
+    return doc.styles.ensure_paragraph_format(
+        base_para_pr_id_ref=0, alignment=정렬, margins={"left": 왼쪽, "intent": 내어, "prev": 위}, line_spacing=줄,
+    )
 
 
 def _문단(doc: HwpxDocument, 글: str, 글자: str, 문단: str | None = None):
@@ -118,7 +100,7 @@ def main() -> None:
     # 쪽 나눔 — 표지 다음. 글이 없는 문단이 쪽을 넘긴다.
     _문단(doc, "", 글자["간격"])
     나눔 = _문단(doc, "{{쪽나눔}}", 글자["간격"])
-    나눔.element.set("pageBreak", "1")
+    나눔.page_break = True
 
     # 장 제목 띠 — 색 채운 번호 칸 | 좁은 틈 | 아래위 선만 있는 제목 칸. 위 빈 줄이 앞 장과 띄운다.
     _문단(doc, "", 글자["띠간격"])

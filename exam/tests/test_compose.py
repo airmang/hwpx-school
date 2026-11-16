@@ -861,15 +861,12 @@ def test_그림_생성기_폴백과_EXIF_회전(양식_hwpx, tmp_path, monkeypat
 
     from PIL import Image
 
-    import exam_kit.compose as C
-
     im = Image.new("RGB", (300, 100), (200, 30, 30))
     exif = Image.Exif()
     exif[0x0112] = 6  # 오른쪽으로 90° 돌려 보라는 사진 — 보이는 모양은 100×300
     im.save(tmp_path / "사진.jpg", exif=exif)
     md = (픽스처 / "표그림_3문항.md").read_text(encoding="utf-8").replace("그림.png){width=6cm}", "사진.jpg){width=3cm}")
     kit = load_kit(킷_디렉터리)
-    monkeypatch.setattr(C, "_create_picture_element", None)  # private 생성기가 없어도 add_picture 폴백으로
     doc, _ = prepare_document(양식_hwpx, kit)
     compose(doc, scan_markdown(md), kit, answer_key=False, image_root=tmp_path)
     ps = 최상위_문단(doc)

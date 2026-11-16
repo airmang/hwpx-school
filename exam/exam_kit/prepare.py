@@ -131,28 +131,24 @@ def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
     doc.sections[0].mark_dirty()
 
 
-def pin_tailbox(tail_p_el, kit: Kit) -> None:
+def pin_tailbox(tail_p, kit: Kit) -> None:
     """꼬리 박스를 오른쪽 단 맨 아래 자리(용지 기준)에 — 어느 쪽에 앉을지는 렌더 뒤 layout.settle이 정한다(설계 R-5).
 
     박스는 마지막 문단(닻)과 함께 흐르므로 마지막 문항이 끝난 쪽에 앉는다. 가로 = 오른쪽 단 왼끝(kit 단 상수),
     세로 = kit.tailbox.vertOffset(제출본 실측). 닻 문단의 줄 캐시(양식에서 글자처럼 취급하던 높이 9542)는
     지운다 — 남기면 한글이 그 높이만큼 닻 줄을 비워 두어 쪽이 넘어간다.
     """
-    tbl = _top_tables(tail_p_el)[0]
-    pos = tbl.find(q("hp", "pos"))
-    pos.set("treatAsChar", "0")
-    pos.set("vertRelTo", kit.tailbox["vertRelTo"])
-    pos.set("horzRelTo", kit.tailbox["horzRelTo"])
-    pos.set("vertAlign", "TOP")
-    pos.set("horzAlign", "LEFT")
-    pos.set("vertOffset", str(kit.tailbox["vertOffset"]))
     m, c = kit.page["margin"], kit.columns
     horz = m["left"] + (c["count"] - 1) * (c["width"] + c["gap"])
     if horz != kit.tailbox["horzOffset"]:
         raise ValueError(f"kit.tailbox.horzOffset {kit.tailbox['horzOffset']} ≠ 오른쪽 단 왼끝 {horz}")
-    pos.set("horzOffset", str(horz))
-    for ls in tail_p_el.findall(q("hp", "linesegarray")):
-        tail_p_el.remove(ls)
+    tail_p.tables[0].set_position(
+        treat_as_char=False,
+        vertical_relative_to=kit.tailbox["vertRelTo"], horizontal_relative_to=kit.tailbox["horzRelTo"],
+        vertical_alignment="TOP", horizontal_alignment="LEFT",
+        vertical_offset=kit.tailbox["vertOffset"], horizontal_offset=horz,
+    )
+    tail_p.clear_layout_cache()
 
 
 # ---- D-8: 양식을 조판 직전 상태로 -------------------------------------------
@@ -258,7 +254,7 @@ def _trim_start(paras, kit: Kit) -> int | None:
     for i, p in enumerate(paras):
         if i == 0:
             continue
-        if rule == "first_page_break" and p.element.get("pageBreak") == "1":
+        if rule == "first_page_break" and p.page_break:
             return i
         if rule == "text_prefix" and _text(p.element).strip().startswith(kit.trim["prefix"]):
             return i
@@ -309,7 +305,7 @@ def prepare_form(doc: HwpxDocument, kit: Kit) -> Prepared:
     if _header_footer_xml(doc) != hf:
         raise ValueError("관리박스 정리가 머리말/꼬리말을 건드렸다")
     n = _trim_body(doc, kit)
-    pin_tailbox(doc.sections[0].paragraphs[-1].element, kit)
+    pin_tailbox(doc.sections[0].paragraphs[-1], kit)
     return Prepared(removed=n, form_bindata=_form_bindata(doc.package), header_footer=hf)
 
 

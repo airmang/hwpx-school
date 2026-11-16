@@ -21,7 +21,6 @@ from __future__ import annotations
 import dataclasses
 import io
 import re
-import xml.etree.ElementTree as StdET
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,11 +29,6 @@ import lxml.etree as ET
 from hwpx.document import HwpxDocument
 from hwpx_automation.office.exam import profile_form
 from PIL import Image, ImageOps
-
-try:  # paragraph.add_picture가 쓰는 pic 생성기(private) — 칸 안에도 넣으려고 직접 부른다
-    from hwpx.oxml.objects import _create_picture_element
-except ImportError:  # 옮겨졌으면 임시 문단의 add_picture로 만든다(_Composer._pic_element)
-    _create_picture_element = None
 
 from . import HP, drawing, equation, preserve, q
 from .kit import STEM_WORD_BREAKS, Kit, Metrics, style_ids
@@ -785,9 +779,8 @@ class _Composer:
     def _수식(self, p, script: str, cp: str) -> ET._Element:
         """문단 끝에 한/글 수식 run을 붙인다(공개 API add_equation) — 그 자리 글자 크기, 글꼴은 킷 typeset.equation_font
         (없으면 수식_글꼴). 수식 요소를 돌려준다."""
-        el = p.add_equation(script, font_size=self.글자_크기(cp) / 100, char_pr_id_ref=cp).element
-        el.set("font", self.kit.typeset.get("equation_font", 수식_글꼴))
-        return el
+        return p.add_equation(script, font_size=self.글자_크기(cp) / 100, char_pr_id_ref=cp,
+                              font=self.kit.typeset.get("equation_font", 수식_글꼴)).element
 
     def 글자_크기(self, cp: str) -> int:
         """charPr의 글자 크기(height, HWPUNIT) — 수식 기준 크기(baseUnit)로 쓴다(한/글도 넣는 자리의 글자 크기로 만든다)."""
@@ -930,11 +923,8 @@ class _Composer:
         return self._pic_element(bid, w, h)
 
     def _pic_element(self, bid: str, w: int, h: int) -> ET._Element:
-        """글자처럼 취급하는 hp:pic — paragraph.add_picture와 같은 모양, 문서와 분리된 요소로."""
-        if _create_picture_element is not None:
-            el = _create_picture_element(bid, w, h, treat_as_char=True)
-            return ET.fromstring(StdET.tostring(el, encoding="utf-8"))
-        sec = self.doc.sections[0]  # 폴백: 임시 문단에 add_picture로 그리고 떼어 낸다
+        """글자처럼 취급하는 hp:pic — 임시 문단에 공개 API(add_picture)로 그리고 떼어 낸다(_수식_run과 같은 방식)."""
+        sec = self.doc.sections[0]
         tmp = sec.add_paragraph("")
         pic = tmp.add_picture(bid, width=w, height=h, treat_as_char=True).element
         pic.getparent().remove(pic)
@@ -1243,8 +1233,7 @@ class _Composer:
         p = sec.add_paragraph("", para_pr_id_ref=pid, char_pr_id_ref=cp, inherit_style=False)
         p.style_id_ref = sid
         if spec.brk:
-            p.element.set("columnBreak", "1" if spec.brk == "column" else "0")
-            p.element.set("pageBreak", "1" if spec.brk == "page" else "0")
+            p.column_break, p.page_break = spec.brk == "column", spec.brk == "page"
         for run in p.element.findall(q("hp", "run")):  # run은 직접 쓴다 — add_run은 \t를 run 바로 아래 hp:tab으로 둔다
             p.element.remove(run)
         mark, tabs = spec.mark, iter(spec.tabs)
@@ -1602,7 +1591,7 @@ def choice_paragraphs(doc: HwpxDocument, kit: Kit, number: int) -> list[int]:
     ps = list(doc.sections[0].paragraphs)
     start = heads[number - 1]
     end = heads[number] if number < len(heads) else len(ps) - 1
-    return [i for i in range(start, end) if str(ps[i].element.get("styleIDRef")) in roles]
+    return [i for i in range(start, end) if str(ps[i].style_id_ref) in roles]
 
 
 def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, answer_key: bool) -> None:

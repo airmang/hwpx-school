@@ -11,7 +11,6 @@ from worksheet.blocks import plan_node
 from worksheet.furniture import plan_band, plan_heading, plan_keyword_page
 from worksheet.kit import Kit
 from worksheet.md import Node
-from worksheet.ns import HP
 from worksheet.plan import (
     CELL_ROLES,
     BandPlan,
@@ -100,13 +99,8 @@ def _그림_등록(doc: HwpxDocument, 그림: PicturePlan, 캐시: dict[Path, st
 def _강조박스_빈_선행_문단_제거(칸) -> None:
     """`add_table()`이 중첩표를 새 문단에 넣어, `_셀`이 이미 만든 빈 문단이 그 앞에 그대로
     남는다(문단 2개: `('', 표 없음)` 다음 `('', 표 있음)`) — 실한컴에서 제목 행과 상자 사이에
-    빈 줄로 보인다.
-
-    `HwpxOxmlParagraph.remove()`는 `self.section.element`(섹션 직속)에서 형제를 찾는다 —
-    표 셀 안 문단(부모가 `hp:subList`)엔 못 쓴다: 대상이 그 부모의 직계 자식이 아니라서
-    `ET.remove()`가 `ValueError`를 던지고, 라이브러리는 그 예외를 조용히 삼켜(`except
-    ValueError: return`) 아무 일도 안 하고 끝난다(실측 — 조용한 no-op이라 트레이스백으로도
-    못 잡는다). 그래서 셀의 `hp:subList`를 직접 찾아 ET로 뗀다.
+    빈 줄로 보인다. 그 빈 문단을 지운다(python-hwpx 7.0의 `paragraph.remove()`는 표 칸 안
+    문단도 지운다 — 6.x는 칸 안에서 조용히 아무 일도 하지 않아 칸의 문단 목록 XML을 직접 고쳤다).
 
     제거 대상이 예상과 다르면(문단이 2개가 아니거나, 첫 문단에 글자·중첩표가 있으면)
     건드리지 않는다 — 방어적으로.
@@ -117,8 +111,7 @@ def _강조박스_빈_선행_문단_제거(칸) -> None:
     첫_문단 = 문단들[0]
     if 첫_문단.text.strip() or 첫_문단.tables:
         return
-    서브리스트 = 칸.element.find(f"{{{HP}}}subList")
-    서브리스트.remove(첫_문단.element)
+    첫_문단.remove()
 
 
 def _표_그리기(doc: HwpxDocument, kit: Kit, plan: TablePlan, 캐시: dict[Path, str]) -> None:
@@ -272,7 +265,7 @@ def draw_heading(doc: HwpxDocument, kit: Kit, plan: HeadingPlan):
         char_pr_id_ref=kit.char_pr["headline"],
     )
     타원.set_attribute("numberingType", "PICTURE")
-    타원.set_attribute("textWrap", "TOP_AND_BOTTOM")
+    타원.set_position(text_wrap="TOP_AND_BOTTOM")
     타원.set_draw_text(str(plan.number), char_pr_id_ref=kit.char_pr["circle_num"])
 
     # 출처 표기는 제목과 **별도 run**(charPr `heading_ref` — 제목보다 작은 글자)이다.
@@ -296,33 +289,17 @@ def draw_heading(doc: HwpxDocument, kit: Kit, plan: HeadingPlan):
             treat_as_char=False,
             char_pr_id_ref=kit.char_pr["headline"],
         )
-        사각형.set_attribute("textWrap", "IN_FRONT_OF_TEXT")
         사각형.set_draw_text(도장["text"], char_pr_id_ref=kit.char_pr["stamp"])
+        # 용지 기준 고정 위치 — 기본(PARA/COLUMN)이면 실한컴 렌더에서 제목과 겹친다
         사각형.set_position(
+            text_wrap="IN_FRONT_OF_TEXT",
             horizontal_offset=도장["pos"]["horzOffset"],
             vertical_offset=도장["pos"]["vertOffset"],
+            horizontal_relative_to="PAPER",
+            vertical_relative_to="PAPER",
         )
-        _anchor_to_paper(사각형, 문단)
 
     return 문단
-
-
-def _anchor_to_paper(shape, paragraph) -> None:
-    """pos 의 relTo 를 PAPER 로 바꾼다.
-
-    python-hwpx 6.4.0의 set_position()은 오프셋만 설정하고 vertRelTo/horzRelTo를
-    바꾸는 경로가 없다(공개 이슈로 등록돼 있다:
-    <https://github.com/airmang/python-hwpx/issues/100>). 그 셋은 ET로 직접 건드린다.
-    """
-    inst_id = shape.inst_id
-    for 요소 in paragraph.element.iter(f"{{{HP}}}rect"):
-        if 요소.get("instid") != inst_id:
-            continue
-        pos = 요소.find(f"{{{HP}}}pos")
-        pos.set("vertRelTo", "PAPER")
-        pos.set("horzRelTo", "PAPER")
-        return
-    raise RuntimeError(f"도형을 문단에서 찾지 못했다: instid={inst_id}")
 
 
 def add_band(doc: HwpxDocument, kit: Kit, *, title: str, slots: dict[str, str] | None = None):

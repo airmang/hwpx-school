@@ -84,12 +84,8 @@ class Settled:
 # ---- 문서 쪽: 문항 묶음 ------------------------------------------------------
 
 def _keep_next_ids(doc: HwpxDocument) -> set[str]:
-    out = set()
-    for pp in doc.parts.headers[0].element.iter(q("hh", "paraPr")):
-        b = pp.find(q("hh", "breakSetting"))
-        if b is not None and b.get("keepWithNext") == "1":
-            out.add(pp.get("id"))
-    return out
+    return {pid for pid, pp in doc.styles.paragraph_properties.items()
+            if pp.break_setting is not None and pp.break_setting.keep_with_next}
 
 
 def group_starts(doc: HwpxDocument) -> list[int]:
@@ -99,7 +95,7 @@ def group_starts(doc: HwpxDocument) -> list[int]:
     out, floor = [], 0
     for h in question_heads(doc):
         i = h
-        while i - 1 > floor and str(ps[i - 1].element.get("paraPrIDRef")) in keep:
+        while i - 1 > floor and str(ps[i - 1].para_pr_id_ref) in keep:
             i -= 1
         out.append(i)
         floor = h
@@ -108,13 +104,11 @@ def group_starts(doc: HwpxDocument) -> list[int]:
 
 def set_break(doc: HwpxDocument, index: int, kind: str | None) -> bool:
     """최상위 문단 index에 단 나눔("column")·쪽 나눔("page")·없음(None). 바뀌었으면 True."""
-    el = doc.sections[0].paragraphs[index].element
-    want = ("1" if kind == "column" else "0", "1" if kind == "page" else "0")
-    if (el.get("columnBreak"), el.get("pageBreak")) == want:
+    p = doc.sections[0].paragraphs[index]
+    want = (kind == "column", kind == "page")
+    if (p.column_break, p.page_break) == want:
         return False
-    el.set("columnBreak", want[0])
-    el.set("pageBreak", want[1])
-    doc.sections[0].mark_dirty()
+    p.column_break, p.page_break = want
     return True
 
 
@@ -125,7 +119,7 @@ def choice_layouts(doc: HwpxDocument, kit: Kit) -> dict[int, tuple[str, int]]:
     ps = list(doc.sections[0].paragraphs)
     out = {}
     for k in range(len(question_heads(doc))):
-        rows = [str(ps[i].element.get("styleIDRef")) for i in choice_paragraphs(doc, kit, k + 1)]
+        rows = [str(ps[i].style_id_ref) for i in choice_paragraphs(doc, kit, k + 1)]
         if rows and rows[0] in kinds:
             out[k] = (kinds[rows[0]], len(rows))
     return out
@@ -359,7 +353,7 @@ class _Loop:
         이 문단의 나눔을 바꾸거나 지우지 않는다(_brk). 문단 요소로 기억한다 — 답지를 다시 쓰면 인덱스가 밀린다."""
         ps = self.ps
         self.pinned = [ps[i].element for i in group_starts(self.doc)
-                       if "1" in (ps[i].element.get("columnBreak"), ps[i].element.get("pageBreak"))]
+                       if ps[i].column_break or ps[i].page_break]
 
     def is_pinned(self, index: int) -> bool:
         el = self.ps[index].element
@@ -385,18 +379,17 @@ class _Loop:
         return rr, lay
 
     def _set_prev(self, index: int, base: str, prev: int) -> bool:
-        el = self.ps[index].element
+        p = self.ps[index]
         pid = derive_para_pr(self.doc.parts.headers[0], base, prev=prev)
-        if el.get("paraPrIDRef") == pid:
+        if p.para_pr_id_ref == pid:
             return False
-        el.set("paraPrIDRef", pid)
+        p.para_pr_id_ref = pid
         return True
 
     def _restore(self, original: dict[int, str]) -> None:
         ps = self.ps
         for i, pid in original.items():
-            ps[i].element.set("paraPrIDRef", pid)
-        self.doc.sections[0].mark_dirty()  # 저장은 dirty 절만 쓴다 — 빠뜨리면 되돌림이 파일에 안 닿는다
+            ps[i].para_pr_id_ref = pid
 
     # ⓪'' 균형 배치
     def plan_columns(self, rr, lay) -> list[int] | None:
@@ -457,7 +450,7 @@ class _Loop:
     def balance(self, rr, lay, rounds: int = 2):
         """⓪'' 균형 배치(Task 30) — plan_columns를 박고 재렌더. 자리가 계획과 다르면(높이 추정 오차) 새 렌더로 다시 한 번.
         두 번 다 다르면 박은 나눔을 거두고(지시 나눔은 그대로) 원래 흐름으로 되돌린다 — 틀린 계획을 남기지 않는다."""
-        before = {i: (self.ps[i].element.get("columnBreak"), self.ps[i].element.get("pageBreak")) for i in group_starts(self.doc)}
+        before = {i: (self.ps[i].column_break, self.ps[i].page_break) for i in group_starts(self.doc)}
         for n in range(rounds):
             plan = self.plan_columns(rr, lay)
             if plan is None:
@@ -477,7 +470,7 @@ class _Loop:
                 return rr, lay
         for i, (col, page) in before.items():  # 되돌림
             if not self.is_pinned(i):
-                set_break(self.doc, i, "column" if col == "1" else "page" if page == "1" else None)
+                set_break(self.doc, i, "column" if col else "page" if page else None)
         self.notes.append("균형 배치: 계획한 단 나눔과 렌더 자리가 두 번 다 달라 원래 흐름으로 되돌렸다")
         return self.render()
 
@@ -527,7 +520,7 @@ class _Loop:
             return None
         header, ps = self.doc.parts.headers[0], self.ps
         need = (right.bottom - _limit(self.kit)) * 100
-        room = sum(max(0, case_prev(header, ps[starts[k]].element.get("paraPrIDRef")) - gmin) for k in right_ks[1:])
+        room = sum(max(0, case_prev(header, ps[starts[k]].para_pr_id_ref) - gmin) for k in right_ks[1:])
         if need + SQUEEZE_SAFETY > room:
             self.notes.append(f"꼬리 박스 자리: {last.page}쪽 오른쪽 단이 {need / 100:.1f}pt 넘쳐 간격 줄이기(하한 {gmin}, "
                               f"줄일 수 있는 양 {room / 100:.1f}pt)로는 모자라 줄이지 않았다")
@@ -536,7 +529,7 @@ class _Loop:
         original: dict[int, str] = {}
         for k in right_ks[1:]:
             i = starts[k]
-            base = ps[i].element.get("paraPrIDRef")
+            base = ps[i].para_pr_id_ref
             if case_prev(header, base) > new:
                 original[i] = base
                 self._set_prev(i, base, new)
@@ -601,7 +594,7 @@ class _Loop:
                 continue
             i = starts[ks[0]]
             changed |= self._brk(i, "page" if c == 1 else "column")  # 흐름 고정 — 간격을 빼도 문항이 앞 단으로 안 당겨진다
-            changed |= self._set_prev(i, ps[i].element.get("paraPrIDRef"), 0)
+            changed |= self._set_prev(i, ps[i].para_pr_id_ref, 0)
         if not changed:
             return rr, lay
         self.doc.sections[0].mark_dirty()
@@ -621,7 +614,7 @@ class _Loop:
         for (p, c), ks in by_col.items():  # 흐름 고정(zero_tops가 이미 박았으면 그대로)
             if (p, c) != (1, 1) and (p, c) not in split_cols and ks[0] > 0:
                 self._brk(starts[ks[0]], "page" if c == 1 else "column")
-        original = {starts[k]: ps[starts[k]].element.get("paraPrIDRef") for k in range(len(starts))}
+        original = {starts[k]: ps[starts[k]].para_pr_id_ref for k in range(len(starts))}
         safety = DIST_SAFETY
         for _ in range(rounds):
             for (p, c), ks in by_col.items():

@@ -128,10 +128,7 @@ def main() -> None:
     머리 = doc.oxml.headers[0]
     번호 = _모양들(머리.element)
     머리.mark_dirty()  # 요소를 직접 고쳤다 — 저장 때 다시 쓰게 한다
-    margin = doc.sections[0].element.find(f".//{HP}secPr/{HP}pagePr/{HP}margin")
-    for k, v in 여백.items():
-        margin.set(k, str(v))
-    doc.sections[0].mark_dirty()
+    doc.page.set_margins(**여백)
     with tempfile.TemporaryDirectory() as tmp:
         원형 = Path(tmp) / "seed.hwpx"
         doc.save(str(원형))

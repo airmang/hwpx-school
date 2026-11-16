@@ -24,12 +24,11 @@ class HwpxWriter:
         self.kit = kit
         self.doc = HwpxDocument.open(kit.skeleton)
         self.section = self.doc.sections[0]
-        문단 = self.section.element.findall(_q("p"))
+        문단 = self.section.paragraphs
         assert len(문단) == 2, "스켈레톤은 문단 2개(1단 머리 + 2단 전환)여야 한다"
-        self._머리, self._2단 = 문단
-        # 2단 전환 문단을 떼어 두었다가 제목·학번 뒤에 다시 붙인다.
-        self.section.element.remove(self._2단)
-        self.section.mark_dirty()
+        # 제목·학번 줄은 1단 머리 문단과 2단 전환 문단 사이에 들어간다(_title).
+        self._머리_문단, self._2단 = 문단
+        self._머리 = self._머리_문단.element
         self._단나눔_대기 = False
         self._메모_번호 = 0
         self._그림_캐시: dict[Path, str] = {}
@@ -54,19 +53,17 @@ class HwpxWriter:
         if plan.score:
             etree.SubElement(run("score"), _q("t")).text = plan.score
         self.section.mark_dirty()
-        self.doc.add_paragraph(k.furniture["idLine"], para_pr_id_ref=k.para_pr["id_line"], char_pr_id_ref=k.char_pr["note"])
-        self.section.element.append(self._2단)
-        self.section.mark_dirty()
+        학번_줄 = self.doc.add_paragraph(k.furniture["idLine"], para_pr_id_ref=k.para_pr["id_line"], char_pr_id_ref=k.char_pr["note"])
+        학번_줄.move_before(self._2단)
 
     # --- 본문 ---------------------------------------------------------------
     def _새_문단_표시(self, 전_개수: int) -> None:
         """이번 draw 로 생긴 첫 최상위 문단에 대기 중인 단 나눔을 건다."""
         if not self._단나눔_대기:
             return
-        문단 = self.section.element.findall(_q("p"))
+        문단 = self.section.paragraphs
         if len(문단) > 전_개수:
-            문단[전_개수].set("columnBreak", "1")
-            self.section.mark_dirty()
+            문단[전_개수].column_break = True
             self._단나눔_대기 = False
 
     def _para(self, plan: ParaPlan) -> None:
@@ -121,9 +118,8 @@ class HwpxWriter:
             border_fill_id_ref=k.border_fill["box"], para_pr_id_ref=k.para_pr["body"],
         )
         # python-hwpx 는 표 바깥 여백을 0 으로 만든다 — 양식처럼 킷 값으로 사방을 채운다.
-        바깥 = str(k.furniture["tableOutMargin"])
-        표.element.find(_q("outMargin")).attrib.update({"left": 바깥, "right": 바깥, "top": 바깥, "bottom": 바깥})
-        표.mark_dirty()
+        바깥 = k.furniture["tableOutMargin"]
+        표.set_out_margins(left=바깥, right=바깥, top=바깥, bottom=바깥)
         병합된: set[tuple[int, int]] = set()
         for r0, c0, r1, c1 in plan.merges:
             표.merge_cells(r0, c0, r1, c1)
@@ -152,7 +148,7 @@ class HwpxWriter:
         if isinstance(plan, ColumnBreakPlan):
             self._단나눔_대기 = True
             return
-        전 = len(self.section.element.findall(_q("p")))
+        전 = len(self.section.paragraphs)
         if isinstance(plan, ParaPlan):
             self._para(plan)
         elif isinstance(plan, TablePlan):
