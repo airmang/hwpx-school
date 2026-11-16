@@ -353,12 +353,11 @@ class _Loop:
         """원고 나눔 지시({단나눔}·{쪽나눔})로 조판이 넣은 나눔 — 루프 시작 때 문항 묶음 첫 문단에 이미 있는 나눔. 루프는
         이 문단의 나눔을 바꾸거나 지우지 않는다(_brk). 문단 요소로 기억한다 — 답지를 다시 쓰면 인덱스가 밀린다."""
         ps = self.ps
-        self.pinned = [ps[i].element for i in group_starts(self.doc)
+        self.pinned = [ps[i] for i in group_starts(self.doc)
                        if ps[i].column_break or ps[i].page_break]
 
     def is_pinned(self, index: int) -> bool:
-        el = self.ps[index].element
-        return any(el is p for p in self.pinned)
+        return self.ps[index] in self.pinned  # 문단 객체는 같은 문단 요소면 같다
 
     def _brk(self, index: int, kind: str | None) -> bool:
         """set_break — 지시된 나눔 문단이면 손대지 않고 False."""
@@ -417,9 +416,8 @@ class _Loop:
         ps = self.ps
         brk = {}
         for k, i in enumerate(starts):
-            el = ps[i].element
-            if any(el is p for p in self.pinned):
-                brk[k] = "page" if el.get("pageBreak") == "1" else "column"
+            if ps[i] in self.pinned:
+                brk[k] = "page" if ps[i].page_break else "column"
         first_top = ext[0].top[2]
         page_top = {c.page: c.top for p in lay for c in p.columns}
         # 단 맨 위 묶음의 윗끝 = 본문 상단 + 글리프 여백 + 위 간격(이 렌더에서는 아직 있다 — ③이 뒤에 뺀다, 그만큼 여유)

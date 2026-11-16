@@ -209,7 +209,7 @@ def test_두_판은_형광펜_말고_같다(tmp_path):
 def test_수식_문단의_줄_캐시_글은_수식마다_8자리(tmp_path):
     doc, _ = _조판(False, tmp_path)
     ps = list(doc.sections[0].paragraphs)
-    head = ps[question_heads(doc)[0]].element
+    head = ps[question_heads(doc)[0]]
     text = para_text(head)
     widths = [eq.line_char_width(ch) for ch in text if eq.line_char_width(ch)]
     assert len(widths) == 4 and len(text) == len(re.sub(r"[\U00100000-\U0010FFFD​]", "", text)) + 4 * 8
