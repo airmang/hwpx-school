@@ -404,8 +404,8 @@ def harvest_samples(doc: HwpxDocument, kit: Kit) -> Samples:
     실패 = [what for what, v in (("〈보기〉 견본", 보기), ("자료 견본", 자료), ("세트 표지 [a∼b]", 표지)) if v is None]
     if 실패:
         raise ValueError("양식이 바뀌었다: 샘플 구역에 " + ", ".join(실패) + " 없음")
-    cp = doc.parts.headers[0].element.find(f".//{q('hh', 'charPr')}[@id='{표지}']")
-    if cp is None or cp.get("height") != str(sm["char_height"]) or (cp.find(q("hh", "bold")) is not None) != sm["bold"]:
+    cp = doc.styles.char_property(표지)
+    if cp is None or cp.attributes.get("height") != str(sm["char_height"]) or ("bold" in cp.child_attributes) != sm["bold"]:
         raise ValueError(f"양식이 바뀌었다: 세트 표지 charPr {표지}가 킷 set_marker(높이 {sm['char_height']}, 굵게 {sm['bold']})와 다르다")
     번호 = None
     if kit.number["mode"] == "literal":
@@ -536,8 +536,7 @@ class _Composer:
     def code_overflow(self, lines: list[str], avail: int, role: str, where: str) -> None:
         """코드 줄이 한 줄 칸 수를 넘으면 notes(G5-3) — 고정폭이라 반각 한 칸 = 글자 크기의 절반, 전각 두 칸.
         한컴은 넘친 줄을 접어 들여쓰기·줄 번호가 흐트러진다. gutter면 번호 자리 '│'만큼 한 칸 더 센다."""
-        cp = self.header.element.find(f".//{q('hh', 'charPr')}[@id='{self.code_char_pr(role)}']")
-        cols = avail // (int(cp.get("height")) // 2)
+        cols = avail // (self.글자_크기(self.code_char_pr(role)) // 2)
         numbered = any(_코드_번호.match(x) for x in lines)
         for k, ln in enumerate(lines, 1):
             ln = ln.replace("\t", "    ").rstrip()
@@ -640,10 +639,11 @@ class _Composer:
 
     def 글자_크기(self, cp: str) -> int:
         """charPr의 글자 크기(height, HWPUNIT) — 수식 기준 크기(baseUnit)로 쓴다(한/글도 넣는 자리의 글자 크기로 만든다)."""
-        el = self.header.element.find(f".//{q('hh', 'charPr')}[@id='{cp}']")
-        if el is None or not (el.get("height") or "").isdigit():
+        style = self.doc.styles.char_property(cp)
+        height = "" if style is None else style.attributes.get("height") or ""
+        if not height.isdigit():
             raise ValueError(f"양식이 바뀌었다: charPr {cp}의 글자 크기(height)가 없다")
-        return int(el.get("height"))
+        return int(height)
 
     def _수식_run(self, m: equation.Math, cp: str) -> ET._Element:
         """칸 안 문단에 넣을 수식 run — 임시 문단에 공개 API(add_equation)로 만들고 떼어 낸다(그림 _pic_element와 같은 방식)."""
@@ -808,16 +808,18 @@ class _Composer:
             붙이기(masked[pos:], None)
         return out
 
-    def _case(self, role: str, child: str) -> ET._Element:
-        """역할 스타일 paraPr의 hp:switch/hp:case 분기 자식(margin·lineSpacing) — 없으면 '양식이 바뀌었다'."""
-        pp = self.header.element.find(f".//{q('hh', 'paraPr')}[@id='{self.style[role][1]}']")
-        el = None if pp is None else pp.find(f"{q('hp', 'switch')}/{q('hp', 'case')}/{q('hh', child)}")
-        if el is None:
+    def _case(self, role: str, child: str):
+        """역할 스타일 paraPr의 hp:switch/hp:case 분기 값(margin·line_spacing) — 없으면 '양식이 바뀌었다'."""
+        shape = self.doc.styles.paragraph_property(self.style[role][1])
+        case = None if shape is None or shape.version_switch is None else shape.version_switch.case
+        value = None if case is None else getattr(case, {"margin": "margin", "lineSpacing": "line_spacing"}[child])
+        if value is None:
             raise ValueError(f"양식이 바뀌었다: {self.kit.styles[role]} paraPr에 hp:switch/hp:case/hh:{child}가 없다")
-        return el
+        return value
 
     def _margins(self, role: str) -> dict[str, int]:
-        return {c.tag.split("}")[1]: int(c.get("value")) for c in self._case(role, "margin")}
+        m = self._case(role, "margin")
+        return {k: int(getattr(m, k)) for k in ("intent", "left", "right", "prev", "next") if getattr(m, k) is not None}
 
     def _widths(self, role: str, cell_width: int) -> tuple[int, int]:
         """셀 안 문단의 첫 줄·다음 줄 가용 폭 — 셀 폭 − 표 안여백(셀 hasMargin=0) − 문단 여백·들여쓰기."""
@@ -841,10 +843,10 @@ class _Composer:
             left = self._margins(role)["left"]
             w = (self.slot_end(role) - left) // 5
             return [left + i * w for i in range(5)]
-        pp = self.header.element.find(f".//{q('hh', 'paraPr')}[@id='{self.style[role][1]}']")
-        tab = self.header.element.find(f".//{q('hh', 'tabPr')}[@id='{pp.get('tabPrIDRef')}']")
-        pos = [] if tab is None else sorted(
-            int(t.get("pos")) for t in tab.findall(f"{q('hp', 'switch')}/{q('hp', 'case')}/{q('hh', 'tabItem')}"))
+        shape = self.doc.styles.paragraph_property(self.style[role][1])
+        tab = None if shape.tab_pr_id_ref is None else self.doc.styles.tab_property(shape.tab_pr_id_ref)
+        switch = None if tab is None else tab.version_switch  # 탭 자리는 case 분기(HWPUNIT)
+        pos = [] if switch is None or switch.case is None else sorted(t.pos for t in switch.case.tab_stops)
         left = self._margins(role)["left"]
         out = [left] + [x for x in pos if x > left]
         if len(out) < need:
@@ -853,9 +855,9 @@ class _Composer:
 
     def _line_pitch(self, role: str) -> int:
         ls = self._case(role, "lineSpacing")
-        pct = int(ls.get("value")) if ls.get("type") == "PERCENT" else None
+        pct = ls.value if ls.spacing_type == "PERCENT" else None
         if pct not in self.kit.metrics.line_pitch:
-            raise ValueError(f"양식이 바뀌었다: {self.kit.styles[role]} 줄간격 {ls.get('type')} {ls.get('value')}")
+            raise ValueError(f"양식이 바뀌었다: {self.kit.styles[role]} 줄간격 {ls.spacing_type} {ls.value}")
         return self.kit.metrics.line_pitch[pct]
 
     def _box(self, block: Block) -> _Para:
@@ -1159,13 +1161,12 @@ class _Composer:
     def _origin(self, pid: str, w: int) -> tuple[int, int]:
         """그림·틀 왼쪽 위의 (가로 단 기준, 세로 문단 기준) 자리 — 문단 기준 세로 원점은 문단 앞 간격(prev) 위, 가운데 문단의
         그림 왼끝은 줄 시작 + (줄 폭 − 그림 폭) / 2(실한컴 렌더 실측 10-26: 원점·그림 위끝 오차 0.2pt 안)."""
-        pp = self.header.element.find(f".//{q('hh', 'paraPr')}[@id='{pid}']")
-        mg = pp.find(f"{q('hp', 'switch')}/{q('hp', 'case')}/{q('hh', 'margin')}")
-        mg = pp.find(q("hh", "margin")) if mg is None else mg
-        m = {c.tag.split("}")[1]: int(c.get("value")) for c in mg}
+        shape = self.doc.styles.paragraph_property(pid)  # 여백은 case 분기, 없으면 바로 아래 margin
+        m = {k: int(getattr(shape.margin, k)) for k in ("intent", "left", "right", "prev", "next")
+             if getattr(shape.margin, k) is not None}
         start = m.get("left", 0) + m.get("intent", 0)
         line_w = self.kit.columns["width"] - m.get("left", 0) - m.get("right", 0) - m.get("intent", 0)
-        center = pp.find(q("hh", "align")).get("horizontal") == "CENTER"
+        center = shape.alignment is not None and shape.alignment.horizontal == "CENTER"
         return start + ((line_w - w) // 2 if center else 0), m.get("prev", 0)
 
     @staticmethod
@@ -1465,11 +1466,11 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
         raise ValueError(f"{qn.number}번 답지가 원고와 다르다: 문서 {have!r} ≠ 원고 {want!r}")
     c = _Composer(doc, kit, Samples(None, None, None), answer_key=answer_key)  # 답지 조판은 견본을 쓰지 않는다
     _, specs = c._choices(dataclasses.replace(qn, override=kind))
-    last_pp = doc.parts.headers[0].element.find(f".//{q('hh', 'paraPr')}[@id='{victims[-1].element.get('paraPrIDRef')}']")
-    last_bs = None if last_pp is None else last_pp.find(q("hh", "breakSetting"))
+    last_pp = doc.styles.paragraph_property(victims[-1].para_pr_id_ref)
+    last_bs = None if last_pp is None else last_pp.break_setting
     for s in specs[:-1]:
         s.keep = True  # 묶음 안 답지 줄은 keepWithNext
-    specs[-1].keep = last_bs is not None and last_bs.get("keepWithNext") == "1"  # 마지막 줄은 원래 줄을 따른다
+    specs[-1].keep = bool(last_bs is not None and last_bs.keep_with_next)  # 마지막 줄은 원래 줄을 따른다
     temp = [c.materialize(s) for s in specs]
     sec.insert_paragraphs(old[0], temp)
     for w in reversed(temp):
