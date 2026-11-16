@@ -36,12 +36,34 @@ def _numbered_para_prs(doc: HwpxDocument) -> set[str]:
 
 
 _글자_번호 = re.compile(r"^\d{1,3}\.\s?$")
+#: nested_text가 글자로 내는 글리프와 토막 사이 줄 바꿈 — 글을 찾을 때는 글로 세지 않는다(옛 itertext와 같게).
+_GLYPHS = re.compile("[\t\n\u00a0\u3000\u00ad]")
 
 
-def _literal_head(p_el) -> bool:
+def _nested_raw(paragraphs) -> str:
+    """문단들의 글을 문단 안 표 칸·글상자·캡션 글까지 문서 차례로(``nested_text``) — 글리프와 토막 사이 줄 바꿈은 빼고, 공백은 그대로."""
+    return "".join(_GLYPHS.sub("", p.nested_text()) for p in paragraphs)
+
+
+def _t_lead_text(run) -> str:
+    """run의 hp:t마다 첫 글(``t.text`` — 형광펜·탭 같은 표시 뒤의 글은 빼고)을 이은 것.
+
+    ``run.content``에서 hp:t 안의 글 조각 가운데, 바로 앞 조각이 같은 hp:t의 표시·글리프가 아닌 것이 hp:t의 첫 글이다
+    (조각 둘이 잇따라 글이면 둘째는 다음 hp:t의 첫 글이다).
+    """
+    out, previous = [], None
+    for item in run.content:
+        if item.container == "t" and item.kind == "text":
+            if previous is None or previous.container != "t" or previous.kind == "text":
+                out.append(item.text)
+        previous = item
+    return "".join(out)
+
+
+def _literal_head(p) -> bool:
     """글자 번호 문항 머리: 첫 글 run이 `N.`(뒤 공백 하나까지)만이다 — 킷 number.mode literal(학교 B) 조판."""
-    for run in p_el.findall(q("hp", "run")):
-        text = "".join(t.text or "" for t in run.findall(q("hp", "t")))
+    for run in p.runs:
+        text = _t_lead_text(run)
         if text:
             return bool(_글자_번호.match(text))
     return False
@@ -55,7 +77,7 @@ def question_heads(doc: HwpxDocument) -> list[int]:
     nums = _numbered_para_prs(doc)
     spans = ranges(doc)
     return [i for i, p in enumerate(doc.sections[0].paragraphs)
-            if (str(p.para_pr_id_ref) in nums or (i > 0 and _literal_head(p.element))) and not inside(i, spans)]
+            if (str(p.para_pr_id_ref) in nums or (i > 0 and _literal_head(p))) and not inside(i, spans)]
 
 
 def _tail_index(doc: HwpxDocument, marker: str | None = None) -> int:
@@ -63,12 +85,11 @@ def _tail_index(doc: HwpxDocument, marker: str | None = None) -> int:
     용지 기준으로 고정한 표(prepare.pin_tailbox)를 가진 마지막 문단(관리박스 문단 0은 빼고). 못 찾으면 마지막 문단."""
     ps = list(doc.sections[0].paragraphs)
     for i in range(len(ps) - 1, 0 if marker is None else -1, -1):
-        el = ps[i].element
         if marker is not None:
-            if marker in "".join(el.itertext()):
+            if marker in _nested_raw([ps[i]]):
                 return i
-        elif any((pos := t.find(q("hp", "pos"))) is not None and pos.get("treatAsChar") == "0"
-                 and pos.get("vertRelTo") == "PAPER" for t in el.iter(q("hp", "tbl"))):
+        elif any(not (pos := place.object.position).treat_as_char and pos.vertical_relative_to == "PAPER"
+                 for place in ps[i].iter_objects(kinds="table")):
             return i
     return len(ps) - 1
 

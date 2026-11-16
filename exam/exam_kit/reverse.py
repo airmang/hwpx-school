@@ -30,7 +30,7 @@ from .prepare import _text, _top_tables
 from .scan import Overlay, overlay_line
 from .slots import read_text_slots
 from .source import Source, SourceError, open_source
-from .verify import _tail_index, question_heads
+from .verify import _nested_raw, _tail_index, question_heads
 
 원문자 = "①②③④⑤"
 노랑 = "#FFFF00"
@@ -511,12 +511,12 @@ def kit_front(doc: HwpxDocument, kit: Kit) -> dict[str, str | None]:
         x = g(slot) or None
         return None if x is None or (digits and not x.isdigit()) else x
 
-    header = " ".join(_text(h) for h in doc.sections[0].element.iter(q("hp", "header")))
+    header = " ".join(_nested_raw(story.paragraphs) for story in doc.page.headers(section=doc.sections[0]))
     학년도 = re.search(r"(\d{4})학년도", header)
     tc = kit.teacher_cell or {"label": "출제교사", "template": "{name}", "placeholder": ""}  # 글자 자리 양식은 칸 글 그대로
     pre, post = (re.escape(x.strip()) for x in tc["template"].split("{name}"))
     teacher = re.search(rf"{re.escape(tc['label'])}\s*{pre}\s*(\S+?)\s*{post}",
-                        _text(doc.sections[0].paragraphs[kit.admin["paragraph"]].element))
+                        _nested_raw([doc.sections[0].paragraphs[kit.admin["paragraph"]]]))
     grade = 값("학년", digits=True)
     names = set(kit.slots) | {n for t in kit.text_slots for n in re.findall(r"{(\w+)}", t["fill"])}
 

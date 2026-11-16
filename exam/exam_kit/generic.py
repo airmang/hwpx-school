@@ -18,23 +18,33 @@ import re
 
 from hwpx.document import HwpxDocument
 
-from . import q
 from .reverse import GENERIC_BOXES, FormProfile
-from .verify import _numbered_para_prs
+from .verify import _nested_raw, _numbered_para_prs
 
 미등록 = "미등록"
 _번호 = re.compile(r"^\s*(\d{1,3})\s*[.．)]\s*\S")
 _기본_필수 = ("양식", "학년도", "학년", "학기", "차", "과목", "시행", "출제교사")
 
 
-def _text(el) -> str:
-    return re.sub(r"\s+", " ", "".join("".join(t.itertext()) for t in el.iter(q("hp", "t")))).strip()
+#: run.content 조각 중 hp:t 안의 글(글리프·표시는 빼고).
+_TEXT_KINDS = ("text", "unknown")
 
 
-def _own_text(p_el) -> str:
+def _flat(paragraphs) -> str:
+    """문단들의 글 — 문단 안 표 칸·글상자·캡션 글까지 문서 차례로(``nested_text``), 글리프는 빼고 공백을 하나로 접는다."""
+    return re.sub(r"\s+", " ", _nested_raw(paragraphs)).strip()
+
+
+def _table_paragraphs(table) -> list:
+    """표의 문단 — 캡션, 그리고 행·칸 차례(칸 안 표는 칸 문단의 nested_text가 읽는다)."""
+    out = list(table.caption.paragraphs) if table.caption is not None else []
+    return out + [p for row in table.rows for cell in row.cells for p in cell.paragraphs]
+
+
+def _own_text(p) -> str:
     """최상위 문단 자신의 글(문단 안 표·그림 칸의 글은 빼고)."""
-    return re.sub(r"\s+", " ", "".join("".join(t.itertext()) for r in p_el.findall(q("hp", "run"))
-                                       for t in r.findall(q("hp", "t")))).strip()
+    return re.sub(r"\s+", " ", "".join(item.text for run in p.runs for item in run.content
+                                       if item.container == "t" and item.kind in _TEXT_KINDS)).strip()
 
 
 def heads(doc: HwpxDocument) -> list[int]:
@@ -42,12 +52,11 @@ def heads(doc: HwpxDocument) -> list[int]:
     nums = _numbered_para_prs(doc)
     out, want = [], 1
     for i, p in enumerate(doc.sections[0].paragraphs):
-        el = p.element
-        if str(el.get("paraPrIDRef")) in nums:
+        if str(p.para_pr_id_ref) in nums:
             out.append(i)
             want += 1
             continue
-        m = _번호.match(_own_text(el))
+        m = _번호.match(_own_text(p))
         if m and int(m.group(1)) == want:
             out.append(i)
             want += 1
@@ -59,13 +68,13 @@ def tail(doc: HwpxDocument) -> int:
     (확인 사항·유의 사항 안내 상자)가 있는 첫 문단, ③ 없으면 문서 끝."""
     ps = list(doc.sections[0].paragraphs)
     for i in range(len(ps) - 1, 0, -1):
-        for t in ps[i].element.iter(q("hp", "tbl")):
-            pos = t.find(q("hp", "pos"))
-            if pos is not None and pos.get("treatAsChar") == "0" and pos.get("vertRelTo") == "PAPER":
+        for place in ps[i].iter_objects(kinds="table"):
+            pos = place.object.position
+            if not pos.treat_as_char and pos.vertical_relative_to == "PAPER":
                 return i
     hs = heads(doc)
     for i in range(hs[-1] + 1 if hs else 1, len(ps)):
-        if any(_text(t).startswith("※") for t in ps[i].element.iter(q("hp", "tbl"))):
+        if any(_flat(_table_paragraphs(place.object)).startswith("※") for place in ps[i].iter_objects(kinds="table")):
             return i
     return len(ps)
 
@@ -74,8 +83,9 @@ def front(doc: HwpxDocument) -> dict[str, str | None]:
     """첫 문항 앞의 글·머리말·꼬리말에서 찾은 머리 값 — 못 찾으면 None."""
     hs = heads(doc)
     ps = list(doc.sections[0].paragraphs)
-    before = " ".join(_text(p.element) for p in ps[:hs[0] if hs else len(ps)])
-    hf = " ".join(_text(x) for tag in ("header", "footer") for x in doc.sections[0].element.iter(q("hp", tag)))
+    before = " ".join(_flat([p]) for p in ps[:hs[0] if hs else len(ps)])
+    first = doc.sections[0]
+    hf = " ".join(_flat(story.paragraphs) for story in (*doc.page.headers(section=first), *doc.page.footers(section=first)))
     text = f"{hf} {before}"  # 머리말이 더 믿을 만하다 — 먼저 찾는다
 
     def find(rx: str) -> str | None:
