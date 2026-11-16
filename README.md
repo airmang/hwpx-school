@@ -1,7 +1,8 @@
 # hwpx-school
 
 학교 문서를 마크다운 원고 한 장에서 한글(HWPX)로 만듭니다. 학교 서식 파일 그대로 위에 조판하고, 실제 한글로 렌더해
-배치를 확인합니다. [python-hwpx](https://github.com/airmang/python-hwpx) 위에서 동작합니다.
+배치를 확인합니다. [python-hwpx](https://github.com/airmang/python-hwpx) 7.0(엔진)과
+[python-hwpx-automation](https://github.com/airmang/python-hwpx-automation) 8.0(미리보기·렌더·시험지·보고서 조립) 위에서 동작합니다.
 
 | 문서 | 폴더 | 할 수 있는 것 |
 |---|---|---|
