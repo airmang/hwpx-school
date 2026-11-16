@@ -17,16 +17,12 @@ kits/synthetic(킷)과 짝을 이룬다. 서식을 다시 만들면 킷의 form.
 from __future__ import annotations
 
 import sys
-from copy import deepcopy
 from pathlib import Path
 
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
 
-HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
 HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
-HPNS = "http://www.hancom.co.kr/hwpml/2011/paragraph"
-UNITCHAR = "http://www.hancom.co.kr/hwpml/2016/HwpUnitChar"
 
 W, H = 72852, 103180
 M = {"left": 5000, "right": 5000, "top": 5669, "bottom": 4000, "header": 0, "footer": 2000}
@@ -35,50 +31,36 @@ COLW = (W - M["left"] - M["right"] - GAP) // 2          # 30726
 BATANG, DOTUM = "1", "0"                                   # 기본 템플릿 글꼴 id
 
 
-def _char(h, *, height: int, font: str, bold: bool = False) -> str:
-    def modify(el):
-        el.set("height", str(height))
-        fr = el.find(HH + "fontRef")
-        for k in list(fr.attrib):
-            fr.set(k, font)
-        if bold and el.find(HH + "bold") is None:
-            el.insert(0, ET.Element(HH + "bold"))
-
-    def match(el):
-        fr = el.find(HH + "fontRef")
-        return (el.get("height") == str(height) and fr is not None and fr.get("hangul") == font
-                and (el.find(HH + "bold") is not None) == bold and el.get("textColor", "#000000") == "#000000")
-
-    return h.ensure_char_property(predicate=match, modifier=modify, base_char_pr_id="0").get("id")
+def _char(doc, *, height: int, font: str, bold: bool = False) -> str:
+    """기본 글자 모양(0)에서 크기·글꼴(모든 언어)·굵게만 바꾼 글자 모양(doc.styles.ensure_run — 스키마 차례로 쓴다)."""
+    face = doc.styles.fonts("HANGUL")[font].face
+    return doc.styles.ensure_run(base_char_pr_id_ref="0", size=height / 100, font=face, bold=bold)
 
 
-def _tab(h, positions: list[int]) -> str:
-    """한컴 저장본과 같은 탭 모양 — 탭마다 hp:switch(case = HWPUNIT, default = 2배)."""
-    box = next(h.element.iter(HH + "tabProperties"))
-    t = ET.SubElement(box, HH + "tabPr", {"id": str(max(int(x.get("id")) for x in box) + 1),
-                                          "autoTabLeft": "0", "autoTabRight": "0"})
-    for pos in positions:
-        sw = ET.SubElement(t, HP + "switch")
-        case = ET.SubElement(sw, HP + "case", {f"{{{HPNS}}}required-namespace": UNITCHAR})
-        ET.SubElement(case, HH + "tabItem", {"pos": str(pos), "type": "LEFT", "leader": "NONE", "unit": "HWPUNIT"})
-        default = ET.SubElement(sw, HP + "default")
-        ET.SubElement(default, HH + "tabItem", {"pos": str(2 * pos), "type": "LEFT", "leader": "NONE"})
-    box.set("itemCnt", str(len(box.findall(HH + "tabPr"))))
-    return t.get("id")
+def _tab(doc, positions: list[int]) -> str:
+    """한컴 저장본과 같은 탭 모양 — 탭마다 hp:switch(case = HWPUNIT, default = 2배)(doc.styles.ensure_tab_definition)."""
+    return doc.styles.ensure_tab_definition(tab_stops=[{"pos": pos, "type": "LEFT", "leader": "NONE"} for pos in positions])
 
 
-def _para(h, *, line: int, left: int = 0, intent: int = 0, tab: str | None = None) -> str:
-    pid = h.ensure_paragraph_format(base_para_pr_id="0", line_spacing_percent=line,
-                                    margins={"left": left, "intent": intent})
-    if tab is not None:
-        pp = next(p for p in h.element.iter(HH + "paraPr") if p.get("id") == str(pid))
-        pp.set("tabPrIDRef", tab)
-    return str(pid)
+def _tab_run(par, text: str, cp: str) -> None:
+    """탭 든 run — 한/글 저장본처럼 hp:tab에 width·leader·type을 적는다. core add_run은 속성 없는 hp:tab을 써서
+    (CORE-ASKS) 이 run만 직접 쓴다."""
+    run = ET.SubElement(par.element, HP + "run", {"charPrIDRef": cp})
+    te = ET.SubElement(run, HP + "t")
+    pieces = text.split("	")
+    te.text = pieces[0]
+    for piece in pieces[1:]:
+        tab = ET.SubElement(te, HP + "tab", {"width": "0", "leader": "0", "type": "1"})
+        tab.tail = piece
+
+
+def _para(doc, *, line: int, left: int = 0, intent: int = 0, tab: str | None = None) -> str:
+    return str(doc.styles.ensure_paragraph_format(base_para_pr_id_ref="0", line_spacing=line,
+                                                  margins={"left": left, "intent": intent}, tab_pr_id_ref=tab))
 
 
 def build(out: Path) -> None:
     doc = HwpxDocument.new(empty_first_line=True)  # 7.0: 6.x처럼 빈 첫 줄(구역 설정)에서 시작한다
-    h = doc.oxml.headers[0]
     sec = doc.sections[0]
 
     # ---- 쪽·단 ----
@@ -87,59 +69,63 @@ def build(out: Path) -> None:
     doc.page.set_columns(2, same_gap=GAP, separator_type="SOLID", separator_width_mm=0.12)
 
     # ---- 글자·문단·스타일 ----
-    body = _char(h, height=1100, font=BATANG)
-    num = _char(h, height=1200, font=BATANG, bold=True)
-    admin = _char(h, height=1000, font=DOTUM)
-    admin_b = _char(h, height=1200, font=DOTUM, bold=True)
+    body = _char(doc, height=1100, font=BATANG)
+    num = _char(doc, height=1200, font=BATANG, bold=True)
+    admin = _char(doc, height=1000, font=DOTUM)
+    admin_b = _char(doc, height=1200, font=DOTUM, bold=True)
     roles = {
-        "문항": _para(h, line=160),
-        "5행답항": _para(h, line=160, left=1000, intent=-1600, tab=_tab(h, [17000])),
-        "3행답항": _para(h, line=160, left=1000, tab=_tab(h, [15500])),
-        "2행답항": _para(h, line=160, left=1000, tab=_tab(h, [10500, 20000])),
-        "1행답항": _para(h, line=160, left=1000, tab=_tab(h, [6400, 11800, 17200, 22600])),
-        "보기안": _para(h, line=160, left=0, intent=-1800),
-        "자료안": _para(h, line=150),
+        "문항": _para(doc, line=160),
+        "5행답항": _para(doc, line=160, left=1000, intent=-1600, tab=_tab(doc, [17000])),
+        "3행답항": _para(doc, line=160, left=1000, tab=_tab(doc, [15500])),
+        "2행답항": _para(doc, line=160, left=1000, tab=_tab(doc, [10500, 20000])),
+        "1행답항": _para(doc, line=160, left=1000, tab=_tab(doc, [6400, 11800, 17200, 22600])),
+        "보기안": _para(doc, line=160, left=0, intent=-1800),
+        "자료안": _para(doc, line=150),
     }
-    style = {name: h.ensure_style(name, style_type="PARA", para_pr_id_ref=pid, char_pr_id_ref=body)
+    style = {name: doc.styles.ensure_style(name, style_type="PARA", para_pr_id_ref=pid, char_pr_id_ref=body)
              for name, pid in roles.items()}
     normal = "0"
 
     def p(text_runs, st=normal, pid=None):
-        """문단 하나 — text_runs = [(글, charPr)]."""
+        """문단 하나 — text_runs = [(글, charPr)]. 탭은 hp:t 안 hp:tab(paragraph.add_run)."""
         par = doc.add_paragraph("", para_pr_id_ref=pid or roles.get(st, "0"),
                                 char_pr_id_ref=body, include_run=False, inherit_style=False)
         par.style_id_ref = style.get(st, st)
-        for t, cp in text_runs:  # 탭은 폭 0을 적은 한/글 꼴 <hp:tab width="0" leader="0" type="1"/>(add_run(tab_widths=))
-            par.add_run(t, char_pr_id_ref=cp, tab_widths=[0] * t.count("\t") if "\t" in t else None)
+        for t, cp in text_runs:
+            if "	" in t:
+                _tab_run(par, t, cp)
+            else:
+                par.add_run(t, char_pr_id_ref=cp)
         return par
 
     def table_in(par, rows, cols, widths, heights, *, inline=True):
-        """par 문단에 표를 넣는다(add_table로 만들어 옮긴다). 칸 글은 뒤에서 채운다."""
+        """par 문단 끝에 표를 넣는다(doc.add_table로 만들어 table.move_to로 옮기고, 빈 자리 문단은 지운다). 칸 글은 뒤에서 채운다."""
         tmp = doc.add_table(rows, cols, width=sum(widths), height=sum(heights))
         tmp.set_column_widths(widths)
         for r in range(rows):
             for c in range(cols):
                 tmp.cell(r, c).set_size(height=heights[r])
-        tbl = tmp.element
-        holder = tbl.getparent()
-        temp_p = holder.getparent()
-        run = ET.SubElement(par.element, HP + "run", {"charPrIDRef": admin})
-        run.append(tbl)
-        sec.element.remove(temp_p)
+        holder = tmp.paragraph
+        tmp.move_to(par)
+        holder.remove()
         if inline:
             tmp.set_treat_as_char(True)
         return tmp
 
     def cell_text(tbl, r, c, lines, cp, st=normal, align=None):
+        """칸 글 — 칸의 첫 문단을 첫 줄로 고쳐 쓰고, 나머지 줄은 문단을 더한다(같은 문단 모양·스타일·글자 모양)."""
         cell = tbl.cell(r, c)
-        sub = cell.element.find(HP + "subList")
-        for old in sub.findall(HP + "p"):
-            sub.remove(old)
-        for line in lines:
-            ap = ET.SubElement(sub, HP + "p", {"id": "0", "paraPrIDRef": roles.get(st, "0"), "styleIDRef": style.get(st, st),
-                                               "pageBreak": "0", "columnBreak": "0", "merged": "0"})
-            run = ET.SubElement(ap, HP + "run", {"charPrIDRef": cp})
-            ET.SubElement(run, HP + "t").text = line
+        first = cell.paragraphs[0]
+        for extra in cell.paragraphs[1:]:
+            extra.remove()
+        first.para_pr_id_ref = roles.get(st, "0")
+        first.style_id_ref = style.get(st, st)
+        for run in first.runs:
+            run.remove()
+        first.add_run(lines[0], char_pr_id_ref=cp)
+        for line in lines[1:]:
+            ap = cell.add_paragraph(line, para_pr_id_ref=roles.get(st, "0"), char_pr_id_ref=cp)
+            ap.style_id_ref = style.get(st, st)
 
     # ---- 문단 0: 관리박스 ----
     p0 = sec.paragraphs[0]
