@@ -1104,17 +1104,26 @@ class _Composer:
         p.style_id_ref = sid
         if spec.brk:
             p.column_break, p.page_break = spec.brk == "column", spec.brk == "page"
-        for run in p.element.findall(q("hp", "run")):  # run은 직접 쓴다 — add_run은 \t를 run 바로 아래 hp:tab으로 둔다
-            p.element.remove(run)
-        mark, tabs = spec.mark, iter(spec.tabs)
-        for text, c in spec.segs:
-            if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
-                self._수식(p, text.script, c or cp)
-                continue
-            run = ET.SubElement(p.element, q("hp", "run"), {"charPrIDRef": c or cp})
-            mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
-        if mark:
-            raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
+        for run in p.runs:
+            run.remove()
+        if spec.tabs:  # 탭 든 답지 줄 — 탭 폭(hp:tab width)을 적는 길이 core에 없어 run을 직접 쓴다(CORE-ASKS)
+            mark, tabs = spec.mark, iter(spec.tabs)
+            for text, c in spec.segs:
+                if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
+                    self._수식(p, text.script, c or cp)
+                    continue
+                run = ET.SubElement(p.element, q("hp", "run"), {"charPrIDRef": c or cp})
+                mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
+            if mark:
+                raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
+        else:  # 공개 API — 조각마다 run(줄바꿈은 hp:t 안 hp:lineBreak), 수식은 문단 끝에 수식 run(조각 차례 그대로)
+            for text, c in spec.segs:
+                if isinstance(text, equation.Math):
+                    self._수식(p, text.script, c or cp)
+                else:
+                    p.add_run(text, char_pr_id_ref=c or cp)
+            if spec.mark:
+                _mark_first(p, spec.mark, spec.segs)
         if spec.obj is not None:
             p.element.find(q("hp", "run")).insert(0, spec.obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
         if spec.drawing is not None:
@@ -1324,6 +1333,20 @@ def wrap_words(text: str, avail: int, m: Metrics) -> str:
         sep = nxt
     out.append(cur)
     return equation.unmask("\n".join(out), maths)
+
+
+def _mark_first(p, mark: str, segs) -> None:
+    """문단의 조각 첫머리(조각 시작·줄바꿈 뒤) 정답 원문자에 형광펜(paragraph.add_highlight) — 그런 자리가 없거나,
+    원문자가 처음 나오는 곳이 그 자리가 아니면 멈춘다(add_highlight는 처음 나오는 곳을 칠한다)."""
+    texts = [t for t, _ in segs if not isinstance(t, equation.Math)]
+    spot = next((k for k, t in enumerate(texts) if any(x.startswith(mark) for x in t.split("\n"))), None)
+    if spot is None:
+        raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
+    first = next(k for k, t in enumerate(texts) if mark in t)
+    at = texts[first].index(mark)
+    if first != spot or not (at == 0 or texts[first][at - 1] == "\n"):
+        raise ValueError(f"형광펜 {mark}가 칠할 자리보다 앞에도 있다: {_글(segs)!r}")
+    p.add_highlight(color=형광, match=mark)
 
 
 def _fill_t(t: ET._Element, text: str, mark: str | None, tabs=None) -> str | None:
