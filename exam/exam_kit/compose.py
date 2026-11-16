@@ -347,30 +347,20 @@ def derive_para_pr(header, base: str, *, prev: int | None = None, align: str | N
                    break_setting: dict | None = None, tab_pr: str | None = None, margins: dict | None = None) -> str:
     """base paraPr의 복제 id — prev·margins(intent·left·right·next)면 그 여백을 case 분기 = 값, default 분기 = 2배로(양식 실측).
 
-    값이 None인 여백은 base 그대로 둔다. tab_pr면 탭 정의(tabPrIDRef)도 바꾼다. ensure_paragraph_format은 두 분기에 같은 값을
-    넣고 같은 모양이 있으면 재사용하므로, 양식의 기존 paraPr를 재사용했는데 default 분기가 다르면 고치지 않고 멈춘다(양식 문단까지 바뀐다).
+    값이 None인 여백은 base 그대로 둔다. tab_pr면 탭 정의(tabPrIDRef)도 바꾼다. python-hwpx 7.0의
+    ensure_paragraph_format이 한/글처럼 case 분기에 값, default 분기에 2배를 쓰고, 두 분기까지 같은 모양만 재사용한다.
     """
     want = dict(margins or {})
     if prev is not None:
         want["prev"] = prev
-    before = {pp.get("id") for pp in header.element.iter(q("hh", "paraPr"))}
-    pid = header.ensure_paragraph_format(base_para_pr_id=base, alignment=align, margins=want or None,
-                                         break_setting=break_setting, tab_pr_id_ref=tab_pr)
-    pp = header.element.find(f".//{q('hh', 'paraPr')}[@id='{pid}']")
-    for key, value in want.items():
-        d = pp.find(f".//{q('hp', 'default')}/{q('hh', 'margin')}/{q('hc', key)}")
-        if d is not None and d.get("value") != str(2 * value):
-            if pid in before:
-                raise RuntimeError(f"paraPr {pid}를 재사용했는데 default 분기 {key}가 다르다")
-            d.set("value", str(2 * value))
-    return pid
+    return header.ensure_paragraph_format(base_para_pr_id=base, alignment=align, margins=want or None,
+                                          break_setting=break_setting, tab_pr_id_ref=tab_pr)
 
 
 def case_prev(header, pid: str) -> int:
     """paraPr pid의 문단 위 간격(case 분기, HWPUNIT)."""
-    pp = header.element.find(f".//{q('hh', 'paraPr')}[@id='{pid}']")
-    el = pp.find(f".//{q('hp', 'case')}/{q('hh', 'margin')}/{q('hc', 'prev')}")
-    return int(el.get("value")) if el is not None else 0
+    shape = header.paragraph_property(pid)  # 여백은 case 분기(한/글 2016+가 읽는 것)
+    return int(shape.margin.prev or 0) if shape is not None and shape.margin is not None else 0
 
 
 @dataclass(frozen=True)
