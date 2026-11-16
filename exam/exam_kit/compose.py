@@ -580,11 +580,10 @@ class _Composer:
 
     def plain_bf(self) -> str:
         """양식의 사방 SOLID 0.12 mm 검정·채움 없음 borderFill(격자표의 바탕)."""
-        for b in self._border_fills().findall(q("hh", "borderFill")):
-            sides = [b.find(q("hh", f"{s}Border")) for s in ("left", "right", "top", "bottom")]
-            if all(x is not None and (x.get("type"), x.get("width"), x.get("color")) == ("SOLID", "0.12 mm", "#000000")
-                   for x in sides) and b.find(q("hc", "fillBrush")) is None:
-                return b.get("id")
+        for b in self.doc.styles.border_fills.values():  # 정의 차례(id 두 꼴로 같은 값이 두 번 나올 수 있다 — 처음 것이 이긴다)
+            if all((x.type, x.width_mm, x.color) == ("SOLID", 0.12, "#000000") for x in (b.left, b.right, b.top, b.bottom)) \
+                    and b.fill_kinds == ():
+                return b.id
         raise ValueError("양식이 바뀌었다: 사방 0.12 mm 실선 borderFill이 없다")
 
     def bf_variant(self, base: str, **sides: tuple[str, str]) -> str:

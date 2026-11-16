@@ -28,6 +28,7 @@ from typing import Callable
 
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
+from hwpx.model import Paragraph
 
 from . import equation, q
 from .kit import Kit, Metrics, style_ids
@@ -119,6 +120,12 @@ def _has_object(p: ET._Element) -> bool:
 def _inner(p: ET._Element) -> list[ET._Element]:
     """최상위 문단 안의 문단들(문서 차례) — 키의 둘째 값이 이 차례다."""
     return list(p.iter(q("hp", "p")))[1:]
+
+
+def paragraph_at(doc: HwpxDocument, key: Key) -> Paragraph:
+    """키의 문단 객체 — 최상위 문단, 또는 그 안 문단(키의 둘째 값은 _inner 차례)."""
+    top = doc.sections[0].paragraphs[key[0]]
+    return top if key[1] < 0 else Paragraph(_inner(top.element)[key[1]], doc.sections[0])
 
 
 def element_at(doc: HwpxDocument, key: Key) -> ET._Element:
@@ -298,9 +305,7 @@ class Spacer:
 
 def current_spacing(doc: HwpxDocument, key: Key) -> int:
     """문단 run들의 자간 가운데 절댓값이 가장 큰 값(부호 그대로) — 이미 맞춘 문단(≠ 0)은 다시 맞추지 않는다."""
-    box = doc.parts.headers[0].element.find(f".//{q('hh', 'charProperties')}")
-    vals = [_spacing(box.find(f"{q('hh', 'charPr')}[@id='{r.get('charPrIDRef')}']"))
-            for r in element_at(doc, key).findall(q("hp", "run"))]
+    vals = [run.letter_spacing or 0 for run in paragraph_at(doc, key).runs]
     return max(vals, key=abs, default=0)
 
 
