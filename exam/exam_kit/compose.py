@@ -110,30 +110,6 @@ CM = 72000 / 25.4  # 1 cm = 2834.6 HWPUNIT
                     # 실측(10-26): 제자리 9개 모두 0.000, 0.30cm 밀린 E·H·2는 0.062~0.188
 
 
-_언어_키 = {"HANGUL": "hangul", "LATIN": "latin", "HANJA": "hanja", "JAPANESE": "japanese", "OTHER": "other",
-          "SYMBOL": "symbol", "USER": "user"}
-
-
-def code_font_ids(header, face: str) -> dict[str, str]:
-    """언어 키(hangul …) → 고정폭 글꼴 face의 fontface 안 id. 없는 언어에는 그 글꼴을 덧붙인다(TTF — 인쇄 PC에 늘 있는 글꼴)."""
-    out = {}
-    for ff in header.element.iter(q("hh", "fontface")):
-        key = _언어_키.get(ff.get("lang"))
-        if key is None:
-            continue
-        font = next((f for f in ff.findall(q("hh", "font")) if f.get("face") == face), None)
-        if font is None:
-            ids = [int(f.get("id")) for f in ff.findall(q("hh", "font"))]
-            font = ET.SubElement(ff, q("hh", "font"), {"id": str(max(ids, default=-1) + 1), "face": face, "type": "TTF",
-                                                      "isEmbedded": "0"})
-            ff.set("fontCnt", str(len(ff.findall(q("hh", "font")))))
-            header.mark_dirty()
-        out[key] = font.get("id")
-    if "hangul" not in out:
-        raise ValueError("양식이 바뀌었다: hh:fontface lang=HANGUL 없음")
-    return out
-
-
 def _picture_attrs(block: Block) -> dict:
     """그림 블록의 그림 줄 속성(src·width_cm·align·indent_cm) — `:::그림` 펜스면 안의 그림 줄에서."""
     if block.attrs.get("src") is not None:
@@ -589,37 +565,8 @@ class _Composer:
         key = ("코드", role, color)
         if key in self._ul:
             return self._ul[key]
-        ids = code_font_ids(self.header, self.kit.code_font)
-        base = self.style[role][2]
-
-        def 모양(c) -> tuple:
-            return tuple(sorted((k, v) for k, v in c.attrib.items() if k != "id")), tuple(
-                (x.tag, tuple(sorted(x.attrib.items()))) for x in c if x.tag not in (q("hh", "fontRef"), q("hh", "ratio"),
-                                                                                    q("hh", "spacing")))
-
-        want = 모양(self.header.element.find(f".//{q('hh', 'charPr')}[@id='{base}']"))
-
-        def 같다(c) -> bool:
-            fr, ra, sp = c.find(q("hh", "fontRef")), c.find(q("hh", "ratio")), c.find(q("hh", "spacing"))
-            if color is not None:
-                return (fr is not None and all(fr.get(k) == v for k, v in ids.items()) and ra is not None
-                        and all(v == "100" for v in ra.attrib.values()) and sp is not None
-                        and all(v == "0" for v in sp.attrib.values()) and c.get("textColor") == color)
-            return (fr is not None and all(fr.get(k) == v for k, v in ids.items()) and ra is not None
-                    and all(v == "100" for v in ra.attrib.values()) and sp is not None
-                    and all(v == "0" for v in sp.attrib.values()) and 모양(c) == want)
-
-        def 바꾸기(c) -> None:
-            for k, v in ids.items():
-                c.find(q("hh", "fontRef")).set(k, v)
-            for tag, val in (("ratio", "100"), ("spacing", "0")):
-                el = c.find(q("hh", tag))
-                for k in el.attrib:
-                    el.set(k, val)
-            if color is not None:
-                c.set("textColor", color)
-
-        cid = self.header.ensure_char_property(predicate=같다, modifier=바꾸기, base_char_pr_id=base).get("id")
+        cid = self.doc.styles.ensure_run(base_char_pr_id_ref=self.style[role][2], font=self.kit.code_font,
+                                         ratio=100, letter_spacing=0, color=color)
         self._ul[key] = cid
         return cid
 
