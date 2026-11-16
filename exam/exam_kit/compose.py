@@ -587,6 +587,19 @@ class _Composer:
         raise ValueError("양식이 바뀌었다: 사방 0.12 mm 실선 borderFill이 없다")
 
     def bf_variant(self, base: str, **sides: tuple[str, str]) -> str:
+        """base borderFill에서 지정 변(top/bottom/left/right)만 (type, width)로 바꾼 것 — 같은 것이 있으면 재사용
+        (doc.styles.ensure_border_fill(base_border_fill_id_ref=)). width는 "0.4 mm" 꼴."""
+        key = (base, tuple(sorted(sides.items())))
+        if any(t == "NONE" for t, _ in sides.values()):
+            return self._bf_variant_xml(base, **sides)
+        if key not in self._bf:
+            self._bf[key] = self.doc.styles.ensure_border_fill(
+                base_border_fill_id_ref=base,
+                sides={side: None if typ == "NONE" else {"type": typ, "width_mm": float(width.split()[0])}
+                       for side, (typ, width) in sides.items()})
+        return self._bf[key]
+
+    def _bf_variant_xml(self, base: str, **sides: tuple[str, str]) -> str:
         """base borderFill에서 지정 변(top/bottom/left/right)만 (type, width)로 바꾼 것 — 같은 것이 있으면 재사용."""
         key = (base, tuple(sorted(sides.items())))
         if key in self._bf:
