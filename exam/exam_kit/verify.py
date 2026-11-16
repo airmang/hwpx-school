@@ -90,7 +90,8 @@ def extract_answers(doc: HwpxDocument) -> dict[str, str]:
 
 
 def _markpens(doc: HwpxDocument) -> list[str]:
-    return [m.get("color") or "" for m in doc.sections[0].element.iter(q("hp", "markpenBegin"))]
+    first = doc.sections[0]
+    return [h.color or "" for h in doc.text.highlights if h.paragraph is not None and h.paragraph.section is first]
 
 
 def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, str] | None,

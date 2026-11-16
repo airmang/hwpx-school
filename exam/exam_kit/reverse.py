@@ -1035,8 +1035,8 @@ def kit_profile(kit: Kit) -> FormProfile:
 
 
 def _columns(doc: HwpxDocument) -> int:
-    c = next(doc.sections[0].element.iter(q("hp", "colPr")), None)
-    return int(c.get("colCount") or 1) if c is not None else 1
+    columns = doc.page.columns(section=0)  # 구역 첫머리의 단(hp:secPr 옆 hp:colPr)이 첫 항목
+    return columns[0].count if columns else 1
 
 
 def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | None = None,

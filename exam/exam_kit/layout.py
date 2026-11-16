@@ -31,7 +31,7 @@ from pathlib import Path
 
 from hwpx.document import HwpxDocument
 
-from . import equation, q
+from . import equation
 from .compose import (
     LOOSER,
     case_prev,
@@ -305,7 +305,8 @@ class _Loop:
 
     # ⓪ 접힌 답지
     def fix_wraps(self, rr, lay, rounds: int):
-        answer_key = next(self.doc.sections[0].element.iter(q("hp", "markpenBegin")), None) is not None
+        first = self.doc.sections[0]
+        answer_key = any(h.paragraph is not None and h.paragraph.section is first for h in self.doc.text.highlights)
         for _ in range(rounds):
             changed = False
             for k, kind in wrapped_choices(self.doc, rr.pdf, self.kit):

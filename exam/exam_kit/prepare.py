@@ -379,7 +379,7 @@ def _postcheck(doc: HwpxDocument, kit: Kit, prepared: Prepared) -> None:
     ps = list(doc.sections[0].paragraphs)
     if not any(kit.tailbox["match_text"] in _text(t) for t in _top_tables(ps[-1].element)):
         실패.append("꼬리 박스가 마지막 문단이 아님")
-    if kit.remove["memos"] and any(f.get("type") == "MEMO" for f in doc.sections[0].element.iter(q("hp", "fieldBegin"))):
+    if kit.remove["memos"] and doc.sections[0].memos:
         실패.append("메모 잔존")
     pos = _top_tables(ps[-1].element)[0].find(q("hp", "pos"))
     if pos.get("vertRelTo") != kit.tailbox["vertRelTo"] or pos.get("vertOffset") != str(kit.tailbox["vertOffset"]):
