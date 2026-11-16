@@ -31,11 +31,12 @@ def _plain(el) -> str:
 def ranges(doc: HwpxDocument) -> list[tuple[int, int]]:
     """책갈피로 표시한 보존 구간들 — (첫 문단, 끝 문단) 번호(구역 0의 최상위 문단 기준, 끝 포함)."""
     marks: dict[str, dict[str, int]] = {}
-    for i, p in enumerate(doc.sections[0].paragraphs):
-        for bm in p.element.iter(q("hp", "bookmark")):
-            m = _책갈피.match(bm.get("name") or "")
-            if m:
-                marks.setdefault(m.group(1), {})[m.group(2)] = i
+    for bm in doc.refs.bookmarks:  # 표 칸·개체 안의 것은 그것을 품은 최상위 문단 번호로
+        if bm.kind != "point" or bm.location.section_index != 0:
+            continue
+        m = _책갈피.match(bm.name or "")
+        if m:
+            marks.setdefault(m.group(1), {})[m.group(2)] = bm.location.paragraph_index_in_section
     return sorted((v["시작"], v["끝"]) for v in marks.values() if "시작" in v and "끝" in v)
 
 

@@ -60,14 +60,11 @@ class ReverseStop(ValueError):
 def mono_char_prs(doc: HwpxDocument) -> set[str]:
     """고정폭 글꼴 charPr — 한글 글꼴의 typeInfo proportion 9(고정폭) 또는 이름이 '…체'(굴림체·돋움체·바탕체·궁서체).
     이 글꼴로만 된 문단은 코드 블록으로 되돌린다(Task 30)."""
-    hdr = doc.parts.headers[0].element
-    ff = next((f for f in hdr.iter(q("hh", "fontface")) if f.get("lang") == "HANGUL"), None)
-    mono = set() if ff is None else {
-        f.get("id") for f in ff.findall(q("hh", "font"))
-        if (f.get("face") or "").endswith("체") or (f.find(q("hh", "typeInfo")) is not None
-                                                    and f.find(q("hh", "typeInfo")).get("proportion") == "9")}
-    return {c.get("id") for c in hdr.iter(q("hh", "charPr"))
-            if c.find(q("hh", "fontRef")) is not None and c.find(q("hh", "fontRef")).get("hangul") in mono}
+    mono = {str(fid) for fid, f in doc.styles.fonts("HANGUL").items()
+            if (f.face or "").endswith("체")
+            or (f.type_info is not None and f.type_info.attributes.get("proportion") == "9")}
+    return {cid for cid, style in doc.styles.char_properties.items()
+            if style.child_attributes.get("fontRef", {}).get("hangul") in mono}
 
 
 def is_code(p_el, mono: set[str]) -> bool:
@@ -83,12 +80,8 @@ def code_text(p_el) -> str:
 
 
 def underlined_char_prs(doc: HwpxDocument) -> set[str]:
-    out = set()
-    for c in doc.parts.headers[0].element.iter(q("hh", "charPr")):
-        u = c.find(q("hh", "underline"))
-        if u is not None and (u.get("type") or "NONE") != "NONE":
-            out.add(c.get("id"))
-    return out
+    return {cid for cid, style in doc.styles.char_properties.items()
+            if (style.child_attributes.get("underline", {}).get("type") or "NONE") != "NONE"}
 
 
 _run_자식 = {q("hp", "t"), q("hp", "tbl"), q("hp", "pic"), q("hp", "equation"),  # 표·그림은 부르는 쪽이 따로 옮긴다
@@ -442,15 +435,7 @@ def picture_line(pic, name: str, place: tuple[str, int] = ("center", 0)) -> str:
 
 def para_info(doc: HwpxDocument) -> dict[str, tuple[str, int]]:
     """paraPr id → (가로 정렬, 왼여백 HWPUNIT) — 글자처럼 취급한 그림의 자리를 그 문단 모양으로 읽는다."""
-    out = {}
-    for pp in doc.oxml.headers[0].element.iter(q("hh", "paraPr")):
-        al = pp.find(q("hh", "align"))
-        left = pp.find(f".//{q('hp', 'case')}//{q('hc', 'left')}")
-        if left is None:
-            left = pp.find(f".//{q('hc', 'left')}")
-        out[pp.get("id")] = ((al.get("horizontal") if al is not None else "JUSTIFY"),
-                             int(left.get("value", "0")) if left is not None else 0)
-    return out
+    return {pid: (g["align"], g["left"]) for pid, g in para_geometry(doc).items()}
 
 
 가운데_허용 = round(CM)  # 떠 있는 그림의 중심이 단 가운데에서 이만큼 안이면 가운데(손으로 끌어 놓은 그림)
@@ -729,24 +714,20 @@ class Geometry:
 def para_geometry(doc: HwpxDocument) -> dict[str, dict]:
     """paraPr id → {"align", "left", "right", "intent", "prev"}(case 분기 여백 — 없으면 바로 아래 margin)."""
     out = {}
-    for pp in doc.oxml.headers[0].element.iter(q("hh", "paraPr")):
-        al = pp.find(q("hh", "align"))
-        mg = pp.find(f".//{q('hp', 'case')}/{q('hh', 'margin')}")
-        mg = pp.find(q("hh", "margin")) if mg is None else mg
-        m = {} if mg is None else {c.tag.split("}")[1]: int(c.get("value") or 0) for c in mg}
-        out[pp.get("id")] = {"align": al.get("horizontal") if al is not None else "JUSTIFY",
-                             **{k: m.get(k, 0) for k in ("left", "right", "intent", "prev")}}
+    for pid, shape in doc.styles.paragraph_properties.items():  # 여백은 case 가지(한/글 2016+가 읽는 것)
+        al = shape.alignment.horizontal if shape.alignment is not None and shape.alignment.horizontal else "JUSTIFY"
+        mg = shape.margin
+        out[pid] = {"align": al, **{k: int(getattr(mg, k) or 0) if mg is not None else 0
+                                    for k in ("left", "right", "intent", "prev")}}
     return out
 
 
 def column_width(doc: HwpxDocument) -> int:
     """구역 0의 단 폭 HWPUNIT = (용지 폭 − 좌우 여백 − 제본 − 단 간격 × (단 수 − 1)) ÷ 단 수."""
-    sec = doc.sections[0].element
-    page, mg = next(sec.iter(q("hp", "pagePr"))), next(sec.iter(q("hp", "margin")))
-    col = next(sec.iter(q("hp", "colPr")), None)
-    n = int(col.get("colCount") or 1) if col is not None else 1
-    gap = int(col.get("sameGap") or 0) if col is not None and n > 1 else 0
-    usable = int(page.get("width")) - int(mg.get("left") or 0) - int(mg.get("right") or 0) - int(mg.get("gutter") or 0)
+    size, mg, cols = doc.page.size(section=0), doc.page.margins(section=0), doc.page.columns(section=0)
+    n = cols[0].count if cols else 1
+    gap = cols[0].gap if cols and n > 1 else 0
+    usable = size.width - (mg.left or 0) - (mg.right or 0) - (mg.gutter or 0)
     return (usable - gap * (n - 1)) // n
 
 
