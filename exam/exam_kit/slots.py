@@ -12,7 +12,7 @@ from hwpx.document import HwpxDocument
 from . import q
 from .frontmatter import FrontMatter
 from .kit import Kit
-from .read import cells_deep, t_text, table_paragraphs
+from .read import t_text, table_paragraphs
 
 _빨강 = "#FF0000"
 
@@ -129,9 +129,7 @@ def _slot_paragraphs(doc: HwpxDocument, kit: Kit, where: dict) -> list:
     if "admin_table_with" in where:
         tbl = next(t for t in p0.tables if where["admin_table_with"] in t_text(table_paragraphs(t)))
         row, col = where["cell"]
-        # 옛 판의 뜻을 그대로 둔 것이며 고침은 `-x`에 있다: 옛 판은 `tbl.iter(hp:tc)`에서 주소가 맞는 첫 칸을 골랐다(앞 칸
-        # 안에 든 표의 같은 주소 칸이 먼저 나오면 그것 — cells_deep이 그 차례).
-        tc = next(c for c in cells_deep(tbl) if c.address == (row, col))
+        tc = next(c for r in tbl.rows for c in r.cells if c.address == (row, col))
         ps = [p.element for p in tc.paragraphs]
         return [ps[where["para"]]] if "para" in where else ps
     if where.get("notice"):

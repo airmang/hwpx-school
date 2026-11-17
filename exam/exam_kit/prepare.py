@@ -17,7 +17,7 @@ from hwpx.errors import HwpxValueError
 
 from . import q
 from .kit import Kit, sha256, style_ids
-from .read import cells_deep, is_blank as _blank, nested_raw as _ptext, table_paragraphs as _table_paragraphs, table_text as _table_text
+from .read import is_blank as _blank, nested_raw as _ptext, table_paragraphs as _table_paragraphs, table_text as _table_text
 
 
 
@@ -200,9 +200,8 @@ def _check_form(doc: HwpxDocument, kit: Kit) -> None:
             shape = [t.row_count, t.column_count]
             addr = next((tuple(sp["content_cell"]) for k, sp in kit.boxes.items()  # 킷은 [열, 행]
                          if k in ("보기", "자료") and sp["shape"] == shape), None)
-            # 옛 판의 뜻을 그대로 둔 것이며 고침은 `-x`에 있다: 옛 판은 `t.iter(hp:tc)`에서 주소가 맞는 첫 칸을 골랐다 —
-            # 앞 칸 안에 든 표의 같은 주소 칸이 바깥 칸보다 먼저 나오면 그것이다(cells_deep이 그 차례).
-            cell = None if addr is None else next((c for c in cells_deep(t) if c.address == (addr[1], addr[0])), None)
+            cell = None if addr is None else next(
+                (c for row in t.rows for c in row.cells if c.address == (addr[1], addr[0])), None)
             if cell is not None and _style_ids(t) & box_styles:
                 h = cell.height
                 if h != kit.box_min_height:
