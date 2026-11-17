@@ -8,6 +8,7 @@ from xml.sax.saxutils import escape
 
 import lxml.etree as ET
 import pytest
+from _models import table
 from exam_kit import HP
 from exam_kit.generic import front, generic_profile, heads, tail
 from exam_kit.kit import load_kit
@@ -80,7 +81,7 @@ def _tbl(rows: list[list[str]], spans: dict | None = None):
             tcs += (f'<hp:tc><hp:subList><hp:p paraPrIDRef="0" styleIDRef="0">{run}</hp:p></hp:subList>'
                     f'<hp:cellAddr colAddr="{c}" rowAddr="{r}"/><hp:cellSpan colSpan="{cs}" rowSpan="{rs}"/></hp:tc>')
         trs += f"<hp:tr>{tcs}</hp:tr>"
-    return ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="{len(rows)}" colCnt="{len(rows[0])}">{trs}</hp:tbl>')
+    return table(ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="{len(rows)}" colCnt="{len(rows[0])}">{trs}</hp:tbl>'))
 
 
 @pytest.mark.parametrize("title", ["< 보 기 >", "〈보기〉", "[보기]", "보 기"])

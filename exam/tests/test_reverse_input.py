@@ -4,20 +4,24 @@
 
 import io
 
+from pathlib import Path
+
 import lxml.etree as ET
 import pytest
+from _models import paragraphs
 from exam_kit import HP
 from exam_kit import source as source_mod
-from exam_kit.reverse import ReverseStop, as_png, page_guess, resolve_front, reverse_body
+from exam_kit.reverse import ReverseStop, as_png, page_guess, para_tops, resolve_front, reverse_body
 from exam_kit.source import SourceError, open_source
 from hwpx.document import HwpxDocument
 from hwpx.hwp5.errors import Hwp5ConversionReport
 from PIL import Image
 
+픽스처 = Path(__file__).parent / "fixtures"
 
-def _p(inner: str = "", vertpos: int | None = None):
-    seg = "" if vertpos is None else f'<hp:linesegarray><hp:lineseg textpos="0" vertpos="{vertpos}"/></hp:linesegarray>'
-    return ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="0" styleIDRef="0">{inner}{seg}</hp:p>')
+
+def _p(inner: str = ""):
+    return ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="0" styleIDRef="0">{inner}</hp:p>')
 
 
 def _run(text: str) -> str:
@@ -83,25 +87,44 @@ def test_그림은_PNG로_통일한다():
 
 
 def test_쪽_어림은_줄_배치가_줄어드는_곳을_새_단으로_센다():
-    ps = [_p(vertpos=y) for y in (0, 900, 40, 500)] + [_p()] + [_p(vertpos=10)]
-    assert page_guess(ps, 2) == [1, 1, 1, 1, 1, 2]  # 2단: 셋째 단(=2쪽) — 줄 캐시 없는 문단은 앞 쪽을 잇는다
-    assert page_guess(ps, 1) == [1, 1, 2, 2, 2, 3]
+    """한/글이 저장한 문서(글 넷 → 2단 구역 → 1단 구역, 문단마다 줄 배치): 첫 줄 세로 자리가 줄어드는 곳이 새 단이다."""
+    doc = HwpxDocument.open(str(픽스처 / "pages_columns_change_after_text.hwpx"))
+    ps = list(doc.sections[0].paragraphs)
+    tops = [p.line_segments[0].vertical_position for p in ps]
+    assert [i for i in range(1, len(ps)) if tops[i] < tops[i - 1]] == [4, 11]  # 줄 배치가 줄어드는 곳 둘
+    ps[12].clear_layout_cache()  # 줄 캐시 없는 문단(새로 만든 문단처럼)은 앞 문단의 쪽을 잇는다
+    assert page_guess(ps, 2) == [1] * 11 + [2] * 4  # 2단: 셋째 단(=2쪽)
+    assert page_guess(ps, 1) == [1] * 4 + [2] * 7 + [3] * 4
+
+
+def test_문단_세로_원점은_첫_줄_자리에서_문단_앞_간격을_뺀다():
+    """한/글이 저장한 줄 배치: (단 번호, 첫 줄 세로 자리 − 문단 앞 간격). 줄 배치가 없는 문단은 None."""
+    doc = HwpxDocument.open(str(픽스처 / "pages_columns_change_after_text.hwpx"))
+    ps = list(doc.sections[0].paragraphs)
+    tops = [p.line_segments[0].vertical_position for p in ps]
+    gp = {str(ps[1].para_pr_id_ref): {"prev": 100}}
+    ps[2].clear_layout_cache()
+    got = para_tops(ps, gp)
+    assert got[2] is None
+    assert [g[0] for g in got if g is not None] == [0] * 3 + [1] * 7 + [2] * 4  # 줄 배치가 줄어드는 곳마다 다음 단
+    prev = lambda p: 100 if str(p.para_pr_id_ref) in gp else 0  # noqa: E731
+    assert [g[1] for g in got if g is not None] == [t - prev(p) for i, (p, t) in enumerate(zip(ps, tops)) if i != 2]
 
 
 def test_멈춤은_문항_쪽_문단_글을_알린다():
-    head = _p(_run("가는? [1.0점]"), vertpos=0)
-    choices = [_p(_run(f"{m} 답"), vertpos=100 * (i + 1)) for i, m in enumerate("①②③④⑤")]
-    stray = _p(_run("덧붙인 글"), vertpos=20)  # 새 단 — 2단이면 1쪽, 1단이면 2쪽
-    paras = [head, *choices, stray]
+    head = _p(_run("가는? [1.0점]"))
+    choices = [_p(_run(f"{m} 답")) for m in "①②③④⑤"]
+    stray = _p(_run("덧붙인 글"))
+    paras = paragraphs([head, *choices, stray])
     with pytest.raises(ReverseStop) as e:
-        reverse_body(paras, {0}, set(), pages=page_guess(paras, 1))
+        reverse_body(paras, {0}, set(), pages=[1, 1, 1, 1, 1, 1, 2])  # 쪽 어림(page_guess)이 덧붙인 글을 2쪽으로 셌다
     stop = e.value
     assert (stop.question, stop.page, stop.paragraph, stop.snippet) == (1, 2, 6, "덧붙인 글")
     assert "답지 뒤에 본문" in stop.reason and str(stop).startswith("약 2쪽 · 1번 문항 · 문단 6:")
 
 
 def test_문항_앞_내용도_자리를_알린다():
-    paras = [_p(_run("떠도는 글")), _p(_run("가는? [1.0점]"))]
+    paras = paragraphs([_p(_run("떠도는 글")), _p(_run("가는? [1.0점]"))])
     with pytest.raises(ReverseStop) as e:
         reverse_body(paras, {1}, set())
     assert e.value.question is None and e.value.paragraph == 0 and "문항 앞" in str(e.value)
@@ -142,8 +165,8 @@ def test_모르는_머리_키는_멈춘다():
 
 def test_배점이_발문_뒤_줄_끝에_있으면_머리로_옮긴다():
     """머리 문단에 배점이 없고 이어지는 발문 줄(다음 문단·그림 뒤) 끝에 `[N점]`이 있으면 그것이 그 문항 배점이다."""
-    paras = [_p(_run("그림과 같이 합성 도형이 있다.")), _p(_run("이때 넓이의 값은? [3.8점]")),
-             *[_p(_run(f"{m} {i}")) for i, m in enumerate("①②③④⑤", 1)]]
+    paras = paragraphs([_p(_run("그림과 같이 합성 도형이 있다.")), _p(_run("이때 넓이의 값은? [3.8점]")),
+                        *[_p(_run(f"{m} {i}")) for i, m in enumerate("①②③④⑤", 1)]])
     md = reverse_body(paras, {0}, set())
     assert md[0] == "## 1. [3.8점]" and md[1:4] == ["그림과 같이 합성 도형이 있다.", "", "이때 넓이의 값은?"]  # 나뉜 문단은 빈 줄로
 

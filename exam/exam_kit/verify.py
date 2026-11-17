@@ -8,10 +8,8 @@ from dataclasses import dataclass
 import pymupdf
 from hwpx.document import HwpxDocument
 
-from . import q
 from .geometry import equation_glyphs, measure, tail_box_rect, tail_box_top, text_lines
 from .kit import Kit, style_ids
-from .prepare import _is_blank
 from .render import RenderResult
 
 
@@ -45,11 +43,84 @@ def _nested_raw(paragraphs) -> str:
     return "".join(_GLYPHS.sub("", p.nested_text()) for p in paragraphs)
 
 
-def _t_lead_text(run) -> str:
-    """run의 hp:t마다 첫 글(``t.text`` — 형광펜·탭 같은 표시 뒤의 글은 빼고)을 이은 것.
+def _script(obj) -> str:
+    """수식 개체의 스크립트 — 문서 전체 걷기(iter_objects)가 준 개체는 그 문단의 수식 객체(paragraph.equations)로 읽는다."""
+    if hasattr(obj, "script"):
+        return obj.script
+    return next((eq.script for eq in obj.paragraph.equations if eq == obj), "") if obj.paragraph is not None else ""
 
-    ``run.content``에서 hp:t 안의 글 조각 가운데, 바로 앞 조각이 같은 hp:t의 표시·글리프가 아닌 것이 hp:t의 첫 글이다
-    (조각 둘이 잇따라 글이면 둘째는 다음 hp:t의 첫 글이다).
+
+def _has_text(paras) -> bool:
+    """문단들 아래에 글이 있는가 — 글자(안쪽 표 칸·글상자·캡션·각주까지), 개체 설명(대체 글)·수식 스크립트, 누름틀
+    매개변수·찾아보기 표시·덧말 글까지 센다(옛 판정이 요소 아래 모든 글을 셌다). 글리프(탭·줄 바꿈·빈칸)는 글이 아니다."""
+    if _nested_raw(paras).strip():
+        return True
+    for p in paras:
+        for place in p.iter_objects():
+            o = place.object
+            if hasattr(o, "description") and o.description.strip():
+                return True
+            if place.kind == "equation" and _script(o).strip():
+                return True
+        for run in p.runs:
+            for item in run.content:
+                if item.kind in ("field_begin", "index_mark") or (item.kind == "unknown" and item.container != "t") \
+                        or item.name == "edit":  # 입력 상자는 제 글을 담는다
+                    # 모르는 요소(컨트롤 안에 잘못 든 글·표 등)는 내용으로 본다 — 빈 칸·빈 문단으로 지나치지 않는다
+                    return True
+                if item.kind == "ruby" and (item.object.text.strip() or item.object.ruby_text.strip()):
+                    return True
+    return False
+
+
+def _is_blank_paragraph(p) -> bool:
+    """빈 문단 — 글이 없고(_has_text) 안에 표·그림이 없다(prepare._is_blank의 문단 객체판)."""
+    return not _has_text([p]) and not any(True for _ in p.iter_objects(kinds=("table", "picture")))
+
+
+def _tree(p):
+    """문단과 그 안의 문단(표 캡션·칸, 도형 안, 그림 등 개체 캡션, 각주·미주, 메모 누름틀)을 문서 차례로."""
+    yield p
+    for run in p.runs:
+        for item in run.content:
+            o = item.object
+            if o is None:
+                continue
+            if item.kind == "table":
+                inner = list(o.caption.paragraphs) if o.caption is not None else []
+                inner += [q for row in o.rows for cell in row.cells for q in cell.paragraphs]
+                for q in inner:
+                    yield from _tree(q)
+            elif item.kind == "shape":
+                yield from (place.paragraph for place in o.iter_paragraphs())
+            elif item.kind in ("footnote", "endnote", "field_begin") and hasattr(o, "paragraphs"):
+                for q in o.paragraphs:
+                    yield from _tree(q)
+            elif getattr(o, "caption", None) is not None:
+                for q in o.caption.paragraphs:
+                    yield from _tree(q)
+
+
+def _section_text(doc: HwpxDocument) -> str:
+    """구역 0의 글 — 문단 글(안쪽 표 칸·글상자·캡션·머리말·각주까지), 메모 글, 개체 설명·수식 스크립트, 누름틀 안내문·메모.
+    금지 문구(서식 안내·샘플 글)가 남았는지 찾을 때 쓴다."""
+    first = doc.sections[0]
+    parts = [_nested_raw(first.paragraphs)]
+    parts += [_nested_raw(memo.paragraphs) for memo in first.memos]
+    for place in doc.text.iter_objects():
+        if place.section is first or place.section == first:
+            o = place.object
+            parts.append(o.description if hasattr(o, "description") else "")
+            parts.append(_script(o) if place.kind == "equation" else "")
+    parts += [f"{f.prompt}{f.memo}" for f in doc.fields.all]
+    return "".join(parts)
+
+
+def _t_lead_text(run) -> str:
+    """run의 글 요소(t)마다 첫 글(``t.text`` — 형광펜·탭 같은 표시 뒤의 글은 빼고)을 이은 것.
+
+    ``run.content``에서 글 요소 안의 글 조각 가운데, 바로 앞 조각이 같은 글 요소의 표시·글리프가 아닌 것이 그 글 요소의 첫 글이다
+    (조각 둘이 잇따라 글이면 둘째는 다음 글 요소의 첫 글이다).
     """
     out, previous = [], None
     for item in run.content:
@@ -100,11 +171,17 @@ def extract_answers(doc: HwpxDocument) -> dict[str, str]:
     out: dict[str, str] = {}
     for k, start in enumerate(heads, 1):
         end = heads[k] if k < len(heads) else _tail_index(doc)
-        for p in ps[start:end]:
-            for t in p.element.iter(q("hp", "t")):
-                for ch in t:
-                    if ch.tag == q("hp", "markpenBegin") and (ch.get("color") or "").upper() == "#FFFF00":
-                        mark = (ch.tail or "").strip()[:1]
+        for top in ps[start:end]:
+            for p in _tree(top):
+                for run in p.runs:
+                    items = run.content
+                    for i, item in enumerate(items):
+                        if item.container != "t" or item.name != "markpenBegin" \
+                                or (item.attribute("color") or "").upper() != "#FFFF00":
+                            continue
+                        after = items[i + 1] if i + 1 < len(items) else None  # 형광펜 바로 뒤 글(같은 글 조각)
+                        mark = (after.text if after is not None and after.container == "t" and after.kind == "text"
+                                else "").strip()[:1]
                         if mark and mark in "①②③④⑤":  # "" in str은 참 — 빈 형광펜을 답으로 세지 않는다
                             out[str(k)] = mark
     return out
@@ -128,7 +205,7 @@ def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, st
     kept = ranges(doc)  # 보존 구간(원본 모양 그대로 심은 서술형 등)은 양식 모양 검사(M7a·M7b)에서 뺀다 — 원본 그대로가 목적이다
     if heads:
         for i in range(heads[0], tail):
-            if _is_blank(ps[i].element) and not inside(i, kept):
+            if _is_blank_paragraph(ps[i]) and not inside(i, kept):
                 fs.append(_f("M7a", f"빈 최상위 문단 (index {i})"))
     ids = style_ids(doc)
     allowed = {ids[n][0] for n in kit.styles.values() if n in ids}  # 킷 스타일 8종의 id
@@ -145,7 +222,7 @@ def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, st
         unfilled = (ph is not None and v == ph) or v == "" or set(v) <= {"_"}
         if unfilled:
             fs.append(_f("M7c", f"슬롯 {slot} 미확정: {v!r}", "W" if draft else "E"))
-    text = "".join(doc.sections[0].element.itertext())
+    text = _section_text(doc)
     for w in kit.forbidden_text:
         if w in text:
             fs.append(_f("M7d", f"금지 문구 잔존: {w!r}"))

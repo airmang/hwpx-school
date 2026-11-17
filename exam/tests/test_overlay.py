@@ -7,6 +7,7 @@ from pathlib import Path
 
 import lxml.etree as ET
 import pytest
+from _models import obj, paragraph, paragraphs
 from exam_kit import HP, q
 from exam_kit.compose import CM, 점_지름
 from exam_kit.kit import load_kit
@@ -130,13 +131,14 @@ def 조판(tmp_path):
     from hwpx.document import HwpxDocument
 
     doc = HwpxDocument.open(str(src))
-    host = next(p.element for p in doc.sections[0].paragraphs if p.element.find(f".//{q('hp', 'pic')}") is not None)
+    host = next(p for p in doc.sections[0].paragraphs if any(True for _ in p.iter_objects(kinds="picture")))
     return kit, src, doc, host
 
 
 def test_조판_얹기는_그림_문단의_떠_있는_개체(조판):
     kit, _, doc, host = 조판
-    floats = floats_in(host)
+    floats = [f.element for f in floats_in(host)]
+    host = host.element
     assert [f.tag.split("}")[1] for f in floats] == ["equation"] * 3 + ["ellipse"]
     for f in floats:
         pos = f.find(q("hp", "pos"))
@@ -162,8 +164,9 @@ def test_조판_얹기는_그림_문단의_떠_있는_개체(조판):
 def test_조판_그림_밖으로_나간_글자만큼_문단_간격(조판):
     """한/글은 문단 기준 음수 세로 오프셋을 0으로 자른다 — 그림 위로 나간 A만큼 문단 앞 간격을 둔다(아래로 나간 B는 뒤 간격)."""
     _, _, doc, host = 조판
+    a = floats_in(host)[0].element
+    host = host.element
     geo = para_geometry(doc)[host.get("paraPrIDRef")]
-    a = floats_in(host)[0]
     assert int(a.find(q("hp", "pos")).get("vertOffset")) == 0  # 맨 위 글자가 문단 원점에 닿는다
     assert geo["prev"] == int(a.find(q("hp", "sz")).get("height")) // 2 + round(0.2 * CM)
     # 간격만 넓힌 바탕글 모양이다 — 정렬은 가운데, 줄 간격은 바탕글 스타일 그대로(여백 사전이 바탕 모양 id를 덮어쓰던 결함)
@@ -199,10 +202,6 @@ def _xml(inner: str):
     return ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="0">{inner}</hp:p>')
 
 
-def _seg(vertpos: int) -> str:
-    return f'<hp:linesegarray><hp:lineseg vertpos="{vertpos}"/></hp:linesegarray>'
-
-
 def _pos(v: int, h: int, rel: str = "PARA") -> str:
     return (f'<hp:pos treatAsChar="0" vertRelTo="PARA" horzRelTo="{rel}" vertAlign="TOP" horzAlign="LEFT" '
             f'vertOffset="{v}" horzOffset="{h}"/>')
@@ -218,13 +217,13 @@ def test_교사식_배치_그림과_다른_문단의_글자():
     세로 거리는 한/글이 저장한 줄 배치(vertpos − prev)로 잰다."""
     pic = (f'<hp:pic><hp:sz width="12000" height="10000"/>{_pos(1500, 10000, "COLUMN")}'
            f'<hp:img binaryItemIDRef="i1"/></hp:pic>')
-    p0 = _xml(f'<hp:run>{pic}{_eq("rm P", 700, 13000)}</hp:run>{_seg(40000)}')
+    p0 = _xml(f'<hp:run>{pic}{_eq("rm P", 700, 13000)}</hp:run>')
     p1 = _xml(f'<hp:run>{_eq("rm Q", 1500, 16000)}<hp:ellipse><hp:sz width="300" height="300"/>{_pos(200, 12000)}'
-              f'</hp:ellipse></hp:run>{_seg(41800)}')
-    paras = [p0, p1]
+              f'</hp:ellipse></hp:run>')
+    paras = p0, p1 = paragraphs([p0, p1])
     gp = {"0": {"align": "JUSTIFY", "left": 0, "right": 0, "intent": 0, "prev": 0}}
-    geo = Geometry(30000, gp, para_tops(paras, gp))
-    box, mixed = _fig_box(p0.find(f".//{q('hp', 'pic')}"), p0, geo)
+    geo = Geometry(30000, gp, [(0, 40000), (0, 41800)])  # 한/글이 저장한 줄 배치로 잰 두 문단의 세로 원점(para_tops — test_reverse_input)
+    box, mixed = _fig_box(p0.pictures[0], p0, geo)
     assert (box, mixed) == ((10000, 1500, 12000, 10000), False)
     fig = _Fig("![](a.png){width=4.23cm}", 0, box, mixed)
     floats = [_float_item(x, i, p, geo) for i, p in enumerate(paras) for x in floats_in(p)]
@@ -241,10 +240,10 @@ def test_교사식_배치_그림과_다른_문단의_글자():
 
 def test_교사식_배치_줄_배치가_없으면_멈춘다():
     pic = f'<hp:pic><hp:sz width="12000" height="10000"/>{_pos(0, 0, "COLUMN")}</hp:pic>'
-    p0, p1 = _xml(f"<hp:run>{pic}</hp:run>"), _xml(f'<hp:run>{_eq("rm P", 0, 100)}</hp:run>')
+    p0, p1 = paragraphs([_xml(f"<hp:run>{pic}</hp:run>"), _xml(f'<hp:run>{_eq("rm P", 0, 100)}</hp:run>')])
     gp = {"0": {"align": "JUSTIFY", "left": 0, "right": 0, "intent": 0, "prev": 0}}
     geo = Geometry(30000, gp, para_tops([p0, p1], gp))
-    fig = _Fig("x", 0, *_fig_box(p0.find(f".//{q('hp', 'pic')}"), p0, geo))
+    fig = _Fig("x", 0, *_fig_box(p0.pictures[0], p0, geo))
     with pytest.raises(ValueError, match="줄 배치"):
         _attach([fig], [_float_item(x, 1, p1, geo) for x in floats_in(p1)], geo)
 
@@ -255,32 +254,32 @@ def test_교사식_배치_줄_배치가_없으면_멈춘다():
 ])
 def test_역변환_얹기_오류(inner, match):
     pic = f'<hp:pic><hp:sz width="5000" height="5000"/>{_pos(0, 0, "COLUMN")}</hp:pic>'
-    p = _xml(f"<hp:run>{pic}{inner}</hp:run>")
+    p = paragraph(_xml(f"<hp:run>{pic}{inner}</hp:run>"))
     gp = {"0": {"align": "JUSTIFY", "left": 0, "right": 0, "intent": 0, "prev": 0}}
     geo = Geometry(30000, gp, [None])
-    fig = _Fig("x", 0, *_fig_box(p.find(f".//{q('hp', 'pic')}"), p, geo))
+    fig = _Fig("x", 0, *_fig_box(p.pictures[0], p, geo))
     with pytest.raises(ValueError, match=match):
         _attach([fig], [_float_item(x, 0, p, geo) for x in floats_in(p)], geo)
 
 
 def test_역변환_박스_안의_얹기는_멈춘다():
     with pytest.raises(ValueError, match="박스·표 안"):
-        paragraph_text(_xml(f'<hp:run>{_eq("rm P", 0, 0)}</hp:run>'), set())
+        paragraph_text(paragraph(_xml(f'<hp:run>{_eq("rm P", 0, 0)}</hp:run>')), set())
 
 
 def test_역변환_글자처럼_취급한_원은_멈춘다():
     el = _xml('<hp:run><hp:ellipse><hp:sz width="300" height="300"/><hp:pos treatAsChar="1"/></hp:ellipse></hp:run>')
     with pytest.raises(ValueError, match="글자처럼 취급한 원"):
-        floats_in(el)
+        floats_in(paragraph(el))
 
 
 def test_떠_있는_그림이_단_가운데_근처면_가운데():
     """기하 원안지: 손으로 끌어 놓은 떠 있는 그림(왼쪽 + 띄움)의 중심이 단 가운데 ±1cm 안이면 가운데(10-26 교사 답)."""
     def pic(off: int, w: int = 11000):
-        return ET.fromstring(f'<hp:pic xmlns:hp="{HP}"><hp:pos treatAsChar="0" horzRelTo="COLUMN" horzAlign="LEFT" '
-                             f'horzOffset="{off}"/><hp:sz width="{w}"/></hp:pic>')
+        return obj(ET.fromstring(f'<hp:pic xmlns:hp="{HP}"><hp:pos treatAsChar="0" horzRelTo="COLUMN" horzAlign="LEFT" '
+                                 f'horzOffset="{off}"/><hp:sz width="{w}"/></hp:pic>'))
 
-    para = ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="7"/>')
+    para = paragraph(ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="7"/>'))
     col = 30900
     assert picture_place(pic(9950), para, {}, col) == ("center", 0)       # 중심 = 단 가운데
     assert picture_place(pic(9950 + 2700), para, {}, col) == ("center", 0)  # 0.95cm 오른쪽
@@ -328,7 +327,7 @@ def test_붙은_rm은_띄워서_문서에_넣고_띄워서_되돌린다():
     from exam_kit.reverse import _수식_원고
 
     def back(script: str) -> str:  # 역변환이 쓰는 원고 수식(`$…$` 안)
-        return _수식_원고(ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>{script}</hp:script></hp:equation>'))[1:-1]
+        return _수식_원고(obj(ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>{script}</hp:script></hp:equation>')))[1:-1]
 
     for doc in ("rm A", "rmA", "rm PQR", "rm K ( 7 , - 2 )"):
         latex = back(doc)
@@ -338,7 +337,7 @@ def test_붙은_rm은_띄워서_문서에_넣고_띄워서_되돌린다():
 
 
 def test_역변환_얹은_rmC는_원고에_정자로():
-    p = _xml(f'<hp:run>{_eq("rmC", 0, 100)}</hp:run>')
+    p = paragraph(_xml(f'<hp:run>{_eq("rmC", 0, 100)}</hp:run>'))
     gp = {"0": {"align": "JUSTIFY", "left": 0, "right": 0, "intent": 0, "prev": 0}}
     ov = _float_item(floats_in(p)[0], 0, p, Geometry(30000, gp, [None]))[0]
     assert ov.latex == "\\mathrm{C}"

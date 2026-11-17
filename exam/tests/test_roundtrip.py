@@ -76,6 +76,7 @@ def test_다른_곳은_자리만_알린다():
 
 def test_조판기_답항표만_답항표로_읽는다():
     import lxml.etree as ET
+    from _models import table
     from exam_kit import HP
 
     def tbl(rows):
@@ -83,7 +84,7 @@ def test_조판기_답항표만_답항표로_읽는다():
             f'<hp:tc><hp:subList><hp:p paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>{t}</hp:t></hp:run>'
             f'</hp:p></hp:subList><hp:cellAddr colAddr="{c}" rowAddr="{r}"/><hp:cellSpan colSpan="1" rowSpan="1"/></hp:tc>'
             for c, t in enumerate(row)) + "</hp:tr>" for r, row in enumerate(rows))
-        return ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="{len(rows)}" colCnt="{len(rows[0])}">{trs}</hp:tbl>')
+        return table(ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="{len(rows)}" colCnt="{len(rows[0])}">{trs}</hp:tbl>'))
 
     rows = [["", "ㄱ", "ㄴ"]] + [[m, "가", "나"] for m in "①②③④⑤"]
     assert answer_table(tbl(rows), set()) == ['머리="ㄱ|ㄴ"'] + [f"{m} 가 | 나" for m in "①②③④⑤"]
@@ -173,13 +174,14 @@ def test_떠_있는_그림의_자리를_읽는다():
     """원안지 실물: 떠 있는 그림(treatAsChar=0)은 hp:pos의 가로 정렬·띄움으로, 글자처럼 취급한 그림은 문단 모양으로."""
     import lxml.etree as ET
     from exam_kit import HP
+    from _models import obj, paragraph
     from exam_kit.reverse import picture_line, picture_place
 
     def pic(tac: str, h: str = "LEFT", off: int = 9046):
-        return ET.fromstring(f'<hp:pic xmlns:hp="{HP}"><hp:pos treatAsChar="{tac}" horzRelTo="COLUMN" horzAlign="{h}" '
-                             f'horzOffset="{off}"/><hp:sz width="11386"/></hp:pic>')
+        return obj(ET.fromstring(f'<hp:pic xmlns:hp="{HP}"><hp:pos treatAsChar="{tac}" horzRelTo="COLUMN" horzAlign="{h}" '
+                                 f'horzOffset="{off}"/><hp:sz width="11386"/></hp:pic>'))
 
-    para = ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="7"/>')
+    para = paragraph(ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="7"/>'))
     assert picture_place(pic("0"), para, {}) == ("left", 9046)
     assert picture_place(pic("0", "CENTER"), para, {}) == ("center", 0)
     assert picture_place(pic("1"), para, {"7": ("CENTER", 0)}) == ("center", 0)

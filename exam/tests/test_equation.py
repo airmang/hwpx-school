@@ -267,7 +267,7 @@ def test_역변환은_수식을_LaTeX로_되돌린다(tmp_path):
     doc, _ = _조판(False, tmp_path)
     ps = list(doc.sections[0].paragraphs)
     heads = question_heads(doc)
-    stem = paragraph_text(ps[heads[0]].element, set())
+    stem = paragraph_text(ps[heads[0]], set())
     assert stem.startswith("1.") and "이차방정식 $x^{2} - 5 x + 6 = 0$의 두 근을 $\\alpha$, $\\beta$라 할 때" in stem
     for m in eq.mask(stem)[1]:  # 되돌린 원고는 다시 같은 한/글 수식이 된다
         assert m.script in {x.script for x in _원고_수식()}
@@ -327,10 +327,11 @@ def test_수식_바로_뒤_한글이면_끝에_4분의1칸(text, scripts):
 def test_역변환은_끝의_4분의1칸을_걷는다():
     import lxml.etree as ET
     from exam_kit import HP
+    from _models import obj
     from exam_kit.reverse import _수식_원고
 
     el = ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>2`</hp:script></hp:equation>')
-    assert _수식_원고(el) == "$2$"
+    assert _수식_원고(obj(el)) == "$2$"
 
 
 @pytest.mark.parametrize("latex, want", [
@@ -371,8 +372,9 @@ def test_수식_안_쉼표_뒤는_2분의1칸(latex, want):
 def test_역변환은_쉼표_뒤_띄움을_걷는다():
     import lxml.etree as ET
     from exam_kit import HP
+    from _models import obj
     from exam_kit.reverse import _수식_원고
 
     el = ET.fromstring(f'<hp:equation xmlns:hp="{HP}"><hp:script>(4,``1)`</hp:script></hp:equation>')
-    latex = _수식_원고(el)[1:-1]
+    latex = _수식_원고(obj(el))[1:-1]
     assert "\\," not in latex and eq.to_script(latex) == "( 4 ,`` 1 )"

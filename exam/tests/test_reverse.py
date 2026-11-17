@@ -3,8 +3,6 @@
 제출본 테스트는 제출본이 있을 때만 돌고, 기대값도 제출본 자체(형광펜·누름틀)에서 뽑는다.
 """
 
-import zipfile
-from pathlib import Path
 from xml.sax.saxutils import escape
 
 import lxml.etree as ET
@@ -12,6 +10,7 @@ import pytest
 from hwpx.document import HwpxDocument
 
 from _kits import kit_dir
+from _models import obj, paragraph, paragraphs, table
 from exam_kit import HC, HP
 from exam_kit import reverse as reverse_mod
 from exam_kit.kit import load_kit
@@ -35,8 +34,12 @@ from exam_kit.verify import extract_answers, question_heads
 킷_디렉터리 = kit_dir()
 
 
-def _p(xml_inner: str):
+def _p_el(xml_inner: str):
     return ET.fromstring(f'<hp:p xmlns:hp="{HP}" paraPrIDRef="0" styleIDRef="0">{xml_inner}</hp:p>')
+
+
+def _p(xml_inner: str):
+    return paragraph(_p_el(xml_inner))
 
 
 def _run(text: str, cp: str = "8") -> str:
@@ -51,7 +54,7 @@ def _tc(row: int, col: int, paras: list[str], *, rs: int = 1, cs: int = 1) -> st
 
 def _tbl(rows: int, cols: int, trs: list[list[str]]):
     body = "".join(f"<hp:tr>{''.join(tr)}</hp:tr>" for tr in trs)
-    return ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="{rows}" colCnt="{cols}">{body}</hp:tbl>')
+    return table(ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="{rows}" colCnt="{cols}">{body}</hp:tbl>'))
 
 
 # --- 문단 글 -----------------------------------------------------------------
@@ -145,11 +148,11 @@ def test_classify_table_격자표():
 
 
 def test_picture_line_원래_폭_cm():
-    pic = ET.fromstring(
+    pic = obj(ET.fromstring(
         f'<hp:pic xmlns:hp="{HP}" xmlns:hc="{HC}"><hc:img binaryItemIDRef="BIN0001"/>'
-        f'<hp:sz width="17008" height="10205"/></hp:pic>')
+        f'<hp:sz width="17008" height="10205"/></hp:pic>'))
     assert picture_line(pic, "그림_05_1.png") == "![](그림_05_1.png){width=6cm}"
-    pic.find(f"{{{HP}}}sz").set("width", "14173")
+    pic.element.find(f"{{{HP}}}sz").set("width", "14173")
     assert picture_line(pic, "a.png") == "![](a.png){width=5cm}"
 
 
@@ -192,7 +195,7 @@ def test_classify_table_3x3_제목행_병합_격자는_자료가_아니다():
 def test_classify_table_자료_안의_격자표():
     grid = ('<hp:run charPrIDRef="8"><hp:tbl rowCnt="1" colCnt="2"><hp:tr>'
             f'{_tc_xml(0, 0, _run("x"))}{_tc_xml(0, 1, _run("y"))}</hp:tr></hp:tbl></hp:run>')
-    tbl = ET.fromstring(f'<hp:tbl xmlns:hp="{HP}"' + _자료_xml(grid)[len("<hp:tbl"):])
+    tbl = table(ET.fromstring(f'<hp:tbl xmlns:hp="{HP}"' + _자료_xml(grid)[len("<hp:tbl"):]))
     assert classify_table(tbl, set(), boxes=_BOXES) == ("자료", ["| x | y |", "|---|---|"])
 
 
@@ -202,15 +205,15 @@ def test_classify_table_자료_안의_격자표():
     + _tc_xml(0, 0, _run("x")) + "</hp:tr></hp:tbl></hp:run>",
 ])
 def test_classify_table_그림_표가_든_격자표는_오류(inner):
-    tbl = ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="1" colCnt="2"><hp:tr>'
-                        f'{_tc_xml(0, 0, inner)}{_tc_xml(0, 1, _run("b"))}</hp:tr></hp:tbl>')
+    tbl = table(ET.fromstring(f'<hp:tbl xmlns:hp="{HP}" rowCnt="1" colCnt="2"><hp:tr>'
+                              f'{_tc_xml(0, 0, inner)}{_tc_xml(0, 1, _run("b"))}</hp:tr></hp:tbl>'))
     with pytest.raises(ValueError, match="그림·표가 든 표"):
         classify_table(tbl, set(), boxes=_BOXES)
 
 
 def test_classify_table_박스_안의_박스는_오류():
     inner = '<hp:run charPrIDRef="8">' + _자료_xml(_run("안")) + "</hp:run>"
-    tbl = ET.fromstring(f'<hp:tbl xmlns:hp="{HP}"' + _자료_xml(inner)[len("<hp:tbl"):])
+    tbl = table(ET.fromstring(f'<hp:tbl xmlns:hp="{HP}"' + _자료_xml(inner)[len("<hp:tbl"):]))
     with pytest.raises(ValueError, match="박스 안에 자료"):
         classify_table(tbl, set(), boxes=_BOXES)
 
@@ -280,7 +283,7 @@ def _choices5(star: str = "③") -> list[str]:
 
 
 def _body(*inners: str):
-    return [_p(x) for x in inners]
+    return paragraphs([_p_el(x) for x in inners])
 
 
 def test_reverse_body_세트와_그림(tmp_path):
@@ -337,14 +340,17 @@ def test_reverse_body_답지가_다섯이_아니면_오류():
         reverse_body(_body(_head("가? [1.0점]"), *_choices5()[:4]), {0}, set())
 
 
-def test_bin_items(tmp_path):
-    f = tmp_path / "x.hwpx"
-    with zipfile.ZipFile(f, "w") as z:
-        z.writestr("Contents/content.hpf", '<opf:package xmlns:opf="http://www.idpf.org/2007/opf/"><opf:manifest>'
-                   '<opf:item id="BIN0001" href="BinData/BIN0001.png"/><opf:item id="s" href="Contents/section0.xml"/>'
-                   "</opf:manifest></opf:package>")
-        z.writestr("BinData/BIN0001.png", b"IMG")
-    assert _bin_items(f) == {"BIN0001": (".png", b"IMG")}
+def test_bin_items():
+    import io
+
+    from hwpx import HwpxDocument
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), "white").save(buf, "PNG")
+    doc = HwpxDocument.new()
+    item = doc.media.add_image(buf.getvalue(), "png")
+    assert _bin_items(doc) == {str(item): (".png", buf.getvalue())}
 
 
 def test_main_scan_오류면_0이_아니다(tmp_path, monkeypatch, capsys):

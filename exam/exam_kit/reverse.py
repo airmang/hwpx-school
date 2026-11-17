@@ -14,23 +14,22 @@ from __future__ import annotations
 import io
 import re
 import tempfile
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import lxml.etree as ET
 from hwpx.document import HwpxDocument
 from hwpx.equation import EquationConversionError, eqedit_to_latex
+from hwpx.errors import HwpxError
+from hwpx.model import Equation, Paragraph, Picture as PictureObject, Run, Shape, Table, TableCell
 from PIL import Image, UnidentifiedImageError
 
-from . import equation, preserve, q
+from . import equation, preserve
 from .kit import Kit
-from .prepare import _text, _top_tables
 from .scan import Overlay, overlay_line
 from .slots import read_text_slots
 from .source import Source, SourceError, open_source
-from .verify import _nested_raw, _tail_index, question_heads
+from .verify import _has_text, _nested_raw, _tail_index, question_heads
 
 원문자 = "①②③④⑤"
 노랑 = "#FFFF00"
@@ -41,9 +40,8 @@ _머리기호 = re.compile(r"^(?:[ㄱㄴㄷㄹㅁ]|[㉠㉡㉢㉣㉤]|\((?:[가�
 _보기_항목 = re.compile(r"^(?:[ㄱㄴㄷㄹㅁ]\.|∘)\s")
 _답지_시작 = re.compile(r"(?:^|\s{2,})(\*?)([①②③④⑤])")
 _열맞춤_답지 = re.compile(r"^\*?[①②③④⑤]\s{3,}")  # 원문자 뒤 공백 3칸+ = 열을 맞춘 짝짓기 행
-_OPF = {"opf": "http://www.idpf.org/2007/opf/"}
 
-Picture = Callable[[ET._Element], str]  # hp:pic → md 그림 줄
+Picture = Callable[..., str]  # 그림 객체(, 자리) → md 그림 줄
 
 
 class ReverseStop(ValueError):
@@ -67,16 +65,16 @@ def mono_char_prs(doc: HwpxDocument) -> set[str]:
             if style.child_attributes.get("fontRef", {}).get("hangul") in mono}
 
 
-def is_code(p_el, mono: set[str]) -> bool:
+def is_code(p: Paragraph, mono: set[str]) -> bool:
     """고정폭 글꼴 run뿐인 문단(표·그림·그림 위 얹기 없음) — 빈 줄도 코드 줄이 될 수 있다."""
-    runs = p_el.findall(q("hp", "run"))
-    return bool(mono) and bool(runs) and all(r.get("charPrIDRef") in mono for r in runs) \
-        and not _top_tables(p_el) and not _pics(p_el) and not floats_in(p_el)
+    runs = p.runs
+    return bool(mono) and bool(runs) and all(r.char_pr_id_ref in mono for r in runs) \
+        and not p.tables and not p.pictures and not floats_in(p)
 
 
-def code_text(p_el) -> str:
+def code_text(p: Paragraph) -> str:
     """코드 줄 글 — 앞 공백 그대로(끝 공백만 뺀다)."""
-    return "".join(_run_text(r) for r in p_el.findall(q("hp", "run"))).rstrip()
+    return "".join(_run_text(r) for r in p.runs).rstrip()
 
 
 def underlined_char_prs(doc: HwpxDocument) -> set[str]:
@@ -84,42 +82,39 @@ def underlined_char_prs(doc: HwpxDocument) -> set[str]:
             if (style.child_attributes.get("underline", {}).get("type") or "NONE") != "NONE"}
 
 
-_run_자식 = {q("hp", "t"), q("hp", "tbl"), q("hp", "pic"), q("hp", "equation"),  # 표·그림은 부르는 쪽이 따로 옮긴다
-            q("hp", "ellipse")}  # 떠 있는 작은 원 = 그림 위 점(●) — reverse_body가 그림에 붙인다(아니면 멈춘다)
+#: run 바로 아래에 둘 수 있는 것(run.content 조각의 요소 이름) — 표·그림은 부르는 쪽이 따로 옮긴다.
+#: 떠 있는 작은 원 = 그림 위 점(●) — reverse_body가 그림에 붙인다(아니면 멈춘다).
+_run_자식 = frozenset({"tbl", "pic", "equation", "ellipse"})
 # 글을 싣지 않는 컨트롤(누름틀 경계·책갈피·단 설정·쪽 번호·감추기) — 건너뛴다. 각주·미주·새 번호 등은 글이 있어 오류.
-_그리기 = {q("hp", t) for t in ("line", "rect", "polygon", "curve", "arc", "container", "connectLine")}  # :::도형 역변환은 다음 단계
-_무해_컨트롤 = {q("hp", t) for t in ("fieldBegin", "fieldEnd", "bookmark", "colPr", "pageNum", "pageHiding")}
-_공백_자식 = {q("hp", "lineBreak"), q("hp", "nbSpace"), q("hp", "fwSpace")}
-_t_자식 = {q("hp", "tab"), q("hp", "markpenBegin"), q("hp", "markpenEnd")} | _공백_자식
+_그리기 = frozenset({"line", "rect", "polygon", "curve", "arc", "container", "connectLine"})  # :::도형 역변환은 다음 단계
+_무해_컨트롤 = frozenset({"fieldBegin", "fieldEnd", "bookmark", "colPr", "pageNum", "pageHiding"})
+_공백_자식 = frozenset({"lineBreak", "nbSpace", "fwSpace"})
+_t_자식 = frozenset({"tab", "markpenBegin", "markpenEnd"}) | _공백_자식
 _펜 = "\x00"  # 노랑 형광펜 자리 — 문단 글을 다 이은 뒤 다음 원문자 앞 `*`로 바꾼다(run을 건너 걸친 형광펜)
 _펜_답 = re.compile(_펜 + r"\s*(__)?\s*([①②③④⑤])")
 
 
-def _tag(el) -> str:
-    return el.tag.split("}")[-1] if isinstance(el.tag, str) else str(el.tag)
-
-
-def _check_run(run) -> None:
-    for ch in run:
-        if ch.tag == q("hp", "ctrl"):
-            bad = [_tag(c) for c in ch if c.tag not in _무해_컨트롤]
-            if bad:
-                raise ValueError(f"run 안의 컨트롤 hp:{', hp:'.join(bad)} — 역변환하지 않는다")
-        elif ch.tag in _그리기:
-            raise ValueError(f"그리기 개체 hp:{_tag(ch)}(선·면·곡선·틀 — 원고 :::도형으로 그린 그림이나 한/글에서 그린 도형)는 "
-                             "아직 원고로 되돌리지 않는다 — 원고의 :::도형을 고쳐 다시 조판한다")
-        elif ch.tag not in _run_자식:
-            raise ValueError(f"run 안의 모르는 요소 hp:{_tag(ch)} — 역변환하지 않는다")
+def _check_run(run: Run) -> None:
+    """run 바로 아래의 것을 본다 — 글을 싣는 컨트롤·그리기 개체·모르는 요소는 조용히 버리지 않고 오류(처음 것)."""
+    for item in run.content:
+        if item.container == "ctrl":
+            if item.name not in _무해_컨트롤:
+                raise ValueError(f"run 안의 컨트롤 hp:{item.name} — 역변환하지 않는다")
+        elif item.container == "run":
+            if item.name in _그리기:
+                raise ValueError(f"그리기 개체 hp:{item.name}(선·면·곡선·틀 — 원고 :::도형으로 그린 그림이나 한/글에서 그린 도형)는 "
+                                 "아직 원고로 되돌리지 않는다 — 원고의 :::도형을 고쳐 다시 조판한다")
+            if item.name not in _run_자식:
+                raise ValueError(f"run 안의 모르는 요소 hp:{item.name} — 역변환하지 않는다")
 
 
 _글_인자 = re.compile(r"\\text\{([^{}]*)\}")
 
 
 def _수식_원고(eq) -> str:
-    """hp:equation → 원고 수식 `$LaTeX$`(hwpx.equation.eqedit_to_latex). 되돌린 LaTeX가 다시 한/글 수식으로 바뀌지 않으면
-    (조판할 수 없는 원고가 되면) 오류."""
-    s = eq.find(q("hp", "script"))
-    script = equation.spaced("" if s is None else (s.text or "").strip())  # `rmA` → `rm A` → `\\mathrm{A}`(equation.spaced)
+    """수식 객체(model.Equation) → 원고 수식 `$LaTeX$`(hwpx.equation.eqedit_to_latex). 되돌린 LaTeX가 다시 한/글 수식으로
+    바뀌지 않으면(조판할 수 없는 원고가 되면) 오류."""
+    script = equation.spaced(eq.script.strip())  # `rmA` → `rm A` → `\\mathrm{A}`(equation.spaced)
     script = script.rstrip(" " + equation.뒤_띄움).rstrip() or script  # 끝의 1/4 칸(`)은 조판 관례 — 원고에 쓰지 않는다
     script = equation.comma_unspaced(script)  # 쉼표 뒤 1/2 칸(``)도 조판 관례
     if not script:
@@ -134,32 +129,30 @@ def _수식_원고(eq) -> str:
     return f"${latex}$"
 
 
-def _run_text(run, *, escape: bool = False) -> str:
+def _run_text(run: Run, *, escape: bool = False) -> str:
     """run 글. 모르는 자식(도형·각주 등)은 조용히 버리지 않고 오류. 노랑 형광펜은 자리표(_펜)로 남긴다.
     수식은 원고 표기 `$LaTeX$`로. escape면 글의 달러 글자를 `\\$`로 쓴다(수식 표기와 겹치지 않게 — 코드 줄은 그대로)."""
     _check_run(run)
     buf: list[str] = []
-    for x in run:
-        if is_floating(x):  # 그림 위에 얹은 글자·점 — 문단 글이 아니다(reverse_body가 그림에 붙인다)
+    for item in run.content:
+        if item.container == "run":
+            if is_floating(item.object):  # 그림 위에 얹은 글자·점 — 문단 글이 아니다(reverse_body가 그림에 붙인다)
+                continue
+            if item.kind == "equation":
+                buf.append(_수식_원고(item.object))
             continue
-        if x.tag == q("hp", "equation"):
-            buf.append(_수식_원고(x))
+        if item.container != "t":
             continue
-        if x.tag != q("hp", "t"):
-            continue
-        piece = [x.text or ""]
-        for ch in x:
-            if ch.tag not in _t_자식:
-                raise ValueError(f"글 안의 모르는 요소 hp:{_tag(ch)} — 역변환하지 않는다")
-            if ch.tag == q("hp", "tab"):
-                piece.append("\t")
-            elif ch.tag == q("hp", "markpenBegin") and (ch.get("color") or "").upper() == 노랑:
-                piece.append(_펜)
-            elif ch.tag in _공백_자식:
-                piece.append(" ")
-            piece.append(ch.tail or "")
-        text = "".join(piece)
-        buf.append(text.replace("$", "\\$") if escape else text)
+        if item.kind == "text":
+            buf.append(item.text.replace("$", "\\$") if escape else item.text)
+        elif item.name not in _t_자식:
+            raise ValueError(f"글 안의 모르는 요소 hp:{item.name} — 역변환하지 않는다")
+        elif item.name == "tab":
+            buf.append("\t")
+        elif item.name == "markpenBegin" and (item.attribute("color") or "").upper() == 노랑:
+            buf.append(_펜)
+        elif item.name in _공백_자식:
+            buf.append(" ")
     return "".join(buf)
 
 
@@ -172,15 +165,15 @@ def _resolve_pens(s: str) -> str:
     return s
 
 
-def paragraph_text(p_el, underlined: set[str], *, floating_ok: bool = False) -> str:
+def paragraph_text(p: Paragraph, underlined: set[str], *, floating_ok: bool = False) -> str:
     """문단 글: 탭 → `\\t`, 밑줄 run → `__…__`(앞뒤 공백은 밑줄 밖), 노랑 형광펜 → 원문자 앞 `*`.
     떠 있는 수식·점(그림 위 얹기)은 글이 아니다 — floating_ok(문항·세트 본문 문단)가 아니면 조용히 버리지 않고 멈춘다."""
-    if not floating_ok and floats_in(p_el):
+    if not floating_ok and floats_in(p):
         raise ValueError("떠 있는 수식·점(그림 위 얹기)이 박스·표 안에 있다 — 문항 블록의 그림 위 얹기만 되돌린다")
     groups: list[list] = []  # [글, 밑줄?] — 이웃한 밑줄 run은 한 덩어리로
-    for run in p_el.findall(q("hp", "run")):
+    for run in p.runs:
         s = _run_text(run, escape=True)
-        ul = run.get("charPrIDRef") in underlined and bool(s.replace(_펜, "").strip())
+        ul = run.char_pr_id_ref in underlined and bool(s.replace(_펜, "").strip())
         if groups and groups[-1][1] == ul:
             groups[-1][0] += s
         else:
@@ -250,34 +243,28 @@ def detect_matching(lines: list[str]) -> tuple[list[str], list[list[str]]] | Non
     return head, rows
 
 
-def _cells(tbl) -> list:
-    """이 표 자신의 칸만 — 칸 안에 든 표의 칸은 섞지 않는다."""
-    return [tc for tr in tbl.findall(q("hp", "tr")) for tc in tr.findall(q("hp", "tc"))]
+def _cells(tbl: Table) -> list[TableCell]:
+    """이 표 자신의 칸만(행 차례, 행 안 칸 차례) — 칸 안에 든 표의 칸은 섞지 않는다."""
+    return [tc for tr in tbl.rows for tc in tr.cells]
 
 
-def _cell(tbl, row: int, col: int):
-    for tc in _cells(tbl):
-        a = tc.find(q("hp", "cellAddr"))
-        if a is not None and a.get("rowAddr") == str(row) and a.get("colAddr") == str(col):
-            return tc
-    return None
+def _cell(tbl: Table, row: int, col: int) -> TableCell | None:
+    return next((tc for tc in _cells(tbl) if tc.address == (row, col)), None)
 
 
-def _span(tc) -> tuple[int, int]:
-    s = tc.find(q("hp", "cellSpan"))
-    return (1, 1) if s is None else (int(s.get("rowSpan", "1")), int(s.get("colSpan", "1")))
+def _span(tc: TableCell) -> tuple[int, int]:
+    return tc.span
 
 
-def _cell_paras(tc) -> list:
-    sub = tc.find(q("hp", "subList"))
-    return [] if sub is None else sub.findall(q("hp", "p"))
+def _cell_paras(tc: TableCell) -> list[Paragraph]:
+    return list(tc.paragraphs)
 
 
-def _pics(p_el) -> list:
-    return [pic for run in p_el.findall(q("hp", "run")) for pic in run.findall(q("hp", "pic"))]
+def _pics(p: Paragraph) -> list[PictureObject]:
+    return list(p.pictures)
 
 
-def _box_lines(tc, underlined: set[str], picture: Picture | None, where: str, mono: set[str] = frozenset(),
+def _box_lines(tc: TableCell, underlined: set[str], picture: Picture | None, where: str, mono: set[str] = frozenset(),
                boxes: dict | None = None) -> list[str]:
     """박스 내용 칸 → md 줄(글 · 칸 안 격자표 · 칸 안 그림 · 고정폭 문단 = ``` 코드 블록)."""
     out: list[str] = []
@@ -289,7 +276,7 @@ def _box_lines(tc, underlined: set[str], picture: Picture | None, where: str, mo
         if code is not None:
             out += ["```", *code, "```"]
             code = None
-        for t in _top_tables(p):
+        for t in p.tables:
             kind, lines = classify_table(t, underlined, boxes=boxes, picture=picture, mono=mono)
             if kind != "표":
                 raise ValueError(f"{where}: 박스 안에 {kind} 박스가 있다 — 역변환하지 않는다")
@@ -317,18 +304,28 @@ def _join_items(lines: list[str]) -> list[str]:
     return out
 
 
-def _blank_cell(tc) -> bool:
-    return tc is not None and not _text(tc).strip() and not any(_pics(p) or _top_tables(p) for p in _cell_paras(tc))
+def _blank_cell(tc: TableCell | None) -> bool:
+    """빈 칸 — 글이 없고(_has_text) 칸 문단 바로 아래 그림·표가 없다. 글 없는 도형만 든 칸은 빈 칸이다."""
+    if tc is None:
+        return False
+    paras = _cell_paras(tc)
+    return not any(_pics(p) or p.tables for p in paras) and not _has_text(paras)
 
 
-def _is_box_frame(tbl, spec: dict) -> bool:
+def _table_text(tbl: Table) -> str:
+    """표의 글(캡션 → 행 → 칸 문단, 안쪽 표·글상자까지) — 글리프는 빼고 공백은 그대로."""
+    caption = list(tbl.caption.paragraphs) if tbl.caption is not None else []
+    return _nested_raw(caption + [p for tc in _cells(tbl) for p in _cell_paras(tc)])
+
+
+def _is_box_frame(tbl: Table, spec: dict) -> bool:
     """자료 박스 틀(킷 boxes["자료"]): 칸 수가 spec cells이고 내용 칸(병합 없음) 밖의 칸은 모두 빈 칸.
     예: 3×3 = 0행·2행 3칸 병합 빈 칸 + 1행 [빈 레일 | 내용 | 빈 레일]. 하나라도 어긋나면 격자표다."""
     tcs = _cells(tbl)
     cc, cr = spec["content_cell"]
     body = _cell(tbl, cr, cc)
     return (len(tcs) == spec["cells"] and body is not None and _span(body) == (1, 1)
-            and all(_blank_cell(tc) for tc in tcs if tc is not body))
+            and all(_blank_cell(tc) for tc in tcs if tc != body))
 
 
 class _GenericBoxes(dict):
@@ -340,7 +337,7 @@ _박스_제목 = {"보기": re.compile(r"^\s*[<〈《\[(]?\s*보\s*기\s*[>〉�
              "조건": re.compile(r"^\s*[<〈《\[(]?\s*조\s*건\s*[>〉》\])]?\s*$")}
 
 
-def generic_box(tbl, underlined: set[str], *, picture: Picture | None = None,
+def generic_box(tbl: Table, underlined: set[str], *, picture: Picture | None = None,
                 mono: set[str] = frozenset()) -> tuple[str, list[str]] | None:
     """킷 없는 양식의 박스(이슈 #8 일반 규칙) — 표의 첫 글 줄이 제목(〈보기〉·<보 기>·[조건] 등)이면 그 박스, 나머지 칸 글이
     내용. 제목 없이 글이 든 칸이 하나뿐인 표(1칸 표·레일 틀 표)는 자료. 아니면 None(답항표·격자표로)."""
@@ -356,17 +353,17 @@ def generic_box(tbl, underlined: set[str], *, picture: Picture | None = None,
     return None
 
 
-def answer_table(tbl, underlined: set[str]) -> list[str] | None:
+def answer_table(tbl: Table, underlined: set[str]) -> list[str] | None:
     """조판기의 짝짓기 답항표(compose.answer_table — 무테 6행: 머리행 [빈 칸, 기호…] + ①~⑤ 행) → `:::답항표` 몸 줄
     [머리 줄, 행 다섯]. 아니면 None. 머리 기호의 밑줄은 조판이 다는 것이라 뺀다."""
-    trs = tbl.findall(q("hp", "tr"))
+    trs = tbl.rows
     if len(trs) != 6 or any(_span(tc) != (1, 1) for tc in _cells(tbl)):
         return None
 
     def 글(tc) -> str:
         return " ".join(t for p in _cell_paras(tc) if (t := paragraph_text(p, underlined)))
 
-    rows = [[글(tc) for tc in tr.findall(q("hp", "tc"))] for tr in trs]
+    rows = [[글(tc) for tc in tr.cells] for tr in trs]
     if rows[0][0] or len({len(r) for r in rows}) != 1 or len(rows[0]) < 3:
         return None
     if [r[0].lstrip("*") for r in rows[1:]] != list(원문자):
@@ -375,15 +372,15 @@ def answer_table(tbl, underlined: set[str]) -> list[str] | None:
     return [f'머리="{"|".join(head)}"'] + [f"{r[0]} " + " | ".join(r[1:]) for r in rows[1:]]
 
 
-def classify_table(tbl, underlined: set[str], *, boxes: dict | None = None, picture: Picture | None = None,
+def classify_table(tbl: Table, underlined: set[str], *, boxes: dict | None = None, picture: Picture | None = None,
                    mono: set[str] = frozenset()) -> tuple[str, list[str]]:
     """본문 표 → ("보기", 항목 줄) | ("자료", 내용 줄) | ("표", md 표 줄). 병합 칸 격자표·그림 칸은 오류.
     boxes = 킷 boxes — 없으면 박스를 가리지 않고 모두 격자표로 본다."""
-    rows, cols = tbl.get("rowCnt"), tbl.get("colCnt")
-    shape = [int(rows), int(cols)]
+    rows, cols = tbl.row_count, tbl.column_count
+    shape = [rows, cols]
     specs = {k: v for k, v in (boxes or {}).items() if isinstance(v, dict) and "shape" in v}
     for kind, spec in specs.items():  # 제목 있는 박스(〈보기〉·〈조건〉): 모양 + 제목 글
-        if not spec.get("title_match") or shape != spec["shape"] or spec["title_match"] not in _text(tbl):
+        if not spec.get("title_match") or shape != spec["shape"] or spec["title_match"] not in _table_text(tbl):
             continue
         name = kind.rstrip("◦")
         cc, cr = spec["content_cell"]
@@ -407,12 +404,12 @@ def classify_table(tbl, underlined: set[str], *, boxes: dict | None = None, pict
         if got is not None:
             return got
     md: list[list[str]] = []
-    for tr in tbl.findall(q("hp", "tr")):
+    for tr in tbl.rows:
         row = []
-        for tc in tr.findall(q("hp", "tc")):
+        for tc in tr.cells:
             if _span(tc) != (1, 1):
                 raise ValueError(f"병합 칸이 있는 표 ({rows}×{cols}) — md 표로 옮길 수 없다")
-            if any(_pics(p) or _top_tables(p) for p in _cell_paras(tc)):
+            if any(_pics(p) or p.tables for p in _cell_paras(tc)):
                 raise ValueError(f"그림·표가 든 표 ({rows}×{cols}, 그림 자료표?) — 역변환하지 않는다")
             row.append(" ".join(t for p in _cell_paras(tc) if (t := paragraph_text(p, underlined))))
         md.append(row)
@@ -425,9 +422,24 @@ def _cm(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def picture_line(pic, name: str, place: tuple[str, int] = ("center", 0)) -> str:
-    """hp:pic → `![](name){width=Ncm}` — 폭은 문서의 현재 폭(hp:sz) 그대로. 단 왼쪽 그림은 `align=left`(+ `indent=Ncm`)."""
-    cm = int(pic.find(q("hp", "sz")).get("width")) / CM
+def _floating(obj) -> bool:
+    """떠 있는 개체(자리 정보(position)가 있고 글자처럼 취급하지 않는 것)."""
+    pos = obj.position
+    return not pos.treat_as_char and any(v is not None for v in (
+        pos.horizontal_relative_to, pos.vertical_relative_to, pos.horizontal_alignment, pos.vertical_alignment,
+        pos.horizontal_offset, pos.vertical_offset, pos.flow_with_text, pos.allow_overlap))
+
+
+def _stored(offset: int | None) -> int:
+    """띄움 값을 파일에 적힌 수 그대로(한/글은 음수를 부호 없는 32비트로 적는다 — 옛 읽기와 같게 그 수로 센다)."""
+    if offset is None:
+        return 0
+    return offset + (1 << 32) if offset < 0 else offset
+
+
+def picture_line(pic: PictureObject, name: str, place: tuple[str, int] = ("center", 0)) -> str:
+    """그림 → `![](name){width=Ncm}` — 폭은 문서의 현재 상자 폭 그대로. 단 왼쪽 그림은 `align=left`(+ `indent=Ncm`)."""
+    cm = pic.box_width / CM
     align, indent = place
     extra = "" if align != "left" else " align=left" + (f" indent={_cm(indent / CM)}cm" if indent / CM >= 0.05 else "")
     return f"![]({name}){{width={_cm(cm)}cm{extra}}}"
@@ -441,26 +453,27 @@ def para_info(doc: HwpxDocument) -> dict[str, tuple[str, int]]:
 가운데_허용 = round(CM)  # 떠 있는 그림의 중심이 단 가운데에서 이만큼 안이면 가운데(손으로 끌어 놓은 그림)
 
 
-def picture_place(pic, para_el, info: dict[str, tuple[str, int]], col_width: int | None = None) -> tuple[str, int]:
-    """그림의 자리 → ("center"|"left", 단 왼쪽에서 띄운 거리 HWPUNIT). 떠 있는 그림(글자처럼 취급 아님)은 hp:pos의
+def picture_place(pic: PictureObject, para: Paragraph, info: dict[str, tuple[str, int]],
+                  col_width: int | None = None) -> tuple[str, int]:
+    """그림의 자리 → ("center"|"left", 단 왼쪽에서 띄운 거리 HWPUNIT). 떠 있는 그림(글자처럼 취급 아님)은 자리 정보의
     가로 정렬·띄움, 글자처럼 취급한 그림은 그 문단의 정렬·왼여백. 오른쪽 정렬 등 모르는 자리는 멈춘다.
 
     떠 있는 그림을 왼쪽 + 띄움으로 놓았어도 중심이 단 가운데에서 1cm 안이면 가운데다(col_width를 줄 때) — 기하 원안지
     그림 6장의 중심이 단 가운데 ±0.45cm였고, 출제 교사는 가운데에 두었다고 답했다(10-26)."""
-    pos = pic.find(q("hp", "pos"))
-    if pos is not None and pos.get("treatAsChar") == "0":
-        h = pos.get("horzAlign") or "LEFT"
+    if _floating(pic):
+        pos = pic.position
+        h = pos.horizontal_alignment or "LEFT"
         if h == "LEFT":
-            off = max(0, int(pos.get("horzOffset") or 0))
-            sz = pic.find(q("hp", "sz"))
-            w = int(sz.get("width") or 0) if sz is not None else 0
-            if col_width and pos.get("horzRelTo", "COLUMN") == "COLUMN" and abs(off + w / 2 - col_width / 2) <= 가운데_허용:
+            off = max(0, _stored(pos.horizontal_offset))
+            w = pic.box_width
+            if col_width and (pos.horizontal_relative_to or "COLUMN") == "COLUMN" \
+                    and abs(off + w / 2 - col_width / 2) <= 가운데_허용:
                 return "center", 0
             return "left", off
         if h == "CENTER":
             return "center", 0
         raise ValueError(f"그림 가로 정렬 {h} — 단 왼쪽·가운데만 되돌린다")
-    pid = str(para_el.get("paraPrIDRef"))
+    pid = str(para.para_pr_id_ref)
     if pid not in info:  # 문단 모양을 모르면 지금까지처럼 가운데
         return "center", 0
     align, left = info[pid]
@@ -471,16 +484,17 @@ def picture_place(pic, para_el, info: dict[str, tuple[str, int]], col_width: int
     raise ValueError(f"그림 문단 정렬 {align} — 단 왼쪽·가운데만 되돌린다")
 
 
-def _bin_items(hwpx: Path) -> dict[str, tuple[str, bytes]]:
-    """BinData id → (확장자, 바이트) — content.hpf 목록에서."""
-    with zipfile.ZipFile(hwpx) as z:
-        hpf = ET.fromstring(z.read("Contents/content.hpf"))
-        out = {}
-        for it in hpf.iterfind(".//opf:item", _OPF):
-            href = it.get("href") or ""
-            if href.startswith("BinData/"):
-                out[it.get("id")] = (Path(href).suffix or ".bin", z.read(href))
-        return out
+def _bin_items(doc: HwpxDocument) -> dict[str, tuple[str, bytes]]:
+    """BinData id → (확장자, 바이트) — 문서의 이진 항목(doc.media.images) 가운데 BinData/ 아래 것."""
+    out = {}
+    for item in doc.media.images:
+        if not item.href.startswith("BinData/"):
+            continue
+        try:
+            out[item.item_id] = (Path(item.href).suffix or ".bin", doc.package.get_part(item.href))
+        except HwpxError:  # 목록에만 있고 파트가 없는 항목 — 그림이 가리키면 그림 저장기가 'BinData가 없다'로 멈춘다
+            continue
+    return out
 
 
 # 누름틀 슬롯 이름 → 같은 뜻의 글자 자리 값 이름(slots.read_text_slots) — 글자 자리 양식은 머리·대상 학년이 한 자리다
@@ -652,15 +666,20 @@ def as_png(data: bytes, ext: str) -> bytes:
         raise ValueError(f"그림 형식 {ext}을 PNG로 바꿀 수 없다 — 한/글에서 그림을 PNG·BMP·JPG로 바꿔 넣는다") from e
 
 
-def page_guess(paras: list, columns: int) -> list[int | None]:
-    """문단마다 쪽 어림 — 저장된 줄 배치(hp:lineseg vertpos)가 줄어드는 곳을 새 단으로 센다. 한/글이 저장할 때 잰 배치라
+def _first_line_top(p: Paragraph) -> int | None:
+    """문단 첫 줄의 세로 자리(한/글이 저장한 줄 배치 paragraph.line_segments) — 줄 배치가 없으면 None."""
+    segments = p.line_segments
+    return segments[0].vertical_position if segments else None
+
+
+def page_guess(paras: list[Paragraph], columns: int) -> list[int | None]:
+    """문단마다 쪽 어림 — 저장된 줄 배치(첫 줄 세로 자리)가 줄어드는 곳을 새 단으로 센다. 한/글이 저장할 때 잰 배치라
     렌더 없이 알 수 있지만, 줄 캐시가 없는 문단(새로 만든 문서)은 앞 문단의 쪽을 이어 쓴다. 오류 위치 알림용."""
     out: list[int | None] = []
     col, prev, page = 0, None, None
-    for el in paras:
-        seg = el.find(f"{q('hp', 'linesegarray')}/{q('hp', 'lineseg')}")
-        if seg is not None and seg.get("vertpos") is not None:
-            y = int(seg.get("vertpos"))
+    for p in paras:
+        y = _first_line_top(p)
+        if y is not None:
             if prev is not None and y < prev:
                 col += 1
             prev = y
@@ -672,32 +691,34 @@ def page_guess(paras: list, columns: int) -> list[int | None]:
 # ---- 그림 위 얹기(글자·점) ------------------------------------------------------
 # 수학 교사는 글자를 지운 그림 위에 문제와 같은 한/글 수식(점 이름·길이)과 점(●)을 떠 있는 개체로 얹는다(10-26 답).
 # 역변환은 그것들을 그 그림의 `:::그림` 펜스 안 `$…$ {x=…cm y=…cm}`·`● {…}` 줄로 되돌린다. 좌표 = 그림 왼쪽 위에서 잰 중심.
-# 자리 셈(실한컴 렌더 실측 10-26): 떠 있는 개체의 문단 기준(vertRelTo=PARA) 세로 원점은 문단 앞 간격 위 = 첫 줄 vertpos − prev,
+# 자리 셈(실한컴 렌더 실측 10-26): 떠 있는 개체의 문단 기준(vertRelTo=PARA) 세로 원점은 문단 앞 간격 위 = 첫 줄 세로 자리 − prev,
 # 단 기준 가로 원점은 단 왼끝, 문단 기준 가로 원점은 단 왼끝 + 문단 왼여백. 글자처럼 취급한 그림 혼자인 문단의 그림 위끝은
-# 원점 + prev, 왼끝은 줄 시작(+ 가운데면 (줄 폭 − 그림 폭) / 2). 수식 글자는 상자 + 바깥 여백(hp:outMargin) 안쪽이다.
-# 그림과 얹은 것이 다른 문단에 앵커돼 있으면 한/글이 저장한 줄 배치(hp:lineseg vertpos)로 두 문단의 세로 거리를 잰다.
+# 원점 + prev, 왼끝은 줄 시작(+ 가운데면 (줄 폭 − 그림 폭) / 2). 수식 글자는 상자 + 바깥 여백(out_margins) 안쪽이다.
+# 그림과 얹은 것이 다른 문단에 앵커돼 있으면 한/글이 저장한 줄 배치(line_segments)로 두 문단의 세로 거리를 잰다.
 
 점_최대 = round(0.3 * CM)  # 이보다 작은 떠 있는 원 = 점(●). 큰 원·타원은 그림에 그려 넣을 도형이라 멈춘다
 _얹기_여유 = round(CM)     # 얹은 것의 중심이 그림 상자 밖 이만큼 안이면 그 그림의 것
 
 
-def is_floating(el) -> bool:
+def _is_ellipse(obj) -> bool:
+    return isinstance(obj, Shape) and obj.shape_type == "ellipse"
+
+
+def is_floating(obj) -> bool:
     """떠 있는(글자처럼 취급하지 않는) 수식·원 — 그림 위에 얹은 글자·점."""
-    if el.tag not in (q("hp", "equation"), q("hp", "ellipse")):
+    if not (isinstance(obj, Equation) or _is_ellipse(obj)):
         return False
-    pos = el.find(q("hp", "pos"))
-    return pos is not None and pos.get("treatAsChar") == "0"
+    return _floating(obj)
 
 
-def floats_in(p_el) -> list:
+def floats_in(p: Paragraph) -> list:
     """문단의 run 바로 아래 떠 있는 수식·원. 글자처럼 취급한 원은 그림 위 점이 아니라 멈춘다."""
     out = []
-    for run in p_el.findall(q("hp", "run")):
-        for x in run:
-            if is_floating(x):
-                out.append(x)
-            elif x.tag == q("hp", "ellipse"):
-                raise ValueError("글자처럼 취급한 원(hp:ellipse) — 그림 위 점은 떠 있는 원으로 얹는다")
+    for obj in p.objects:
+        if is_floating(obj):
+            out.append(obj)
+        elif _is_ellipse(obj):
+            raise ValueError("글자처럼 취급한 원(hp:ellipse) — 그림 위 점은 떠 있는 원으로 얹는다")
     return out
 
 
@@ -731,31 +752,30 @@ def column_width(doc: HwpxDocument) -> int:
     return (usable - gap * (n - 1)) // n
 
 
-def para_tops(paras: list, geo_paras: dict[str, dict]) -> list[tuple[int, int] | None]:
-    """문단마다 (단 번호, 문단 기준 세로 원점 = 첫 줄 vertpos − prev). 줄 배치가 줄어드는 곳을 새 단으로 센다(page_guess와 같다)."""
+def para_tops(paras: list[Paragraph], geo_paras: dict[str, dict]) -> list[tuple[int, int] | None]:
+    """문단마다 (단 번호, 문단 기준 세로 원점 = 첫 줄 세로 자리 − prev). 줄 배치가 줄어드는 곳을 새 단으로 센다(page_guess와 같다)."""
     out: list[tuple[int, int] | None] = []
     col, last = 0, None
-    for el in paras:
-        seg = el.find(f"{q('hp', 'linesegarray')}/{q('hp', 'lineseg')}")
-        if seg is None or seg.get("vertpos") is None:
+    for p in paras:
+        y = _first_line_top(p)
+        if y is None:
             out.append(None)
             continue
-        y = int(seg.get("vertpos"))
         if last is not None and y < last:
             col += 1
         last = y
-        out.append((col, y - geo_paras.get(str(el.get("paraPrIDRef")), {}).get("prev", 0)))
+        out.append((col, y - geo_paras.get(str(p.para_pr_id_ref), {}).get("prev", 0)))
     return out
 
 
-def _local(el, pp: dict, col_width: int) -> tuple[int, int]:
+def _local(obj, pp: dict, col_width: int) -> tuple[int, int]:
     """떠 있는 개체의 (가로 단 기준, 세로 앵커 문단 기준 원점) 왼쪽 위 HWPUNIT."""
-    pos = el.find(q("hp", "pos"))
-    w = int(el.find(q("hp", "sz")).get("width") or 0)
-    if pos.get("vertRelTo") != "PARA" or (pos.get("vertAlign") or "TOP") != "TOP":
-        raise ValueError(f"떠 있는 개체의 세로 기준 {pos.get('vertRelTo')}·{pos.get('vertAlign')} — 문단 기준·위만 되돌린다")
-    off = int(pos.get("horzOffset") or 0)
-    rel, al = pos.get("horzRelTo"), pos.get("horzAlign") or "LEFT"
+    pos = obj.position
+    w = obj.box_width
+    if pos.vertical_relative_to != "PARA" or (pos.vertical_alignment or "TOP") != "TOP":
+        raise ValueError(f"떠 있는 개체의 세로 기준 {pos.vertical_relative_to}·{pos.vertical_alignment} — 문단 기준·위만 되돌린다")
+    off = _stored(pos.horizontal_offset)
+    rel, al = pos.horizontal_relative_to, pos.horizontal_alignment or "LEFT"
     if rel == "COLUMN" and al == "LEFT":
         x = off
     elif rel == "COLUMN" and al == "CENTER":
@@ -764,7 +784,7 @@ def _local(el, pp: dict, col_width: int) -> tuple[int, int]:
         x = pp.get("left", 0) + off
     else:
         raise ValueError(f"떠 있는 개체의 가로 기준 {rel}·{al} — 단·문단 기준 왼쪽(단은 가운데도)만 되돌린다")
-    return x, int(pos.get("vertOffset") or 0)
+    return x, _stored(pos.vertical_offset)
 
 
 class _Fig:
@@ -780,37 +800,33 @@ class _Fig:
         return [":::그림", self.line, *(overlay_line(o) for o in self.overlays), ":::"]
 
 
-def _fig_box(pic, p_el, geo: Geometry) -> tuple[tuple[int, int, int, int], bool]:
+def _fig_box(pic: PictureObject, p: Paragraph, geo: Geometry) -> tuple[tuple[int, int, int, int], bool]:
     """그림 상자 (x, y, w, h) — 앵커 문단 기준. mixed = 글자처럼 취급했는데 한 문단에 글·다른 개체가 함께 있다."""
-    sz = pic.find(q("hp", "sz"))
-    w, h = int(sz.get("width") or 0), int(sz.get("height") or 0)
-    pp = geo.paras.get(str(p_el.get("paraPrIDRef")), {"align": "JUSTIFY"})
-    pos = pic.find(q("hp", "pos"))
-    if pos is not None and pos.get("treatAsChar") == "0":
+    w, h = pic.box_width, pic.box_height
+    pp = geo.paras.get(str(p.para_pr_id_ref), {"align": "JUSTIFY"})
+    if _floating(pic):
         x, y = _local(pic, pp, geo.col_width)
         return (x, y, w, h), False
     start = pp.get("left", 0) + pp.get("intent", 0)
     line_w = geo.col_width - pp.get("left", 0) - pp.get("right", 0) - pp.get("intent", 0)
     x = start + ((line_w - w) // 2 if pp.get("align") == "CENTER" else 0)
-    mixed = bool("".join(_run_text(r) for r in p_el.findall(q("hp", "run"))).strip()) or len(_pics(p_el)) > 1 \
-        or bool(_top_tables(p_el)) or pp.get("align") not in ("CENTER", "LEFT", "JUSTIFY", "DISTRIBUTE")
+    mixed = bool("".join(_run_text(r) for r in p.runs).strip()) or len(_pics(p)) > 1 \
+        or bool(p.tables) or pp.get("align") not in ("CENTER", "LEFT", "JUSTIFY", "DISTRIBUTE")
     return (x, pp.get("prev", 0), w, h), mixed
 
 
-def _float_item(el, anchor: int, p_el, geo: Geometry) -> tuple[Overlay, int, int, int]:
+def _float_item(obj, anchor: int, p: Paragraph, geo: Geometry) -> tuple[Overlay, int, int, int]:
     """떠 있는 수식·원 → (Overlay(좌표 미정), 앵커, 중심 x, 중심 y — 앵커 문단 기준)."""
-    sz = el.find(q("hp", "sz"))
-    w, h = int(sz.get("width") or 0), int(sz.get("height") or 0)
-    if el.tag == q("hp", "ellipse"):
+    w, h = obj.box_width, obj.box_height
+    if _is_ellipse(obj):
         if max(w, h) > 점_최대:
             raise ValueError(f"그림 위의 큰 원·타원({w / CM:.2f}×{h / CM:.2f}cm) — 점(●)만 되돌린다, 도형은 그림에 그려 넣는다")
         ov = Overlay("점", None, 0.0, 0.0)
     else:
-        ov = Overlay("글자", _수식_원고(el)[1:-1], 0.0, 0.0)
-    x, y = _local(el, geo.paras.get(str(p_el.get("paraPrIDRef")), {}), geo.col_width)
-    om = el.find(q("hp", "outMargin"))
-    ol, ot = (int(om.get("left") or 0), int(om.get("top") or 0)) if om is not None else (0, 0)
-    return ov, anchor, x + ol + w // 2, y + ot + h // 2
+        ov = Overlay("글자", _수식_원고(obj)[1:-1], 0.0, 0.0)
+    x, y = _local(obj, geo.paras.get(str(p.para_pr_id_ref), {}), geo.col_width)
+    om = obj.out_margins
+    return ov, anchor, x + om.left + w // 2, y + om.top + h // 2
 
 
 def _attach(figs: list[_Fig], floats: list, geo: Geometry) -> None:
@@ -846,13 +862,12 @@ def _expand(lines: list) -> list[str]:
 
 
 def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
-    """그림 저장기 — 이름표(문항 번호·세트)를 바꿔 가며 hp:pic을 파일로 쓰고 md 그림 줄을 돌려준다."""
+    """그림 저장기 — 이름표(문항 번호·세트)를 바꿔 가며 그림을 파일로 쓰고 md 그림 줄을 돌려준다."""
     owner = {"label": "", "n": 0}
 
-    def picture(pic, place: tuple[str, int] = ("center", 0)) -> str:
-        """hp:pic → 그림 파일 + md 그림 줄."""
-        ref = pic.find(f".//{q('hc', 'img')}")
-        rid = None if ref is None else ref.get("binaryItemIDRef")
+    def picture(pic: PictureObject, place: tuple[str, int] = ("center", 0)) -> str:
+        """그림 → 그림 파일 + md 그림 줄."""
+        rid = pic.item_id
         if rid not in bins:
             raise ValueError(f"그림 BinData {rid!r}가 문서에 없다")
         if image_dir is None:
@@ -870,7 +885,7 @@ def _saver(bins: dict[str, tuple[str, bytes]], image_dir: Path | None):
     return picture, relabel
 
 
-def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
+def reverse_body(paras: list[Paragraph], heads: set[int], underlined: set[str], *,
                  bins: dict[str, tuple[str, bytes]] | None = None, image_dir: Path | None = None,
                  mono: set[str] = frozenset(), skip_prefix: str | None = None,
                  boxes: dict | None = None, pages: list[int | None] | None = None,
@@ -917,7 +932,7 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
             return
         flush_code()
         t = paragraph_text(el, underlined, floating_ok=True)
-        if i in heads or (_세트.match(t) and not _top_tables(el)):
+        if i in heads or (_세트.match(t) and not el.tables):
             settle()
         if i in heads:
             if cur is not None:
@@ -928,7 +943,7 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
             relabel(f"{k:02d}")
             cur = _Question(k, t, member=set_rng is not None)
             t = ""  # 머리 글은 이미 썼다 — 머리 문단 안의 표·그림만 아래에서
-        elif (m := _세트.match(t)) and not _top_tables(el):
+        elif (m := _세트.match(t)) and not el.tables:
             if cur is not None:
                 out.extend(cur.finish())
                 cur = None
@@ -941,7 +956,7 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
             return
         if skip_prefix and skip_prefix in t:
             return
-        blocks = [classify_table(tb, underlined, boxes=boxes, picture=picture, mono=mono) for tb in _top_tables(el)]
+        blocks = [classify_table(tb, underlined, boxes=boxes, picture=picture, mono=mono) for tb in el.tables]
         for pic in _pics(el):
             line = picture(pic, picture_place(pic, el, para_prs or {}, geo.col_width if geo else None))
             if geo is None:
@@ -971,7 +986,7 @@ def reverse_body(paras: list, heads: set[int], underlined: set[str], *,
 
     def stop(e: ValueError, i: int | None) -> ReverseStop:
         el = paras[i] if i is not None else None
-        snippet = "" if el is None else re.sub(r"\s+", " ", "".join("".join(t.itertext()) for t in el.iter(q("hp", "t")))).strip()[:20]
+        snippet = "" if el is None else re.sub(r"\s+", " ", _nested_raw([el])).strip()[:20]
         page = None if not pages else pages[i if i is not None else -1]
         return ReverseStop(str(e), question=k or None, page=page, paragraph=i, snippet=snippet)
 
@@ -1029,7 +1044,7 @@ def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | Non
         with tempfile.TemporaryDirectory() as tmp:  # .hwp 변환 사본 자리 — 그림을 다 꺼낸 뒤 지운다
             return reverse(open_source(Path(src), Path(tmp)), profile, image_dir=image_dir, front=front)
     doc = src.doc
-    ps = [p.element for p in doc.sections[0].paragraphs]
+    ps = list(doc.sections[0].paragraphs)
     heads = profile.heads(doc)
     if not heads:
         raise ReverseStop("문항 머리(자동번호 문단 또는 글자 번호 `N.`)를 찾지 못했다 — 원안지가 아닌가?")
@@ -1038,12 +1053,12 @@ def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | Non
     pages = page_guess(ps, _columns(doc))
     # 보존 구간(서술형·논술형 등 — 아직 조판하지 않는다): 다시 조판한 문서는 책갈피로, 원안지는 머리 글로 찾는다
     spans = preserve.ranges(doc)
-    keep = spans[0][0] if spans else preserve.find_start(ps, heads[0] + 1, tail)
+    keep = spans[0][0] if spans else _preserve_start(ps, heads[0] + 1, tail)
     end = tail if keep is None else keep
     gp = para_geometry(doc)
     geo = Geometry(column_width(doc), gp, para_tops(ps[first:end], gp))
     body = reverse_body(ps[first:end], {i - first for i in heads if first <= i < end}, underlined_char_prs(doc),
-                        bins=_bin_items(src.hwpx), image_dir=image_dir, mono=mono_char_prs(doc),
+                        bins=_bin_items(doc), image_dir=image_dir, mono=mono_char_prs(doc),
                         skip_prefix=profile.skip_prefix, boxes=profile.boxes, pages=pages[first:end],
                         para_prs=para_info(doc), geo=geo)
     if keep is not None:
@@ -1068,14 +1083,30 @@ def _check_md(md: str, head_lines: int) -> None:
                       question=int(number) if number else None, snippet=e.text.strip()[:20])
 
 
-def _preserved(src: Source, ps: list, start: int, end: int, image_dir: Path | None, page: int | None) -> list[str]:
+def _preserved(src: Source, ps: list[Paragraph], start: int, end: int, image_dir: Path | None, page: int | None) -> list[str]:
     """보존 구간 [start, end) → `보존_01.hwpx`(image_dir) + 원고 줄(`## 보존` · :::보존 · 미리보기)."""
     if image_dir is None:
         raise ReverseStop("보존 구간(서술형·논술형 등)이 있는데 그 파일을 둘 자리(image_dir)가 없다", page=page, paragraph=start)
     name = "보존_01.hwpx"
     preserve.write_region(src.hwpx, start, end, Path(image_dir) / name)
-    lines = [re.sub(r"^\s*(```|:::)+", "", x) for x in preserve.preview(ps[start:end])]  # 미리보기가 원고 문법을 깨지 않게
+    lines = [re.sub(r"^\s*(```|:::)+", "", x) for x in _preserve_preview(ps[start:end])]  # 미리보기가 원고 문법을 깨지 않게
     return ["", "## 보존", f':::보존 src="{name}"', *[x for x in lines if x.strip()], ":::"]
+
+
+def _plain(p: Paragraph) -> str:
+    """문단 글(안쪽 표 칸·글상자까지, 수식 스크립트·설명 글은 넣지 않는다) 공백 하나로 — preserve._plain의 문단 객체판."""
+    return " ".join(_nested_raw([p]).split())
+
+
+def _preserve_start(paras: list[Paragraph], first: int, end: int) -> int | None:
+    """보존 구간의 시작 문단 번호(first ≤ i < end) — 책갈피가 없는 원안지는 서술형·논술형 머리 글(preserve.START_RE)로
+    찾는다(preserve.find_start의 문단 객체판)."""
+    return next((i for i in range(first, end) if preserve.START_RE.match(_plain(paras[i]))), None)
+
+
+def _preserve_preview(paras: list[Paragraph]) -> list[str]:
+    """읽기용 미리보기 — 구간 최상위 문단마다 글 한 줄(빈 문단은 뺀다; preserve.preview의 문단 객체판)."""
+    return [t for p in paras if (t := _plain(p))]
 
 
 def _given(pairs: list[str]) -> dict[str, str]:

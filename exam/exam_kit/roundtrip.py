@@ -20,15 +20,15 @@ from pathlib import Path
 
 from hwpx.document import HwpxDocument
 
-from . import preserve, q
+from . import preserve
 from .compose import compose, 물결
 from .kit import Kit, load_kit
 from .prepare import finalize_form, prepare_document
-from .reverse import FormProfile, ReverseStop, kit_profile, reverse
+from .reverse import FormProfile, ReverseStop, _preserve_start, kit_profile, reverse
 from .scan import Scan, scan_markdown
 from .slots import fill_slots
 from .source import Source, SourceError, open_source
-from .verify import _tail_index, question_heads
+from .verify import _tail_index
 
 _그림 = re.compile(r"!\[[^\]]*\]\([^)]*\)(\{[^}]*\})?")
 
@@ -58,11 +58,11 @@ def counts(doc: HwpxDocument, profile: FormProfile) -> Counts:
     ps = list(doc.sections[0].paragraphs)
     tail = profile.tail(doc) if profile.tail is not None else _tail_index(doc, profile.tail_marker)
     if heads and not preserve.ranges(doc):  # 원안지: 보존 구간(서술형·논술형 머리 글부터)의 머리를 뺀다 — 역변환과 같은 규칙
-        keep = preserve.find_start([p.element for p in ps], heads[0] + 1, tail)
+        keep = _preserve_start(ps, heads[0] + 1, tail)
         heads = [h for h in heads if keep is None or h < keep]
-    body = [p.element for p in ps[heads[0]:tail]] if heads else []
-    return Counts(len(heads), sum(1 for p in body for _ in p.iter(q("hp", "equation"))),
-                  sum(1 for p in body for _ in p.iter(q("hp", "pic"))))
+    body = ps[heads[0]:tail] if heads else []
+    return Counts(len(heads), sum(1 for p in body for _ in p.iter_objects(kinds="equation")),
+                  sum(1 for p in body for _ in p.iter_objects(kinds="picture")))
 
 
 def _norm(text: str, pairs) -> str:
