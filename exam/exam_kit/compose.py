@@ -1137,9 +1137,9 @@ class _Composer:
         for run in p.runs:
             run.remove()
         texts = [t for t, _ in spec.segs if not isinstance(t, equation.Math)]
-        if any("\r" in t for t in texts) or (spec.mark and _mark_first_ok(spec.segs, spec.mark) is False):
-            # 옛 꼴을 지키려 run을 직접 쓴다 — 글에 CR이 있을 때(add_run은 CR을 줄바꿈 hp:lineBreak로 쓴다), 정답 원문자가 칠할
-            # 자리보다 앞에도 있을 때(add_highlight는 처음 나오는 곳을 칠한다) — CORE-ASKS
+        if spec.mark and _mark_first_ok(spec.segs, spec.mark) is False:
+            # 옛 꼴을 지키려 run을 직접 쓴다 — 정답 원문자가 칠할 자리보다 앞에도 있을 때(add_highlight는 처음 나오는 곳을
+            # 칠한다) — CORE-ASKS. 글의 CR은 B12(결정 전): 공개 add_run이 줄바꿈 hp:lineBreak로 쓴다(옛 판은 hp:t에 CR 그대로).
             mark, tabs = spec.mark, iter(spec.tabs)
             for text, c in spec.segs:
                 if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
