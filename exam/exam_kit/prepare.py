@@ -151,6 +151,14 @@ def _holds_header_footer(paragraph) -> bool:
                for p in _table_paragraphs(place.object))
 
 
+def _replace_text(paragraph, old: str, new: str) -> int:
+    """문단과 그 안 표 칸 문단의 글에서 old를 new로(run.replace_text). 머리말·꼬리말 story는 건드리지 않는다."""
+    n = sum(run.replace_text(old, new) for run in paragraph.runs)
+    for place in paragraph.iter_objects(kinds="table"):
+        n += sum(run.replace_text(old, new) for p in _table_paragraphs(place.object) for run in p.runs)
+    return n
+
+
 def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
     a = kit.admin
     p0 = doc.sections[0].paragraphs[a["paragraph"]]
@@ -168,7 +176,7 @@ def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
     # 레이아웃용 중첩 표가 따로 있으므로, 유의 안의 편집은 유의 자신의 행·칸과 각 칸의 문단으로만 한정한다 —
     # 문단 하나가 누름틀도 품고 있어 컨트롤 유무로는 못 거르므로, 머리말·꼬리말이 있는 문단만 건드리지 않는다.
     for w in a["remove_text"]:  # 관리박스 문단 자신에 붙은 안내 글(학교 B: 빨강 "한칸 띄기")
-        _replace_in_runs(p0.element, w, "")
+        _replace_text(p0, w, "")
     지울 = tuple(a["notice_delete_paras_with"])
     for row in 유의.rows:
         for cell in row.cells:
@@ -179,7 +187,7 @@ def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
                     p.remove()
                 else:
                     for old, new in a["notice_replace"]:
-                        _replace_in_runs(p.element, old, new)
+                        _replace_text(p, old, new)
     if kit.notice_box_height is not None:  # 유의는 한 줄 표 — 칸 높이와 표 높이를 함께
         if 유의.row_count != 1:
             raise ValueError(f"양식이 바뀌었다: 유의 표가 {유의.row_count}줄이다 — notice_box_height는 한 줄 표에만 준다")
