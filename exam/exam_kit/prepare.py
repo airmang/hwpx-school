@@ -94,18 +94,6 @@ def _set_para_text(p_el, text: str) -> None:
     t.text = text
 
 
-def _replace_in_runs(p_el, old: str, new: str) -> int:
-    n = 0
-    for t in p_el.iter(q("hp", "t")):
-        if t.text and old in t.text:
-            t.text = t.text.replace(old, new)
-            n += 1
-        if t.tail and old in t.tail:
-            t.tail = t.tail.replace(old, new)
-            n += 1
-    return n
-
-
 def _remove_paragraphs(sec, paragraphs) -> None:
     for p in reversed(list(paragraphs)):
         p.remove()
