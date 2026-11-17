@@ -8,17 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hwpx.document import HwpxDocument
-from lxml import etree
 
 from assessment.blocks import InputError
 from assessment.kit import Kit
 from assessment.memo import add_answer_memo
-from assessment.ns import HP
 from assessment.plan import CELL_ROLES, CellPlan, ColumnBreakPlan, ParaPlan, Plan, TablePlan, TitlePlan
-
-
-def _q(tag: str) -> str:
-    return f"{{{HP}}}{tag}"
 
 
 #: 새로 생기는 문단·개체·메모 id 의 씨앗 — 같은 원고는 같은 id 로 만든다(python-hwpx `open(seed=)`).
@@ -40,31 +34,26 @@ class HwpxWriter:
         assert len(문단) == 2, "스켈레톤은 문단 2개(1단 머리 + 2단 전환)여야 한다"
         # 제목·학번 줄은 1단 머리 문단과 2단 전환 문단 사이에 들어간다(_title).
         self._머리_문단, self._2단 = 문단
-        self._머리 = self._머리_문단.element
         self._단나눔_대기 = False
         self._메모_번호 = 0
         self._그림_캐시: dict[Path, str] = {}
 
     # --- 머리 ---------------------------------------------------------------
     def _title(self, plan: TitlePlan) -> None:
-        k, 머리 = self.kit, self._머리
-        머리.set("paraPrIDRef", str(k.para_pr["title"]))
-
-        def run(char: str) -> etree._Element:
-            return etree.SubElement(머리, _q("run"), {"charPrIDRef": str(k.char_pr[char])})
-
-        t = etree.SubElement(run("title"), _q("t"))
-        etree.SubElement(t, _q("markpenBegin"), {"color": k.furniture["titleMarkpen"]})
-        # ElementTree 에서 markpenBegin 뒤 글은 tail 이다.
-        t[-1].tail = plan.main
-        끝_t = t
+        k, 머리 = self.kit, self._머리_문단
+        머리.para_pr_id_ref = k.para_pr["title"]
+        # 제목(+부제)에 형광펜 하나 — 런을 넘으면 시작은 제목 런, 끝은 부제 런에 둔다(본체 #782 add_highlight start=·end=).
+        # 형광펜 끝 뒤의 빈칸 하나는 마지막 런 글 끝에 붙는다(옛 꼴: markpenEnd 뒤 " ").
+        시작 = len(머리.text)
         if plan.suffix:
-            끝_t = etree.SubElement(run("title_suffix"), _q("t"))
-            끝_t.text = plan.suffix
-        etree.SubElement(끝_t, _q("markpenEnd")).tail = " "
+            머리.add_run(plan.main, char_pr_id_ref=k.char_pr["title"])
+            머리.add_run(plan.suffix + " ", char_pr_id_ref=k.char_pr["title_suffix"])
+        else:
+            머리.add_run(plan.main + " ", char_pr_id_ref=k.char_pr["title"])
+        끝 = 시작 + len(plan.main) + len(plan.suffix or "")
+        머리.add_highlight(color=k.furniture["titleMarkpen"], start=시작, end=끝)
         if plan.score:
-            etree.SubElement(run("score"), _q("t")).text = plan.score
-        self.section.mark_dirty()
+            머리.add_run(plan.score, char_pr_id_ref=k.char_pr["score"])
         학번_줄 = self.doc.add_paragraph(k.furniture["idLine"], para_pr_id_ref=k.para_pr["id_line"], char_pr_id_ref=k.char_pr["note"])
         학번_줄.move_before(self._2단)
 
