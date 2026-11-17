@@ -58,24 +58,25 @@ def _박스(kit: Kit, kind: str) -> tuple[str, tuple[int, int], tuple[int, ...],
     return kind, tuple(b["content_cell"]), tuple(b["rails"]), b["style"]
 
 
-def _박스_넓히기(tbl: ET._Element, rails: tuple[int, ...], d: int) -> None:
-    """견본 박스 표를 d만큼 넓힌다(kit.box_fit = column, G5-1) — 레일(양 끝 세로 칸)은 그대로, 내용 칸 +d. 내용 칸이 셋으로
-    나뉜 줄(〈보기〉 제목 줄: 옆 칸·제목·옆 칸)은 제목을 가운데에 두고 양옆 칸이 d/2씩."""
-    ncols = int(tbl.get("colCnt"))
+def _박스_넓힌_폭(tbl, rails: tuple[int, ...], d: int) -> dict:
+    """견본 박스 표를 d만큼 넓힐 때 앵커 칸마다의 새 폭((행, 열) → 폭, kit.box_fit = column, G5-1) — 레일(양 끝 세로 칸)은
+    그대로, 내용 칸 +d. 내용 칸이 셋으로 나뉜 줄(〈보기〉 제목 줄: 옆 칸·제목·옆 칸)은 제목을 가운데에 두고 양옆 칸이 d/2씩."""
+    ncols = tbl.column_count
     content = set(range(ncols)) - set(rails)
     middle = sorted(content)[len(content) // 2] if len(content) == 3 else None
-    for tc in tbl.iter(q("hp", "tc")):
-        a, sp, sz = tc.find(q("hp", "cellAddr")), tc.find(q("hp", "cellSpan")), tc.find(q("hp", "cellSz"))
-        cols = set(range(int(a.get("colAddr")), int(a.get("colAddr")) + int(sp.get("colSpan"))))
+    out = {}
+    for x in tbl.iter_grid():
+        if not x.is_anchor:
+            continue
+        cols = set(range(x.column, x.column + x.cell.span[1]))
         if content <= cols:
             add = d
         elif middle is not None and cols & content and middle not in cols:
             add = d // 2
         else:
             add = 0
-        sz.set("width", str(int(sz.get("width")) + add))
-    s = tbl.find(q("hp", "sz"))
-    s.set("width", str(int(s.get("width")) + d))
+        out[(x.row, x.column)] = x.cell.width + add
+    return out
 
 
 _항목_박스 = ("보기", "조건")  # 항목(ㄱ.·∙) 박스 — 글만 받고, 항목 문단 모양(item_pr)을 쓴다
@@ -343,16 +344,19 @@ def case_prev(header, pid: str) -> int:
 
 @dataclass(frozen=True)
 class Samples:
-    """샘플 구역을 지우기 전에 떠 둔 양식 견본(문서와 분리된 사본). Task 23이 복제해 쓴다."""
+    """샘플 구역의 양식 견본 — 문서 안 공개 객체(조판이 샘플 구역을 지우기 전에 박스가 copy_to로 복사한다, Task 23)."""
 
-    보기_tbl: ET._Element
-    자료_tbl: ET._Element
+    보기_tbl: object  # 문서 안 견본 표(공개 객체) — 박스는 이것을 copy_to로 복사한다
+    자료_tbl: object
     세트_charpr: str  # `[a∼b]` 표지의 글자 모양(13pt 굵게) — 양식 견본 run에서 읽는다
     번호_charpr: str | None = None  # 글자 번호(킷 number literal)의 글자 모양 — 견본 번호 run에서 읽는다
     extra: dict = field(default_factory=dict)  # 보기·자료 밖의 견본(〈조건〉·◦ 자료 등) — 킷 boxes 종류 → 표
 
-    def table(self, kind: str) -> ET._Element:
-        return {"보기": self.보기_tbl, "자료": self.자료_tbl}.get(kind) if kind in ("보기", "자료") else self.extra[kind]
+    def source(self, kind: str):
+        t = {"보기": self.보기_tbl, "자료": self.자료_tbl}.get(kind) if kind in ("보기", "자료") else self.extra.get(kind)
+        if t is None:
+            raise ValueError(f"견본 {kind} 표가 없다(harvest_samples로 뜬 견본만 박스로 복사한다)")
+        return t
 
 
 @dataclass
@@ -402,6 +406,25 @@ class _표:
 
 
 @dataclass
+class _박스계획:
+    """박스의 계획 — 견본 표(문서 안 공개 객체)를 materialize가 copy_to로 복사해 내용 칸을 채운다.
+
+    items: ("글", 칸 문단 계획) 또는 ("개체", 칸 문단 계획, _표|_그림). h: 글 줄 높이 합(개체 줄은 짓고 나서 더한다).
+    widen: 단 폭 박스로 넓힐 HWPUNIT(없으면 None). widths: 넓힌 뒤의 앵커 칸 폭((행, 열) → 폭)."""
+
+    src: object
+    content: tuple
+    rails: tuple
+    role: str
+    items: list
+    h: int
+    pitch: int
+    widen: int | None
+    widths: dict
+    inline: bool
+
+
+@dataclass
 class _Para:
     """삽입 전 문단 계획. segs의 charPr가 None이면 그 역할 스타일의 charPr."""
 
@@ -435,7 +458,7 @@ def harvest_samples(doc: HwpxDocument, kit: Kit) -> Samples:
     ids = style_ids(doc)
     paras = list(doc.sections[0].paragraphs)[start:end + 1]
     tables = [t for p in paras for t in p.tables]
-    보기, 자료 = (next((t.element for t in tables if is_sample_table(t, kit.boxes[k], ids[kit.styles[kit.boxes[k]["style"]]][0])), None)
+    보기, 자료 = (next((t for t in tables if is_sample_table(t, kit.boxes[k], ids[kit.styles[kit.boxes[k]["style"]]][0])), None)
                 for k in ("보기", "자료"))
     sm = kit.set_marker
     표지_re = re.compile(sm["pattern"])
@@ -458,11 +481,11 @@ def harvest_samples(doc: HwpxDocument, kit: Kit) -> Samples:
     for kind, spec in kit.boxes.items():
         if kind in ("보기", "자료") or not isinstance(spec, dict):
             continue
-        t = next((t.element for t in tables if is_sample_table(t, spec, ids[kit.styles[spec["style"]]][0])), None)
+        t = next((t for t in tables if is_sample_table(t, spec, ids[kit.styles[spec["style"]]][0])), None)
         if t is None:
             raise ValueError(f"양식이 바뀌었다: 샘플 구역에 {kind} 견본 없음")
-        extra[kind] = deepcopy(t)
-    return Samples(deepcopy(보기), deepcopy(자료), 표지, 번호, extra)
+        extra[kind] = t
+    return Samples(보기, 자료, 표지, 번호, extra)
 
 
 class _Composer:
@@ -652,22 +675,6 @@ class _Composer:
                        for side, (typ, width) in sides.items()})
         return self._bf[key]
 
-    def _cell_p(self, segs: list[tuple[str | equation.Math, str | None]], role: str, *, pid: str | None = None,
-                mark: str | None = None) -> ET._Element:
-        """칸 안 문단(줄 캐시 없이) — segs의 charPr가 None이면 역할 스타일 charPr. mark는 그 글자에 형광펜."""
-        sid, _, cp = self.style[role]
-        p = ET.Element(q("hp", "p"), {"id": "2147483648", "paraPrIDRef": pid or self.cell_pr(role), "styleIDRef": sid,
-                                      "pageBreak": "0", "columnBreak": "0", "merged": "0"}, nsmap={"hp": HP})
-        for text, c in segs:
-            if isinstance(text, equation.Math):
-                p.append(self._수식_run(text, c or cp))
-                continue
-            mark = _fill_t(ET.SubElement(ET.SubElement(p, q("hp", "run"), {"charPrIDRef": c or cp}), q("hp", "t")),
-                           text, mark)
-        if mark:
-            raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
-        return p
-
     def _수식(self, p, script: str, cp: str):
         """문단 끝에 한/글 수식 run을 붙인다(공개 API add_equation) — 그 자리 글자 크기, 글꼴은 킷 typeset.equation_font
         (없으면 수식_글꼴). 수식 개체를 돌려준다."""
@@ -681,48 +688,6 @@ class _Composer:
         if not height.isdigit():
             raise ValueError(f"양식이 바뀌었다: charPr {cp}의 글자 크기(height)가 없다")
         return int(height)
-
-    def _수식_run(self, m: equation.Math, cp: str) -> ET._Element:
-        """칸 안 문단에 넣을 수식 run — 임시 문단에 공개 API(add_equation)로 만들고 떼어 낸다(그림 _pic_element와 같은 방식)."""
-        sec = self.doc.sections[0]
-        tmp = sec.add_paragraph("")
-        self._수식(tmp, m.script, cp)
-        run = tmp.element.findall(q("hp", "run"))[-1]
-        tmp.element.remove(run)
-        sec.remove_paragraph(tmp)
-        return run
-
-    def _table(self, cells: list[list[tuple[ET._Element, str]]], widths: list[int], heights: list[int], *,
-               bf: str, in_margin: dict, out_margin: dict) -> ET._Element:
-        """글자처럼 취급하는 표 — cells[행][열] = (칸 문단, borderFill). 칸은 표 안여백을 쓴다(hasMargin=0)."""
-        m = {k: str(v) for k, v in in_margin.items()}
-        tbl = ET.Element(q("hp", "tbl"), {
-            "id": "0", "zOrder": "0", "numberingType": "TABLE", "textWrap": "TOP_AND_BOTTOM", "textFlow": "BOTH_SIDES",
-            "lock": "0", "dropcapstyle": "None", "pageBreak": "CELL", "repeatHeader": "1", "rowCnt": str(len(cells)),
-            "colCnt": str(len(widths)), "cellSpacing": "0", "borderFillIDRef": bf, "noAdjust": "0"}, nsmap={"hp": HP})
-        ET.SubElement(tbl, q("hp", "sz"), {"width": str(sum(widths)), "widthRelTo": "ABSOLUTE",
-                                           "height": str(sum(heights)), "heightRelTo": "ABSOLUTE", "protect": "0"})
-        ET.SubElement(tbl, q("hp", "pos"), {
-            "treatAsChar": "1", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "0", "holdAnchorAndSO": "0",
-            "vertRelTo": "PARA", "horzRelTo": "PARA", "vertAlign": "TOP", "horzAlign": "LEFT",
-            "vertOffset": "0", "horzOffset": "0"})
-        ET.SubElement(tbl, q("hp", "outMargin"), {k: str(v) for k, v in out_margin.items()})
-        ET.SubElement(tbl, q("hp", "inMargin"), m)
-        for r, row in enumerate(cells):
-            tr = ET.SubElement(tbl, q("hp", "tr"))
-            for c, (p, cell_bf) in enumerate(row):
-                tc = ET.SubElement(tr, q("hp", "tc"), {"name": "", "header": "0", "hasMargin": "0", "protect": "0",
-                                                       "editable": "0", "dirty": "0", "borderFillIDRef": cell_bf})
-                sub = ET.SubElement(tc, q("hp", "subList"), {
-                    "id": "", "textDirection": "HORIZONTAL", "lineWrap": "BREAK", "vertAlign": "CENTER",
-                    "linkListIDRef": "0", "linkListNextIDRef": "0", "textWidth": "0", "textHeight": "0",
-                    "hasTextRef": "0", "hasNumRef": "0"})
-                sub.append(p)
-                ET.SubElement(tc, q("hp", "cellAddr"), {"colAddr": str(c), "rowAddr": str(r)})
-                ET.SubElement(tc, q("hp", "cellSpan"), {"colSpan": "1", "rowSpan": "1"})
-                ET.SubElement(tc, q("hp", "cellSz"), {"width": str(widths[c]), "height": str(heights[r])})
-                ET.SubElement(tc, q("hp", "cellMargin"), m)
-        return tbl
 
     def grid(self, lines, width: int, where: str) -> ET._Element:
         """md 표 → 격자표(제출본 8번): 사방 0.12 mm, 머리행 아래·첫 본문행 위 겹선 0.4 mm, 칸은 가운데·바탕글."""
@@ -865,15 +830,6 @@ class _Composer:
         sec.remove_paragraph(tmp)
         return obj
 
-    def _pic_element(self, bid: str, w: int, h: int) -> ET._Element:
-        """글자처럼 취급하는 hp:pic — 임시 문단에 공개 API(add_picture)로 그리고 떼어 낸다(_수식_run과 같은 방식)."""
-        sec = self.doc.sections[0]
-        tmp = sec.add_paragraph("")
-        pic = tmp.add_picture(bid, width=w, height=h, treat_as_char=True).element
-        pic.getparent().remove(pic)
-        sec.remove_paragraph(tmp)
-        return pic
-
     # ---- 문단 계획 -----------------------------------------------------------
 
     def _segs(self, text: str, role: str) -> list[tuple[str | equation.Math, str | None]]:
@@ -948,31 +904,22 @@ class _Composer:
         return self.kit.metrics.line_pitch[pct]
 
     def _box(self, block: Block) -> _Para:
-        """`:::보기`/`:::자료` → 견본 표 사본. 내용 셀을 비우고 줄마다 한 문단, 내용 행 높이를 줄 수에 맞춘다.
-
-        자료 안의 md 표·그림 줄은 가운데 정렬 문단 하나에 글자처럼 앉는다(표 폭 = 내용 셀 가용 폭).
-        """
+        """`:::보기`/`:::자료` → 견본 표 사본의 계획(_박스계획). 내용 셀을 비우고 줄마다 한 문단, 내용 행 높이를 줄 수에 맞춘다
+        (짓기는 materialize — _put_box). 자료 안의 md 표·그림 줄은 가운데 정렬 문단 하나에 글자처럼 앉는다(표 폭 = 내용 셀
+        가용 폭)."""
         kind_ = box_kind(self.kit, block)
         attr, (cc, cr), rails, role = _박스(self.kit, kind_)
-        tbl = deepcopy(self.samples.table(attr))
-        if self.kit.box_fit == "column":  # 단 폭 박스(G5-1) — 오른끝이 발문 오른끝과 맞는다
-            _박스_넓히기(tbl, rails, self.kit.columns["width"] - int(tbl.find(q("hp", "sz")).get("width")))
-        if self.kit.boxes[kind_].get("inline"):  # 떠 있는 견본(학교 B 자료 상자) → 글자처럼 취급(다른 박스와 같게)
-            pos = tbl.find(q("hp", "pos"))
-            pos.attrib.update({"treatAsChar": "1", "vertRelTo": "PARA", "horzRelTo": "PARA", "vertOffset": "0",
-                               "horzOffset": "0", "flowWithText": "1"})
-        cells = {(int(a.get("colAddr")), int(a.get("rowAddr"))): tc
-                 for tc in tbl.iter(q("hp", "tc")) for a in [tc.find(q("hp", "cellAddr"))]}
-        content = cells[(cc, cr)]
-        sub = content.find(q("hp", "subList"))
-        for p in sub.findall(q("hp", "p")):
-            sub.remove(p)
-        in_m = tbl.find(q("hp", "inMargin"))
-        first, rest = self._widths(role, int(content.find(q("hp", "cellSz")).get("width"))
-                                   - int(in_m.get("left")) - int(in_m.get("right")))
+        src = self.samples.source(attr)
+        widen = self.kit.columns["width"] - src.width if self.kit.box_fit == "column" else None  # 단 폭 박스(G5-1)
+        widths = _박스_넓힌_폭(src, rails, widen) if widen is not None else {}
+        content = next(x.cell for x in src.iter_grid() if x.is_anchor and (x.column, x.row) == (cc, cr))
+        in_m = src.in_margins
+        content_w = widths.get((cr, cc), content.width)
+        first, rest = self._widths(role, content_w - int(in_m.left or 0) - int(in_m.right or 0))
         pitch = self._line_pitch(role)
         _, pid, _ = self.style[role]
-        h = 0  # 줄 높이 합 — 글 줄은 피치, 개체 줄은 개체 높이 + 바깥 여백 + (피치 − 글자 높이)
+        h = 0  # 글 줄 높이 합 — 개체 줄(개체 높이 + 바깥 여백 + (피치 − 글자 높이))은 짓고 나서 더한다
+        items = []
         for kind, part in _box_parts(block):
             if kind != "글" and block.kind in _항목_박스:
                 raise ValueError(f"L{block.line_no} 〈{block.kind}〉 안의 {kind}는 조판하지 않는다 — 자료 박스로 옮긴다")
@@ -981,7 +928,8 @@ class _Composer:
                 self.code_overflow(part, first, role, f"L{block.line_no} :::{block.kind} 안")
                 for code_line in part:
                     h += pitch
-                    sub.append(self._cell_p(self.code_segs(code_line, role, numbered), role, pid=self.code_para_pr(role)))
+                    items.append(("글", self._plan_cell(self.code_segs(code_line, role, numbered), role,
+                                                        pid=self.code_para_pr(role))))
                 continue
             if kind == "글":
                 # 〈보기〉 항목은 앞 공백 없이 ㄱ을 x = 0에, 내어쓰기는 self.kit.bogi_hanging_indent(제출본 교사 다수 기하, Task 29)
@@ -989,34 +937,53 @@ class _Composer:
                 plain = part.replace("__", "")
                 h += (estimate_lines(plain, first, more, self.kit.metrics) * pitch
                       + estimate_extra(plain, first, more, self.kit.metrics))
-                sub.append(self._cell_p(self._segs(part, role), role, pid=self.item_pr() if block.kind in _항목_박스 else pid))
+                items.append(("글", self._plan_cell(self._segs(part, role), role,
+                                                    pid=self.item_pr() if block.kind in _항목_박스 else pid)))
                 continue
-            if kind == "표":
-                g = self.grid(part, first, f"L{block.line_no} :::자료 안의")
-                obj = self._table([[(self._cell_p(list(k.segs), k.role, pid=k.pid, mark=k.mark), bf) for k, bf in row]
-                                   for row in g.cells], g.widths, g.heights, bf=g.bf, in_margin=g.in_margin,
-                                  out_margin=g.out_margin)
-            else:
-                g = self.picture(part, first)
-                obj = self._pic_element(g.bid, g.width, g.height)
-            osz, om = obj.find(q("hp", "sz")), obj.find(q("hp", "outMargin"))
-            h += int(osz.get("height")) + int(om.get("top")) + int(om.get("bottom")) + pitch - self.kit.metrics.char_height
-            p = self._cell_p([("", None)], role, pid=self.cell_pr(role))
-            p.find(q("hp", "run")).insert(0, obj)
-            sub.append(p)
-        if h == 0:
+            obj = self.grid(part, first, f"L{block.line_no} :::자료 안의") if kind == "표" else self.picture(part, first)
+            items.append(("개체", self._plan_cell([("", None)], role, pid=self.cell_pr(role)), obj))
+        if not items:
             raise ValueError(f"L{block.line_no} :::{block.kind} 내용이 비었다")
-        if kind in ("표", "그림"):  # 박스 끝의 표·그림은 아래 바깥 여백을 없앤다 — 있으면 아래 여백이 위보다 그만큼(2.8pt) 크다
-            h -= int(om.get("bottom"))
-            om.set("bottom", "0")
-        h += self.kit.metrics.box_extra - pitch  # 마지막 줄은 줄간격을 뺀 자리 + 셀 여백(실측 (n − 1) × 피치 + self.kit.metrics.box_extra)
-        row_old = int(content.find(q("hp", "cellSz")).get("height"))  # 견본에서 내용 행 높이 = 내용 셀(레일보다 크다)
-        h = max(h, row_old)  # 견본 높이 밑으로 내리지 않는다 — 제출본 세 줄 박스도 견본 높이(한글은 늘리기만 한다, Task 29)
-        for col in (cc, *rails):
-            cells[(col, cr)].find(q("hp", "cellSz")).set("height", str(h))
-        sz = tbl.find(q("hp", "sz"))
-        sz.set("height", str(int(sz.get("height")) - row_old + h))
-        return _Para("normal", [("", None)], obj=tbl)
+        return _Para("normal", [("", None)], obj=_박스계획(src, (cc, cr), tuple(rails), role, items, h, pitch, widen, widths,
+                                                      bool(self.kit.boxes[kind_].get("inline"))))
+
+    def _put_box(self, host, plan: "_박스계획"):
+        """박스를 host 문단의 첫 자리에 — 견본 표를 copy_to(offset=0)로 복사(새 id, 줄 캐시 없음 — B14)하고, 넓히기·글자처럼
+        취급을 맞춘 뒤 내용 칸의 문단을 계획대로 새로 짓고 옛 문단을 지운다. 내용 행 높이는 줄 높이 합(_set_box_row)."""
+        t = plan.src.copy_to(host, offset=0)
+        cc, cr = plan.content
+        if plan.widen is not None:  # 단 폭 박스 — 표 폭 +widen, 칸 폭은 _박스_넓힌_폭대로
+            cols = t.column_widths
+            t.set_column_width(0, cols[0] + plan.widen)  # 표 폭을 넓히고(그 열을 지나는 칸도 함께 바뀐다) 칸 폭을 칸마다 맞춘다
+            for x in t.iter_grid():
+                if x.is_anchor and (x.row, x.column) in plan.widths:
+                    x.cell.set_size(width=plan.widths[(x.row, x.column)])
+        if plan.inline:  # 떠 있는 견본(학교 B 자료 상자) → 글자처럼 취급(다른 박스와 같게)
+            t.set_position(treat_as_char=True, vertical_relative_to="PARA", horizontal_relative_to="PARA",
+                           vertical_offset=0, horizontal_offset=0, flow_with_text=True)
+        content = next(x.cell for x in t.iter_grid() if x.is_anchor and (x.column, x.row) == (cc, cr))
+        old = list(content.paragraphs)
+        h = plan.h
+        last = None
+        for item in plan.items:
+            cp = content.add_paragraph("")
+            self._fill_cell(cp, item[1])
+            if item[0] == "개체":
+                obj = self._put_table(cp, item[2]) if isinstance(item[2], _표) else self._put_picture(cp, item[2])
+                om = obj.out_margins
+                h += obj.height + int(om.top or 0) + int(om.bottom or 0) + plan.pitch - self.kit.metrics.char_height
+                last = obj
+            else:
+                last = None
+        for p in old:
+            p.remove()
+        if last is not None:  # 박스 끝의 표·그림은 아래 바깥 여백을 없앤다 — 있으면 아래 여백이 위보다 그만큼(2.8pt) 크다
+            h -= int(last.out_margins.bottom or 0)
+            last.set_out_margins(bottom=0)
+        h += self.kit.metrics.box_extra - plan.pitch  # 마지막 줄은 줄간격을 뺀 자리 + 셀 여백(실측 (n − 1) × 피치 + box_extra)
+        h = max(h, content.height)  # 견본 높이 밑으로 내리지 않는다 — 제출본 세 줄 박스도 견본 높이(한글은 늘리기만 한다, Task 29)
+        _set_box_row(t, content, cc, cr, plan.rails, h)
+        return t
 
     def _blocks(self, blocks, where: str) -> list[_Para]:
         """답지 앞 블록들 → 문단. 답항표는 답지 자리라 plan이 따로 다룬다."""
@@ -1221,6 +1188,8 @@ class _Composer:
             obj = self._put_picture(p, obj)
         elif isinstance(obj, _표):
             obj = self._put_table(p, obj)
+        elif isinstance(obj, _박스계획):
+            obj = self._put_box(p, obj)
         elif obj is not None:
             p.element.find(q("hp", "run")).insert(0, obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
         if spec.drawing is not None:

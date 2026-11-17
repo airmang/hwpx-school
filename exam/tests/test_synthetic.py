@@ -57,7 +57,7 @@ def test_합성_서식_준비():
     assert "논술형 :" not in _text(notice)
     assert _body_region(doc, kit) == (1, len(ps) - 2)
     s = harvest_samples(doc, kit)
-    assert s.번호_charpr is not None and "보 기" in _text(s.보기_tbl)
+    assert s.번호_charpr is not None and "보 기" in _text(s.보기_tbl.element)
 
 
 def _조판(answer_key: bool, tmp_path: Path) -> HwpxDocument:

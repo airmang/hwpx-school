@@ -165,9 +165,9 @@ def test_견본_채집(양식_hwpx):
     doc, _ = prepare_document(양식_hwpx, kit)
     s = harvest_samples(doc, kit)
     assert isinstance(s, Samples)
-    assert (s.보기_tbl.get("rowCnt"), s.보기_tbl.get("colCnt")) == ("4", "5") and kit.boxes["보기"]["title"] in 텍스트(s.보기_tbl)
-    assert (s.자료_tbl.get("rowCnt"), s.자료_tbl.get("colCnt")) == ("3", "3")
-    assert s.보기_tbl.getparent() is None and s.자료_tbl.getparent() is None  # 사본(문서와 분리)
+    assert (s.보기_tbl.row_count, s.보기_tbl.column_count) == (4, 5) and kit.boxes["보기"]["title"] in 텍스트(s.보기_tbl.element)
+    assert (s.자료_tbl.row_count, s.자료_tbl.column_count) == (3, 3)
+    assert s.보기_tbl.element.getparent() is not None and s.자료_tbl.element.getparent() is not None  # 문서 안 견본(박스가 copy_to로 복사)
     cp = _char_pr(doc, s.세트_charpr)
     assert cp.get("height") == "1300" and cp.find(q("hh", "bold")) is not None
     assert s.세트_charpr == "12"
@@ -326,13 +326,13 @@ def test_박스는_견본과_같은_셀_구조로_발문_다음_문단에_앉는
     ids = style_ids(doc)
     tbl_ids = [t.get("id") for t in doc.sections[0].element.iter(q("hp", "tbl"))]
     assert len(tbl_ids) == len(set(tbl_ids))  # 복제한 표도 id가 겹치지 않는다
-    assert not {견본.보기_tbl.get("id"), 견본.자료_tbl.get("id")} & set(tbl_ids)  # 견본 id를 그대로 쓰지 않는다
+    assert not {견본.보기_tbl.element.get("id"), 견본.자료_tbl.element.get("id")} & set(tbl_ids)  # 견본 id를 그대로 쓰지 않는다
     for k, h in enumerate(heads, 1):
         host = ps[h + 1].element
         assert host.get("styleIDRef") == ids["바탕글"][0]
         assert "".join(x.text or "" for x in host.iterfind(f"{q('hp', 'run')}/{q('hp', 't')}")) == ""  # 표 말고 글자 없음
         [tbl] = _표(host)
-        src = 견본.보기_tbl if 박스_종류[str(k)] == "보기" else 견본.자료_tbl
+        src = (견본.보기_tbl if 박스_종류[str(k)] == "보기" else 견본.자료_tbl).element
         assert _구조(tbl) == _구조(src)
         pos = tbl.find(q("hp", "pos"))
         assert pos.get("treatAsChar") == "1"
@@ -698,9 +698,12 @@ def test_칸_문단에_칠할_원문자가_없으면_거부(양식_hwpx):
     kit = load_kit(킷_디렉터리)
     doc, _ = prepare_document(양식_hwpx, kit)
     c = _Composer(doc, kit, harvest_samples(doc, kit), answer_key=True)
-    assert 텍스트(c._cell_p([("③", None)], "choice5", mark="③")) == "③"
+    t = doc.sections[0].add_paragraph("").add_table(1, 2)
+    ok, bad = (t.cell(0, k).paragraphs[0] for k in (0, 1))
+    c._fill_cell(ok, c._plan_cell([("③", None)], "choice5", mark="③"))
+    assert 텍스트(ok.element) == "③" and ok.element.find(f".//{q('hp', 'markpenBegin')}") is not None
     with pytest.raises(ValueError, match="형광펜"):
-        c._cell_p([("정밀도", None)], "choice5", mark="③")
+        c._fill_cell(bad, c._plan_cell([("정밀도", None)], "choice5", mark="③"))
 
 
 _객체 = ("tbl", "pic", "rect", "ellipse", "line", "container", "equation")

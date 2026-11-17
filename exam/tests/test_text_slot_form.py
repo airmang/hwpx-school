@@ -47,8 +47,8 @@ def test_학교B_견본_채집(학교B_양식):
     kit = load_kit(킷_B)
     doc, _ = prepare_document(학교B_양식, kit)
     s = harvest_samples(doc, kit)
-    assert (s.보기_tbl.get("rowCnt"), s.보기_tbl.get("colCnt")) == ("5", "5") and "보 기" in _text(s.보기_tbl)
-    assert (s.자료_tbl.get("rowCnt"), s.자료_tbl.get("colCnt")) == ("1", "1")
+    assert (s.보기_tbl.row_count, s.보기_tbl.column_count) == (5, 5) and "보 기" in _text(s.보기_tbl.element)
+    assert (s.자료_tbl.row_count, s.자료_tbl.column_count) == (1, 1)
 
 
 _머리 = ("---\n양식: 글자자리-예시\n학년도: 2026\n학년: 2\n학기: 2\n차: 2\n과목: 인공지능 기초\n"
