@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from hwpx import HwpxDocument
@@ -332,7 +333,8 @@ class HwpxWriter:
 
     def __init__(self, kit: Kit) -> None:
         self.kit = kit
-        self.doc = HwpxDocument.open(kit.skeleton_path)
+        # 새로 뽑는 문단·개체 id만 스켈레톤 지문 씨앗에서 — 같은 원고면 같은 바이트(읽어 온 id·날짜는 그대로)
+        self.doc = HwpxDocument.open(kit.skeleton_path, seed=int(hashlib.sha256(Path(kit.skeleton_path).read_bytes()).hexdigest()[:8], 16))
         # 칸 안 그림 등록 결과(절대경로 → 이진 항목 id) — 이 문서 전체가 공유한다. 같은 그림
         # 파일이 여러 칸·여러 블록에 나와도 BinData에 한 번만 들어간다.
         self._그림_캐시: dict[Path, str] = {}
