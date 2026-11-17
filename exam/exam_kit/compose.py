@@ -495,7 +495,23 @@ class _Composer:
         """base charPr와 밑줄(BOTTOM)만 다른 charPr — 있으면 재사용, 없으면 복제."""
         if base in self._ul:
             return self._ul[base]
-        cid = self.doc.styles.ensure_run(base_char_pr_id_ref=base, underline=True, underline_shape="SOLID")
+        styles = self.doc.styles
+        src = styles.char_property(base)
+        if src is not None and "underline" not in src.child_attributes:
+            # 옛 판처럼 밑줄 자식이 없으면 이미 있는 쌍둥이(밑줄만 BOTTOM·SOLID)만 다시 쓰고, 없으면 거부한다.
+            def 모양(s) -> tuple:
+                return s.attributes, {k: v for k, v in s.child_attributes.items() if k != "underline"}
+
+            def 같다(s) -> bool:
+                u = s.child_attributes.get("underline")
+                return u is not None and u.get("type") == "BOTTOM" and u.get("shape") == "SOLID" and 모양(s) == 모양(src)
+
+            cid = next((k for k, s in styles.char_properties.items() if 같다(s)), None)
+            if cid is None:
+                raise ValueError(f"charPr {base}에 hh:underline 자식이 없다 — 밑줄 모양을 복제할 수 없다")
+            self._ul[base] = cid
+            return cid
+        cid = styles.ensure_run(base_char_pr_id_ref=base, underline=True, underline_shape="SOLID")
         self._ul[base] = cid
         return cid
 
@@ -505,6 +521,8 @@ class _Composer:
         key = ("코드", role, color)
         if key in self._ul:
             return self._ul[key]
+        if not self.doc.styles.fonts("HANGUL"):  # 옛 code_font_ids와 같은 멈춤 — 한글 글꼴 목록이 없는 양식
+            raise ValueError("양식이 바뀌었다: hh:fontface lang=HANGUL 없음")
         cid = self.doc.styles.ensure_run(base_char_pr_id_ref=self.style[role][2], font=self.kit.code_font,
                                          ratio=100, letter_spacing=0, color=color)
         self._ul[key] = cid

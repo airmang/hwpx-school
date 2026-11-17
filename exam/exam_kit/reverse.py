@@ -97,10 +97,13 @@ _펜_답 = re.compile(_펜 + r"\s*(__)?\s*([①②③④⑤])")
 
 def _check_run(run: Run) -> None:
     """run 바로 아래의 것을 본다 — 글을 싣는 컨트롤·그리기 개체·모르는 요소는 조용히 버리지 않고 오류(처음 것)."""
-    for item in run.content:
+    items = run.content
+    for item in items:
         if item.container == "ctrl":
-            if item.name not in _무해_컨트롤:
-                raise ValueError(f"run 안의 컨트롤 hp:{item.name} — 역변환하지 않는다")
+            if item.name not in _무해_컨트롤:  # 옛 판처럼 그 hp:ctrl 하나의 나쁜 자식을 모두 든다
+                bad = [x.name for x in items if x.container == "ctrl" and x.child_index == item.child_index
+                       and x.name not in _무해_컨트롤]
+                raise ValueError(f"run 안의 컨트롤 hp:{', hp:'.join(bad)} — 역변환하지 않는다")
         elif item.container == "run":
             if item.name in _그리기:
                 raise ValueError(f"그리기 개체 hp:{item.name}(선·면·곡선·틀 — 원고 :::도형으로 그린 그림이나 한/글에서 그린 도형)는 "

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from hwpx import HwpxDocument
 from hwpx.errors import HwpxValueError
+from worksheet.ns import HH
 
 
 _CONTENT_HPF = "Contents/content.hpf"
@@ -100,10 +101,13 @@ def _글꼴_사후조건_확인(
     원래_글꼴들 = set(font_map)
     유효_범위: dict[str, int] = {}
 
+    # fontCnt와 '블록은 있는데 글꼴이 0개'는 공개 읽기(styles.fonts)로 보이지 않아 저장한 헤더 파트를 읽는다(옛 판 조건 그대로).
+    헤더 = saved.package.get_xml(saved.package.header_paths()[0])
+    fontcnt_of = {ff.get("lang", ""): ff.get("fontCnt") for ff in 헤더.iter(f"{{{HH}}}fontface")}
     for lang in _LANGS:
-        fonts = saved.styles.fonts(lang)
-        if not fonts:  # 그 언어 목록이 없다
+        if lang not in fontcnt_of:  # 그 언어 목록이 없다
             continue
+        fonts = saved.styles.fonts(lang)
         남은 = 원래_글꼴들 & {f.face for f in fonts.values()}
         if 남은:
             raise ValueError(
@@ -115,9 +119,10 @@ def _글꼴_사후조건_확인(
             id값들 = sorted(int(i) for i in ids)
         except ValueError:
             id값들 = None
-        if id값들 != list(range(len(fonts))):
+        if id값들 != list(range(len(fonts))) or fontcnt_of[lang] != str(len(fonts)):
             raise ValueError(
-                f"{_실패_머리말}: {lang} 글꼴 목록의 id가 0..N-1 연속이 아니다 — id={ids}"
+                f"{_실패_머리말}: {lang} fontface의 id가 0..N-1 연속이 아니거나 fontCnt가 "
+                f"실제 항목 수와 다르다 — id={ids}, fontCnt={fontcnt_of[lang]!r}"
             )
         유효_범위[lang.lower()] = len(fonts)
 

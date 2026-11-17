@@ -435,10 +435,11 @@ def test_밑줄_자식이_없는_charPr는_거부(양식_hwpx):
     kit = load_kit(킷_디렉터리)
     doc, _ = prepare_document(양식_hwpx, kit)
     c = _Composer(doc, kit, harvest_samples(doc, kit), answer_key=False)
-    cp = _char_pr(doc, "25")
+    base = "25" if _char_pr(doc, "25") is not None else c.style["choice5"][2]  # 합성 킷에는 25가 없다
+    cp = _char_pr(doc, base)
     cp.remove(cp.find(q("hh", "underline")))
     with pytest.raises(ValueError, match="underline"):
-        c.underline("25")
+        c.underline(base)
 
 
 def test_렌더_박스_높이와_제목(양식_hwpx, 오라클, tmp_path):
