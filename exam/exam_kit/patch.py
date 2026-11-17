@@ -27,11 +27,12 @@ from pathlib import Path
 
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
+from hwpx.model import Paragraph
 
 from . import q
 from .build import final_layouts, same_layout, same_package
 from .compose import add_answer_marks, compose
-from .fit import Spacer, _spacing, para_text
+from .fit import Spacer, _has_object, inner_paragraphs, para_text
 from .geometry import hancom_windows_pdf, measure
 from .kit import Kit, load_kit
 from .lint import errors as lint_errors
@@ -87,35 +88,38 @@ def check_small(old: Scan, new: Scan, layouts: dict[str, str]) -> list[str]:
 
 # ---- 2·3. 갈아 끼우기 -------------------------------------------------------------------------
 
-def _regions(doc: HwpxDocument, kit: Kit) -> list[list]:
-    """문항마다 최상위 문단들 — 머리부터 다음 머리 앞까지(마지막은 꼬리 박스 앞까지)."""
-    ps = [p.element for p in doc.sections[0].paragraphs]
+def _regions(doc: HwpxDocument, kit: Kit) -> list[list[int]]:
+    """문항마다 최상위 문단 번호들 — 머리부터 다음 머리 앞까지(마지막은 꼬리 박스 앞까지)."""
     heads = question_heads(doc)
     ends = heads[1:] + [_tail_index(doc, kit.tailbox["match_text"])]
-    return [ps[a:b] for a, b in zip(heads, ends)]
+    return [list(range(a, b)) for a, b in zip(heads, ends)]
 
 
-def _units(region: list) -> list:
+def _units(doc: HwpxDocument, region: list[int], inner: list[list[Paragraph]]) -> list[Paragraph]:
     """문항 안의 글 단위 — 최상위 문단과 그 안(박스·표 칸)의 문단, 문서 차례대로."""
-    return [p for top in region for p in top.iter(q("hp", "p"))]
+    ps = doc.sections[0].paragraphs
+    return [p for i in region for p in (ps[i], *inner[i])]
 
 
-def _pictures(region: list) -> list[str]:
-    return [pic.find(f".//{q('hc', 'img')}").get("binaryItemIDRef") for top in region for pic in top.iter(q("hp", "pic"))]
+def _pictures(units: list[Paragraph]) -> list[str | None]:
+    """글 단위 문단마다 바로 든 그림의 이진 항목 id — 그림이 바뀌었는지 견준다."""
+    return [pic.item_id for p in units for pic in p.pictures]
 
 
-_떠_있는_것 = {q("hp", t) for t in ("equation", "ellipse", "line", "polygon", "curve", "rect", "arc")}
+_떠_있는_것 = {"equation", "ellipse", "line", "polygon", "curve", "rect", "arc"}
 
 
-def _overlays(p) -> list[tuple]:
+def _overlays(p: Paragraph) -> list[tuple]:
     """문단의 그림 위 얹기·도형 개체 — (종류, 수식 글, 세로·가로 오프셋, 크기). 도형 틀(글자처럼 취급한 사각형)도 크기로 든다."""
     out = []
-    for run in p.findall(q("hp", "run")):
-        for e in run:
-            pos, sz = e.find(q("hp", "pos")), e.find(q("hp", "sz"))
-            if e.tag in _떠_있는_것 and pos is not None and (pos.get("treatAsChar") == "0" or e.tag == q("hp", "rect")):
-                out.append((e.tag, (e.findtext(q("hp", "script")) or "").strip(), pos.get("vertOffset"), pos.get("horzOffset"),
-                            None if sz is None else (sz.get("width"), sz.get("height"))))
+    for run in p.runs:
+        for it in run.content:
+            if it.container != "run" or it.name not in _떠_있는_것:
+                continue
+            pos = it.object.position
+            if not pos.treat_as_char or it.name == "rect":
+                out.append((it.name, (getattr(it.object, "script", "") or "").strip(), pos.vertical_offset,
+                            pos.horizontal_offset, (it.object.width, it.object.height)))
     return out
 
 
@@ -165,30 +169,30 @@ def apply_patch(old: HwpxDocument, new: HwpxDocument, kit: Kit) -> list[str]:
     ro, rn = _regions(old, kit), _regions(new, kit)
     if len(ro) != len(rn):
         raise NeedsRebuild(f"문항 수 {len(ro)} ≠ {len(rn)}")
+    io, inn = inner_paragraphs(old), inner_paragraphs(new)
     ho, hn = _bin_hashes(old), _bin_hashes(new)
     cmap = _CharMap(old, new)
     spacer = Spacer(old)  # 기존 문단의 자간 맞춤(렌더 루프가 줄을 당긴 값)을 새 글에도 그대로 — 줄 수를 지키려고
-    box = next(old.oxml.headers[0].element.iter(q("hh", "charProperties")))
 
-    def 자간(p) -> int:
-        vals = [_spacing(box.find(f"{q('hh', 'charPr')}[@id='{r.get('charPrIDRef')}']")) for r in p.findall(q("hp", "run"))]
-        return max(vals, key=abs, default=0)
+    def 자간(p: Paragraph) -> int:
+        return max((run.letter_spacing or 0 for run in p.runs), key=abs, default=0)
 
     changed: list[str] = []
-    for k, (a, b) in enumerate(zip(ro, rn), 1):
-        if [ho.get(x) for x in _pictures(a)] != [hn.get(x) for x in _pictures(b)]:
+    for k, (ra, rb) in enumerate(zip(ro, rn), 1):
+        ua, ub = _units(old, ra, io), _units(new, rb, inn)
+        if [ho.get(x) for x in _pictures(ua)] != [hn.get(x) for x in _pictures(ub)]:
             raise NeedsRebuild(f"{k}번 그림이 바뀌었다")
-        ua, ub = _units(a), _units(b)
         if len(ua) != len(ub):
             raise NeedsRebuild(f"{k}번 문단 수 {len(ua)} ≠ {len(ub)}")
-        for j, (x, y) in enumerate(zip(ua, ub)):
-            if _overlays(x) != _overlays(y):
+        for j, (px, py) in enumerate(zip(ua, ub)):
+            if _overlays(px) != _overlays(py):
                 raise NeedsRebuild(f"{k}번 그림 위 얹기(글자·점)·도형이 바뀌었다")
-            if re.sub(r"\s", "", para_text(x)) == re.sub(r"\s", "", para_text(y)):
+            if re.sub(r"\s", "", para_text(px)) == re.sub(r"\s", "", para_text(py)):
                 continue
-            if any(r.find(q("hp", t)) is not None for r in x.findall(q("hp", "run")) for t in ("tbl", "pic")):
+            if _has_object(px):
                 raise NeedsRebuild(f"{k}번 표·그림이 든 문단의 글이 바뀌었다")
-            s = 자간(x)
+            s = 자간(px)
+            x, y = px.element, py.element
             for r in x.findall(q("hp", "run")):
                 x.remove(r)
             for seg in x.findall(q("hp", "linesegarray")):  # 줄 캐시 — 한/글이 다시 잰다

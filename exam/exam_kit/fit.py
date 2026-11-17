@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import zipfile
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,30 +80,27 @@ class FitResult:
 
 # ---- 문단 ---------------------------------------------------------------------
 
-# hp:t 안의 한 글자짜리 요소 — 한컴 줄 캐시(textpos)는 이것들을 한 글자로 센다. 형광펜 표지는 글자가 아니다.
-_글자_요소 = {q("hp", "tab"): "\t", q("hp", "lineBreak"): "\n", q("hp", "nbSpace"): "\u00a0", q("hp", "fwSpace"): "\u3000"}
+# hp:t 안의 한 글자짜리 조각 — 한컴 줄 캐시(textpos)는 이것들을 한 글자로 센다. 형광펜 표지는 글자가 아니다.
+# (run.content의 종류 — hp:t 밖, 런 바로 아래 적힌 탭·줄바꿈은 세지 않는다)
+_글자_조각 = ("text", "tab", "line_break", "nb_space", "fw_space")
 
 
-def _수식_폭(eq: ET._Element) -> int:
-    """hp:equation이 줄에서 차지하는 폭 — 상자 폭(hp:sz) + 좌우 바깥 여백(hp:outMargin)."""
-    sz, om = eq.find(q("hp", "sz")), eq.find(q("hp", "outMargin"))
-    w = int(sz.get("width", "0")) if sz is not None else 0
-    return w + (0 if om is None else int(om.get("left", "0")) + int(om.get("right", "0")))
+def _수식_폭(eq) -> int:
+    """수식(hp:equation 모델)이 줄에서 차지하는 폭 — 상자 폭(hp:sz) + 좌우 바깥 여백(hp:outMargin)."""
+    om = eq.out_margins
+    return int(eq.width or 0) + (0 if om is None else int(om.left or 0) + int(om.right or 0))
 
 
-def para_text(p: ET._Element) -> str:
+def para_text(p: Paragraph) -> str:
     """문단 자신의 글자(run/t — 탭·줄바꿈·묶음 빈칸·고정폭 빈칸은 한 글자) — 안에 든 표·그림의 글자는 넣지 않는다.
     수식은 줄 캐시처럼 8글자 자리다(equation.line_chars — 첫 글자에 폭을 담는다)."""
     out = []
-    for r in p.findall(q("hp", "run")):
-        for x in r:
-            if x.tag == q("hp", "equation"):
-                out.append(equation.line_chars(_수식_폭(x)))
-            elif x.tag == q("hp", "t"):
-                out.append(x.text or "")
-                for ch in x:
-                    out.append(_글자_요소.get(ch.tag, ""))
-                    out.append(ch.tail or "")
+    for r in p.runs:
+        for it in r.content:
+            if it.kind == "equation":
+                out.append(equation.line_chars(_수식_폭(it.object)))
+            elif it.container == "t" and it.kind in _글자_조각:
+                out.append(it.text)
     return "".join(out)
 
 
@@ -113,40 +109,60 @@ def _폭(s: str, m: Metrics) -> int:
     return sum(w if (w := equation.line_char_width(ch)) is not None else m.char(ch) for ch in s)
 
 
-def _has_object(p: ET._Element) -> bool:
-    return any(x.tag in (q("hp", "tbl"), q("hp", "pic")) for r in p.findall(q("hp", "run")) for x in r)
+def _has_object(p: Paragraph) -> bool:
+    """문단 런 바로 아래 표·그림이 있는가(박스·격자표·답항표·그림 문단)."""
+    return any(it.kind in ("table", "picture") for r in p.runs for it in r.content)
 
 
-def _inner(p: ET._Element) -> list[ET._Element]:
-    """최상위 문단 안의 문단들(문서 차례) — 키의 둘째 값이 이 차례다."""
-    return list(p.iter(q("hp", "p")))[1:]
+def inner_paragraphs(doc: HwpxDocument) -> list[list[Paragraph]]:
+    """구역 0 최상위 문단마다 그 안의 문단들(표 칸·글상자·머리말 …, 문서 차례) — 키의 둘째 값이 이 차례다."""
+    sec = doc.sections[0]
+    out: list[list[Paragraph]] = []
+    for place in doc.text.iter_paragraphs():
+        if place.section is not sec:
+            continue
+        if place.where == "body" and place.depth == 0:
+            out.append([])
+        elif out:
+            out[-1].append(place.paragraph)
+    return out
 
 
-def paragraph_at(doc: HwpxDocument, key: Key) -> Paragraph:
-    """키의 문단 객체 — 최상위 문단, 또는 그 안 문단(키의 둘째 값은 _inner 차례)."""
-    top = doc.sections[0].paragraphs[key[0]]
-    return top if key[1] < 0 else Paragraph(_inner(top.element)[key[1]], doc.sections[0])
-
-
-def element_at(doc: HwpxDocument, key: Key) -> ET._Element:
-    top = doc.sections[0].paragraphs[key[0]].element
-    return top if key[1] < 0 else _inner(top)[key[1]]
+def paragraph_at(doc: HwpxDocument, key: Key, inner: list[list[Paragraph]] | None = None) -> Paragraph:
+    """키의 문단 객체 — 최상위 문단, 또는 그 안 문단(키의 둘째 값은 inner_paragraphs 차례)."""
+    if key[1] < 0:
+        return doc.sections[0].paragraphs[key[0]]
+    return (inner_paragraphs(doc) if inner is None else inner)[key[0]][key[1]]
 
 
 def code_char_prs(doc: HwpxDocument, kit: Kit) -> set[str]:
     """코드 블록 글자 모양 id — 한글 글꼴이 kit.code_font인 charPr(자간 맞춤·양쪽 정렬 대상이 아니다, Task 30)."""
-    hdr = doc.parts.headers[0].element
-    ff = next((f for f in hdr.iter(q("hh", "fontface")) if f.get("lang") == "HANGUL"), None)
-    fid = None if ff is None else next((f.get("id") for f in ff.findall(q("hh", "font")) if f.get("face") == kit.code_font), None)
+    fid = next((str(i) for i, f in doc.styles.fonts("HANGUL").items() if f.face == kit.code_font), None)
     if fid is None:
         return set()
-    return {c.get("id") for c in hdr.iter(q("hh", "charPr"))
-            if c.find(q("hh", "fontRef")) is not None and c.find(q("hh", "fontRef")).get("hangul") == fid}
+    return {cid for cid, c in doc.styles.char_properties.items()
+            if "fontRef" in c.child_attributes and c.child_attributes["fontRef"].get("hangul") == fid}
 
 
-def _is_code(p: ET._Element, code: set[str]) -> bool:
-    runs = [r for r in p.findall(q("hp", "run")) if "".join(r.itertext()).strip()]
-    return bool(runs) and all(r.get("charPrIDRef") in code for r in runs)
+def _run_has_text(r) -> bool:
+    """런에 공백 아닌 글이 있는가 — 글, 수식 글, 안에 든 개체(표·글상자)의 글까지."""
+    if r.text.strip():
+        return True
+    for it in r.content:
+        if it.kind == "equation" and (it.object.script or "").strip():
+            return True
+        if it.kind == "table":
+            if any(cp.nested_text().strip() for row in it.object.rows for cell in row.cells for cp in cell.paragraphs):
+                return True
+        elif it.container == "run" and hasattr(it.object, "iter_paragraphs"):
+            if any(pl.paragraph.text.strip() for pl in it.object.iter_paragraphs()):
+                return True
+    return False
+
+
+def _is_code(p: Paragraph, code: set[str]) -> bool:
+    runs = [r for r in p.runs if _run_has_text(r)]
+    return bool(runs) and all(str(r.char_pr_id_ref) in code for r in runs)
 
 
 def targets(doc: HwpxDocument, kit: Kit) -> list[Target]:
@@ -161,21 +177,22 @@ def targets(doc: HwpxDocument, kit: Kit) -> list[Target]:
         return []
     code = code_char_prs(doc, kit)
     ps = list(doc.sections[0].paragraphs)
+    inner = inner_paragraphs(doc)
     starts = group_starts(doc)  # 문항 k의 보호 묶음 = starts[k] ~ 다음 묶음 앞(세트 머리·지문은 그 세트 첫 문항 묶음)
     out: list[Target] = []
     for i in range(starts[0], len(ps) - 1):
-        el = ps[i].element
+        p = ps[i]
         number = bisect_right(starts, i)
-        if _has_object(el):  # 〈보기〉·자료 박스: 내용 셀의 박스 스타일 문단만(격자표·답항표 칸은 스타일이 달라 빠진다)
-            for j, sub in enumerate(_inner(el)):
-                role = box_roles.get(str(sub.get("styleIDRef")))
+        if _has_object(p):  # 〈보기〉·자료 박스: 내용 셀의 박스 스타일 문단만(격자표·답항표 칸은 스타일이 달라 빠진다)
+            for j, sub in enumerate(inner[i]):
+                role = box_roles.get(str(sub.style_id_ref))
                 text = para_text(sub)
                 if role and text.strip() and not _has_object(sub) and not _is_code(sub, code):
                     out.append(Target((i, j), number, role, text))
             continue
-        role = by_style.get(str(el.get("styleIDRef")))
-        text = para_text(el)
-        if role and text.strip() and not _is_code(el, code):
+        role = by_style.get(str(p.style_id_ref))
+        text = para_text(p)
+        if role and text.strip() and not _is_code(p, code):
             out.append(Target((i, -1), number, role, text))
     return out
 
@@ -183,20 +200,19 @@ def targets(doc: HwpxDocument, kit: Kit) -> list[Target]:
 # ---- 한컴 측정(줄 캐시) ------------------------------------------------------
 
 def read_lines(hwpx: Path) -> dict[Key, Lines]:
-    """한컴이 저장한 hwpx의 줄 캐시 — 모든 문단(최상위·안쪽)의 Lines. 줄 캐시가 없는 문단은 뺀다."""
-    with zipfile.ZipFile(hwpx) as z:
-        sec = ET.fromstring(z.read("Contents/section0.xml"))
+    """한컴이 저장한 hwpx의 줄 캐시(paragraph.line_segments) — 모든 문단(최상위·안쪽)의 Lines. 줄 캐시가 없는 문단은 뺀다."""
+    doc = HwpxDocument.open(str(hwpx))
     out: dict[Key, Lines] = {}
-    for i, top in enumerate(sec.findall(q("hp", "p"))):
-        for j, p in enumerate([top] + _inner(top)):
-            segs = p.findall(f"{q('hp', 'linesegarray')}/{q('hp', 'lineseg')}")
+    for i, (top, inner) in enumerate(zip(doc.sections[0].paragraphs, inner_paragraphs(doc))):
+        for j, p in enumerate([top] + inner):
+            segs = p.line_segments
             if not segs:
                 continue
             text = para_text(p)
             last = segs[-1]
-            out[(i, j - 1)] = Lines(len(segs), text[int(last.get("textpos")):], int(last.get("horzsize")), text,
-                                    tuple(int(x.get("textpos")) for x in segs), tuple(int(x.get("horzsize")) for x in segs),
-                                    tuple(int(x.get("vertsize", "0")) for x in segs))
+            out[(i, j - 1)] = Lines(len(segs), text[last.text_position:], last.width, text,
+                                    tuple(x.text_position for x in segs), tuple(x.width for x in segs),
+                                    tuple(x.height for x in segs))
     return out
 
 
@@ -231,8 +247,9 @@ def hancom_lines(hwpx: Path, work: Path, *, oracle=None) -> dict[Key, Lines]:
 
 # ---- 자간 charPr --------------------------------------------------------------
 
-def _spacing(c: ET._Element) -> int:
-    sp = c.find(q("hh", "spacing"))
+def _spacing(c) -> int:
+    """글자 모양(char_property)의 한글 자간 — 자간 정의가 없으면 0."""
+    sp = c.child_attributes.get("spacing")
     return 0 if sp is None else int(sp.get("hangul", "0"))
 
 
@@ -290,17 +307,17 @@ class Spacer:
 
     def set(self, decisions: dict[Key, int]) -> None:
         """decisions 밖 문단은 원래 charPr로, 안의 문단은 run마다 원래 charPr의 자간 s 복제로."""
+        inner = inner_paragraphs(self.doc)
         for key, ids in self.orig.items():
-            for r, cid in zip(element_at(self.doc, key).findall(q("hp", "run")), ids):
-                r.set("charPrIDRef", cid)
+            for r, cid in zip(paragraph_at(self.doc, key, inner).runs, ids):
+                r.char_pr_id_ref = cid
         self._drop_made()
         for key, s in decisions.items():
-            runs = element_at(self.doc, key).findall(q("hp", "run"))
-            ids = self.orig.setdefault(key, [r.get("charPrIDRef") for r in runs])
+            runs = paragraph_at(self.doc, key, inner).runs
+            ids = self.orig.setdefault(key, [str(r.char_pr_id_ref) for r in runs])
             if s:
                 for r, cid in zip(runs, ids):
-                    r.set("charPrIDRef", self.charpr(cid, s))
-        self.doc.sections[0].mark_dirty()
+                    r.char_pr_id_ref = self.charpr(cid, s)
 
 
 def current_spacing(doc: HwpxDocument, key: Key) -> int:
@@ -310,12 +327,11 @@ def current_spacing(doc: HwpxDocument, key: Key) -> int:
 
 
 def drop_line_cache(doc: HwpxDocument, keys) -> None:
-    """문단의 줄 캐시(hp:linesegarray)를 지운다 — 한컴이 낡은 캐시를 그대로 쓰지 않고 다시 재게(M-4)."""
+    """문단의 줄 캐시(hp:linesegarray)를 지운다 — 한컴이 낡은 캐시를 그대로 쓰지 않고 다시 재게(M-4).
+    그 문단을 품은 문단(박스 칸 문단이면 박스 문단)의 캐시도 함께 간다(paragraph.clear_layout_cache)."""
+    inner = inner_paragraphs(doc)
     for key in keys:
-        el = element_at(doc, key)
-        for seg in el.findall(q("hp", "linesegarray")):
-            el.remove(seg)
-    doc.sections[0].mark_dirty()
+        paragraph_at(doc, key, inner).clear_layout_cache()
 
 
 # ---- 맞춤 루프 ----------------------------------------------------------------
@@ -503,26 +519,19 @@ class Traits:
 
 
 def read_traits(hwpx: Path) -> dict[Key, Traits]:
-    """hwpx의 모든 문단(최상위·안쪽)의 Traits — 키는 read_lines와 같다."""
-    with zipfile.ZipFile(hwpx) as z:
-        sec = ET.fromstring(z.read("Contents/section0.xml"))
-        hdr = ET.fromstring(z.read("Contents/header.xml"))
-    cps = {c.get("id"): c for c in hdr.iter(q("hh", "charPr"))}
-    pps = {p.get("id"): p for p in hdr.iter(q("hh", "paraPr"))}
+    """hwpx의 모든 문단(최상위·안쪽)의 Traits — 키는 read_lines와 같다. 여백은 문단 모양의 case 분기(한/글 2016+가 읽는 것)."""
+    doc = HwpxDocument.open(str(hwpx))
+    styles = doc.styles
     out: dict[Key, Traits] = {}
-    for i, top in enumerate(sec.findall(q("hp", "p"))):
-        for j, p in enumerate([top] + _inner(top)):
-            pp = pps.get(p.get("paraPrIDRef"))
-            m = None if pp is None else pp.find(f".//{q('hp', 'case')}/{q('hh', 'margin')}")
-
-            def v(name):
-                el = None if m is None else m.find(q("hc", name))
-                return 0 if el is None else int(el.get("value"))
-
-            runs = [cps[r.get("charPrIDRef")] for r in p.findall(q("hp", "run"))
-                    if "".join(r.itertext()).strip() and r.get("charPrIDRef") in cps]
-            out[(i, j - 1)] = Traits(v("left"), v("intent"), para_text(p).startswith(" "),
-                                     tuple(_spacing(c) for c in runs))
+    for i, (top, inner) in enumerate(zip(doc.sections[0].paragraphs, inner_paragraphs(doc))):
+        for j, p in enumerate([top] + inner):
+            pp = styles.paragraph_property(p.para_pr_id_ref) if p.para_pr_id_ref is not None else None
+            sw = None if pp is None else pp.version_switch
+            m = None if sw is None or sw.case is None else sw.case.margin
+            runs = [c for r in p.runs if _run_has_text(r)
+                    and (c := styles.char_property(r.char_pr_id_ref)) is not None]
+            out[(i, j - 1)] = Traits(int((m.left if m else None) or 0), int((m.intent if m else None) or 0),
+                                     para_text(p).startswith(" "), tuple(_spacing(c) for c in runs))
     return out
 
 
@@ -566,15 +575,11 @@ def fresh_layout(hwpx: Path, work: Path, *, oracle=None) -> dict[Key, Lines]:
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
     bare = work / f"캐시없음-{Path(hwpx).name}"
-    with zipfile.ZipFile(hwpx) as zi, zipfile.ZipFile(bare, "w", zipfile.ZIP_DEFLATED) as zo:
-        for it in zi.infolist():  # 항목 차례·압축 방식 그대로(첫 항목 mimetype 무압축)
-            data = zi.read(it.filename)
-            if it.filename.startswith("Contents/section"):
-                root = ET.fromstring(data)
-                for seg in list(root.iter(q("hp", "linesegarray"))):
-                    seg.getparent().remove(seg)
-                data = ET.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
-            zo.writestr(it, data)
+    doc = HwpxDocument.open(str(hwpx))
+    for place in doc.text.iter_paragraphs():  # 본문·칸·머리말·꼬리말 … 모든 문단(바탕쪽은 구역 XML 밖)
+        if place.where != "master_page":
+            place.paragraph.clear_layout_cache()
+    doc.save(str(bare))
     return hancom_lines(bare, work, oracle=oracle)
 
 

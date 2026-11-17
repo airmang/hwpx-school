@@ -16,7 +16,7 @@ from exam_kit.fit import (
     Lines,
     Spacer,
     current_spacing,
-    element_at,
+    paragraph_at,
     fit_spacing,
     para_text,
     read_lines,
@@ -73,10 +73,10 @@ def test_대상_문단(견본):
     ids = style_ids(doc)
     box_styles = {ids[kit.styles["box_guide"]][0], ids[kit.styles["box"]][0]}
     for t in ts:
-        el = element_at(doc, t.key)
-        assert para_text(el) == t.text
+        p = paragraph_at(doc, t.key)
+        assert para_text(p) == t.text
         if t.key[1] >= 0:
-            assert el.get("styleIDRef") in box_styles, t
+            assert str(p.style_id_ref) in box_styles, t
     assert not [t for t in ts if t.number == 10 and t.role == "자료"]  # 10번 자료는 격자표뿐(칸은 바탕글)
     assert not [t for t in ts if t.number == 6 and t.text.strip() in ("(A)", "강화", "지도")]  # 답항표 칸
     answers = [t for t in ts if t.role == "답지" and t.number == 1]
@@ -90,7 +90,7 @@ def test_자간_charPr_파생·재사용·걷어내기(견본):
     before = _charprs(doc)
     ts = targets(doc, kit)
     a, b = [t for t in ts if t.role == "답지"][:2]  # 같은 스타일 charPr 한 run
-    base = element_at(doc, a.key).find(q("hp", "run")).get("charPrIDRef")
+    base = paragraph_at(doc, a.key).element.find(q("hp", "run")).get("charPrIDRef")
     sp = Spacer(doc)
     sp.set({a.key: -5, b.key: -5})
     after = _charprs(doc)
@@ -102,10 +102,10 @@ def test_자간_charPr_파생·재사용·걷어내기(견본):
     assert {k: v for k, v in got.attrib.items() if k != "id"} == {k: v for k, v in src.attrib.items() if k != "id"}
     assert [(x.tag, x.attrib) for x in got if not x.tag.endswith("spacing")] == \
            [(x.tag, x.attrib) for x in src if not x.tag.endswith("spacing")]
-    assert {r.get("charPrIDRef") for r in element_at(doc, a.key).findall(q("hp", "run"))} == {cid}
+    assert {r.get("charPrIDRef") for r in paragraph_at(doc, a.key).element.findall(q("hp", "run"))} == {cid}
     sp.set({})  # 되돌림: 원래 run·원래 charPr 목록 그대로(만든 것은 걷어 낸다)
     assert _charprs(doc) == before
-    assert element_at(doc, a.key).find(q("hp", "run")).get("charPrIDRef") == base
+    assert paragraph_at(doc, a.key).element.find(q("hp", "run")).get("charPrIDRef") == base
     box = doc.parts.headers[0].element.find(f".//{q('hh', 'charProperties')}")
     assert box.get("itemCnt") == str(len(before))
     sp.set({a.key: -3})
@@ -131,7 +131,7 @@ def _가짜_측정(kit, spec: dict, calls: list | None = None, *, bad_text: bool
             n, tail, need, *kind = spec.get(t.key, (1, "", 99))
             kind = kind[0] if kind else "줄"
             s = abs(current_spacing(d, t.key))
-            text = para_text(element_at(d, t.key)) + ("?" if bad_text else "")
+            text = para_text(paragraph_at(d, t.key)) + ("?" if bad_text else "")
             if kind == "줄" or kind == "여유깨짐":
                 got_n = n - 1 if s >= need else n
                 cut = 4 + (1 if kind == "여유깨짐" and s >= need + 1 else 0)
@@ -204,23 +204,32 @@ def test_가짜_측정_글자가_다르면_멈춘다(견본, tmp_path):
 
 
 def test_줄_캐시_읽기(tmp_path):
-    """최상위 문단 (i, −1), 그 안 문단 (i, j) — 줄 수 = lineseg 수, 끝줄 = 마지막 textpos부터."""
-    sec = (f'<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="{q("hp", "x")[1:].split("}")[0]}">'
-           '<hp:p><hp:run><hp:t>첫 문단 글자</hp:t></hp:run><hp:linesegarray>'
-           '<hp:lineseg textpos="0" horzsize="30000" vertsize="1100"/>'
-           '<hp:lineseg textpos="2" horzsize="29000" vertsize="2500"/></hp:linesegarray></hp:p>'
-           '<hp:p><hp:run><hp:tbl><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>칸<hp:tab/>글</hp:t></hp:run>'
-           '<hp:linesegarray><hp:lineseg textpos="0" horzsize="100"/></hp:linesegarray></hp:p>'
-           '</hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>')
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("Contents/section0.xml", sec)
+    """최상위 문단 (i, −1), 그 안 문단 (i, j) — 줄 수 = lineseg 수, 끝줄 = 마지막 textpos부터. 문서는 공개 API로 짓고,
+    줄 캐시(한/글이 저장할 때 쓰는 hp:linesegarray)만 시험이 XML로 심는다."""
+    doc = HwpxDocument.new()
+    sec = doc.sections[0]
+    first = sec.paragraphs[0]
+    first.text = "첫 문단 글자"
+    holder = sec.add_paragraph("")
+    tbl = holder.add_table(1, 1, width=20000)
+    tbl.cell(0, 0).paragraphs[0].text = "칸	글"
     path = tmp_path / "x.hwpx"
-    path.write_bytes(buf.getvalue())
+    doc.save(str(path))
+    reopened = HwpxDocument.open(str(path))
+    ps = reopened.sections[0].paragraphs
+    cell_p = ps[1].tables[0].cell(0, 0).paragraphs[0]
+
+    def 심기(p, segs: str) -> None:
+        p.element.append(ET.fromstring(f'<hp:linesegarray xmlns:hp="{q("hp", "x")[1:].split("}")[0]}">{segs}</hp:linesegarray>'))
+        p.section.mark_dirty()
+
+    심기(ps[0], '<hp:lineseg textpos="0" horzsize="30000" vertsize="1100"/><hp:lineseg textpos="2" horzsize="29000" vertsize="2500"/>')
+    심기(cell_p, '<hp:lineseg textpos="0" horzsize="100"/>')
+    reopened.save(str(path))
     got = read_lines(path)
     assert got[(0, -1)] == Lines(2, "문단 글자", 29000, "첫 문단 글자", (0, 2), (30000, 29000), (1100, 2500))
     assert got[(0, -1)].extra(1100) == 1400  # 수식이 든 줄처럼 높아진 줄 — 글자 높이를 넘은 만큼
-    assert got[(1, 0)] == Lines(1, "칸\t글", 100, "칸\t글", (0,), (100,), (0,))
+    assert got[(1, 0)] == Lines(1, "칸	글", 100, "칸	글", (0,), (100,), (0,))
     assert (1, -1) not in got  # 줄 캐시가 없는 문단은 뺀다
 
 
@@ -476,7 +485,8 @@ def test_측정은_한_번_더_해_본다(tmp_path):
     from exam_kit.fit import hancom_lines
     from exam_kit.render import RenderUnavailable
 
-    src = _꾸러미(tmp_path / "a.hwpx")
+    src = tmp_path / "a.hwpx"  # read_lines는 문서를 연다 — 공개 API로 지은 빈 문서
+    HwpxDocument.new().save(str(src))
 
     class 오라클:
         def __init__(self, 실패):
@@ -487,7 +497,7 @@ def test_측정은_한_번_더_해_본다(tmp_path):
             return self.호출 > self.실패
 
     o = 오라클(1)
-    assert hancom_lines(src, tmp_path / "m", oracle=o) == {} and o.호출 == 2
+    assert hancom_lines(src, tmp_path / "m", oracle=o) == read_lines(src) and o.호출 == 2
     names = [p.name for p in (tmp_path / "m").iterdir()]
     assert len(names) == 2 and len(set(names)) == 2  # (m-1) 재시도는 새 무작위 이름의 새 사본으로
     with pytest.raises(RenderUnavailable, match="2회"):
@@ -675,10 +685,13 @@ def test_렌더_넘치는_표는_낱말_사이에서만_접힌다(양식_hwpx, �
     lines = hancom_lines(out, tmp_path / "m", oracle=오라클)
     cells = []
     ps = 최상위(doc)
+    from exam_kit.fit import inner_paragraphs
+
+    inner = inner_paragraphs(doc)
     for i, p in list(enumerate(ps))[1:-1]:  # 관리박스(첫 문단)·꼬리 박스(끝 문단)는 양식 표 — 뺀다
         for tbl in (x for r in p.element.findall(q("hp", "run")) for x in r if x.tag == q("hp", "tbl")):
             for j, sub in enumerate(list(p.element.iter(q("hp", "p")))[1:]):
-                if any(a is tbl for a in sub.iterancestors(q("hp", "tbl"))) and para_text(sub).strip():
+                if any(a is tbl for a in sub.iterancestors(q("hp", "tbl"))) and para_text(inner[i][j]).strip():
                     cells.append(lines[(i, j)])
     assert cells
     for ln in cells:  # 접힌 줄은 모두 띄어쓰기 뒤에서 시작한다(낱말 한가운데서 접히지 않았다)

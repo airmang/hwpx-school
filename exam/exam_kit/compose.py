@@ -587,6 +587,19 @@ class _Composer:
         raise ValueError("양식이 바뀌었다: 사방 0.12 mm 실선 borderFill이 없다")
 
     def bf_variant(self, base: str, **sides: tuple[str, str]) -> str:
+        """base borderFill에서 지정 변(top/bottom/left/right)만 (type, width)로 바꾼 것 — 같은 것이 있으면 재사용
+        (doc.styles.ensure_border_fill(base_border_fill_id_ref=)). width는 "0.4 mm" 꼴."""
+        key = (base, tuple(sorted(sides.items())))
+        if any(t == "NONE" for t, _ in sides.values()):
+            return self._bf_variant_xml(base, **sides)
+        if key not in self._bf:
+            self._bf[key] = self.doc.styles.ensure_border_fill(
+                base_border_fill_id_ref=base,
+                sides={side: None if typ == "NONE" else {"type": typ, "width_mm": float(width.split()[0])}
+                       for side, (typ, width) in sides.items()})
+        return self._bf[key]
+
+    def _bf_variant_xml(self, base: str, **sides: tuple[str, str]) -> str:
         """base borderFill에서 지정 변(top/bottom/left/right)만 (type, width)로 바꾼 것 — 같은 것이 있으면 재사용."""
         key = (base, tuple(sorted(sides.items())))
         if key in self._bf:
@@ -1091,17 +1104,31 @@ class _Composer:
         p.style_id_ref = sid
         if spec.brk:
             p.column_break, p.page_break = spec.brk == "column", spec.brk == "page"
-        for run in p.element.findall(q("hp", "run")):  # run은 직접 쓴다 — add_run은 \t를 run 바로 아래 hp:tab으로 둔다
-            p.element.remove(run)
-        mark, tabs = spec.mark, iter(spec.tabs)
-        for text, c in spec.segs:
-            if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
-                self._수식(p, text.script, c or cp)
-                continue
-            run = ET.SubElement(p.element, q("hp", "run"), {"charPrIDRef": c or cp})
-            mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
-        if mark:
-            raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
+        for run in p.runs:
+            run.remove()
+        texts = [t for t, _ in spec.segs if not isinstance(t, equation.Math)]
+        if spec.tabs or any("\r" in t for t in texts):
+            # 탭 든 답지 줄 — 탭 폭(hp:tab width)을 적는 길이 core에 없어 run을 직접 쓴다(CORE-ASKS). 글에 CR이 있어도
+            # 옛 꼴(hp:t 안 글자 그대로)을 지키려 여기로 — add_run은 CR을 줄바꿈(hp:lineBreak)으로 쓴다.
+            mark, tabs = spec.mark, iter(spec.tabs)
+            for text, c in spec.segs:
+                if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
+                    self._수식(p, text.script, c or cp)
+                    continue
+                run = ET.SubElement(p.element, q("hp", "run"), {"charPrIDRef": c or cp})
+                mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
+            if mark:
+                raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
+        else:  # 공개 API — 조각마다 run(줄바꿈은 hp:t 안 hp:lineBreak), 수식은 문단 끝에 수식 run(조각 차례 그대로)
+            for t in texts:
+                _xml_글(t)
+            for text, c in spec.segs:
+                if isinstance(text, equation.Math):
+                    self._수식(p, text.script, c or cp)
+                else:
+                    p.add_run(text, char_pr_id_ref=c or cp)
+            if spec.mark:
+                _mark_first(p, spec.mark, spec.segs)
         if spec.obj is not None:
             p.element.find(q("hp", "run")).insert(0, spec.obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
         if spec.drawing is not None:
@@ -1313,6 +1340,32 @@ def wrap_words(text: str, avail: int, m: Metrics) -> str:
     return equation.unmask("\n".join(out), maths)
 
 
+_XML_밖 = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+
+
+def _xml_글(text: str) -> None:
+    """XML에 쓸 수 없는 글자가 든 글이면 run을 직접 쓸 때(lxml)와 같은 예외로 멈춘다 — add_run은 그 글자를 걸러 쓰지만 조판은
+    옛 길처럼 멈춘다. 탭·줄바꿈으로 나눈 조각마다 본다(옛 길이 hp:t 글에 넣던 단위 — 짝 없는 대리 글자 오류의 자리가 같게)."""
+    for piece in re.split(r"[\t\n]", text):
+        if _XML_밖.search(piece):
+            raise ValueError("All strings must be XML compatible: Unicode or ASCII, no NULL bytes or control characters")
+        piece.encode("utf-8")  # 짝 없는 대리 글자 — UnicodeEncodeError
+
+
+def _mark_first(p, mark: str, segs) -> None:
+    """문단의 조각 첫머리(조각 시작·줄바꿈 뒤) 정답 원문자에 형광펜(paragraph.add_highlight) — 그런 자리가 없거나,
+    원문자가 처음 나오는 곳이 그 자리가 아니면 멈춘다(add_highlight는 처음 나오는 곳을 칠한다)."""
+    texts = [t for t, _ in segs if not isinstance(t, equation.Math)]
+    spot = next((k for k, t in enumerate(texts) if any(x.startswith(mark) for x in t.split("\n"))), None)
+    if spot is None:
+        raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
+    first = next(k for k, t in enumerate(texts) if mark in t)
+    at = texts[first].index(mark)
+    if first != spot or not (at == 0 or texts[first][at - 1] == "\n"):
+        raise ValueError(f"형광펜 {mark}가 칠할 자리보다 앞에도 있다: {_글(segs)!r}")
+    p.add_highlight(color=형광, match=mark)
+
+
 def _fill_t(t: ET._Element, text: str, mark: str | None, tabs=None) -> str | None:
     """hp:t 채우기 — \t는 hp:tab(제출본 모양 `① ㄱ, ㄴ<hp:tab …/>② …`, width는 tabs에서), \n은 hp:lineBreak, mark로 시작하는
     조각은 원문자에 형광펜(add_highlight와 같은 모양 <markpenBegin/>①<markpenEnd/>). 칠했으면 None, 못 칠했으면 mark를 돌려준다."""
@@ -1421,15 +1474,31 @@ def compose(doc: HwpxDocument, scan: Scan, kit: Kit, *, answer_key: bool, image_
 LOOSER = {"1행": "2행", "2행": "3행", "3행": "5행"}  # 답지가 접히면 한 단계 느슨한 형으로(렌더 루프)
 
 
-def _문단_글(el) -> str:
-    """문단 글(hp:t) — 수식은 그 한/글 수식 문자열로(수식 설명 글 '수식입니다.'는 넣지 않는다)."""
+def _문단_글(paragraph) -> str:
+    """문단의 글(hp:t의 글자)을 문서 차례로 — 표가 있는 자리에는 그 칸 문단의 글이(같은 방식으로), 글상자 따위 도형 안 문단의
+    글도 그 자리에 든다. 수식은 그 한/글 수식 문자열로(수식 설명 글 '수식입니다.'는 넣지 않는다). 탭·줄바꿈 같은 글자 요소는
+    글로 세지 않는다."""
     out = []
-    for node in el.iter(q("hp", "t"), q("hp", "equation")):
-        if node.tag == q("hp", "equation"):
-            s = node.find(q("hp", "script"))
-            out.append("" if s is None else s.text or "")
-        else:
-            out.append("".join(node.itertext()))
+    for r in paragraph.runs:
+        for it in r.content:
+            if it.kind == "equation":
+                out.append(it.object.script or "")
+            elif it.container == "t" and it.kind == "text":
+                out.append(it.text)
+            elif it.kind == "table":
+                cap = it.object.caption  # 캡션은 표 XML에서 칸보다 앞
+                out += [_문단_글(cp) for cp in (cap.paragraphs if cap is not None else ())]
+                out += [_문단_글(cp) for row in it.object.rows for cell in row.cells for cp in cell.paragraphs]
+            elif it.container == "ctrl" and hasattr(it.object, "paragraphs"):  # 메모 누름틀·각주·미주의 문단
+                out += [_문단_글(cp) for cp in it.object.paragraphs]
+            elif it.container == "run" and not hasattr(it.object, "iter_paragraphs") \
+                    and getattr(it.object, "caption", None) is not None:  # 그림 따위의 캡션
+                out += [_문단_글(cp) for cp in it.object.caption.paragraphs]
+            elif it.container == "run" and hasattr(it.object, "iter_paragraphs"):
+                out += ["".join(x.object.script or "" if x.kind == "equation" else x.text
+                                for rr in pl.paragraph.runs for x in rr.content
+                                if x.kind == "equation" or (x.container == "t" and x.kind == "text"))
+                        for pl in it.object.iter_paragraphs()]
     return "".join(out)
 
 
@@ -1459,7 +1528,7 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
     sec = doc.sections[0]
     ps = list(sec.paragraphs)
     victims = [ps[i] for i in old]
-    have = re.sub(r"\s", "", "".join(_문단_글(v.element) for v in victims))
+    have = re.sub(r"\s", "", "".join(_문단_글(ps[i]) for i in old))
     want = re.sub(r"\s", "", "".join(_원고_글(f"{c.mark}{c.text}".replace("__", "")) for c in qn.choices))
     if have != want:  # 원고가 이 문서와 다르다 — 다른 문항의 답지로 덮어쓰지 않게 멈춘다
         raise ValueError(f"{qn.number}번 답지가 원고와 다르다: 문서 {have!r} ≠ 원고 {want!r}")
@@ -1479,19 +1548,27 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
     sec.mark_dirty()
 
 
-def _mark_at(t: ET._Element, anchor, mark: str) -> None:
-    """t 안에서 anchor(None = t.text, 아니면 그 자식의 tail) 앞머리 mark를 <markpenBegin/>mark<markpenEnd/>로 감싼다."""
-    rest = (t.text if anchor is None else anchor.tail)[len(mark):]
-    if anchor is None:
-        t.text = None
-    else:
-        anchor.tail = None
-    at = 0 if anchor is None else list(t).index(anchor) + 1
-    begin = ET.SubElement(t, q("hp", "markpenBegin"), {"color": 형광})  # SubElement — 부모의 hp 접두를 물려받는다
-    end = ET.SubElement(t, q("hp", "markpenEnd"))
-    t.insert(at, begin)
-    t.insert(at + 1, end)
-    begin.tail, end.tail = mark, rest or None
+def _mark_eligible(run, mark: str) -> bool:
+    """런 글(hp:t)이 정답 원문자로 시작하거나 탭 바로 뒤 글이 정답 원문자로 시작하는가 — 형광펜 표지 뒤(이미 칠한 자리)는 아니다."""
+    items = [it for it in run.content if it.container == "t"]
+    if items and items[0].kind == "text" and items[0].text.startswith(mark):
+        return True
+    return any(a.kind == "tab" and b.kind == "text" and b.text.startswith(mark) for a, b in zip(items, items[1:]))
+
+
+def _mark_spot(paragraphs, mark: str):
+    """정답 형광펜을 칠할 문단 — 칠할 자리(_mark_eligible)가 있는 런이 든 첫 문단. 그 문단에서 원문자가 처음 나오는 런이 그
+    런이어야 하고 그 런에서 처음 나오는 곳이 그 자리여야 한다(paragraph.add_highlight는 처음 나오는 곳을 칠한다)."""
+    for p in paragraphs:
+        for r in p.runs:
+            if not _mark_eligible(r, mark):
+                continue
+            first = next(x for x in p.runs if mark in x.text)
+            at = first.text.index(mark)
+            if first != r or not (at == 0 or first.text[at - 1] == "\t"):
+                raise ValueError(f"정답 {mark}가 칠할 자리보다 앞에도 있다 — 형광펜을 엉뚱한 곳에 칠하지 않게 멈춘다")
+            return p
+    return None
 
 
 def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, draft: bool = False) -> None:
@@ -1499,8 +1576,12 @@ def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, dr
 
     자리 = 그 문항 답지 줄 문단(답항표면 그 표의 칸)에서 조각 첫머리가 정답 원문자인 곳(줄 첫머리 또는 탭 뒤).
     draft(초안)면 정답 표시 없는 문항은 칠하지 않고 넘어간다(한/글 초안을 되돌린 원고 — 10-01). 최종판은 멈춘다.
+    칠하기는 공개 API(paragraph.add_highlight — <markpenBegin/>①<markpenEnd/>)로.
     """
+    from .fit import inner_paragraphs
+
     ps = list(doc.sections[0].paragraphs)
+    inner = inner_paragraphs(doc)
     n = len(question_heads(doc))
     missing = [k for k in range(1, n + 1) if not answers.get(str(k))]
     if missing and not draft:  # 칠하기 전에 — 반쯤 칠한 문서를 남기지 않게
@@ -1509,21 +1590,38 @@ def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, dr
         if k in missing:
             continue
         mark = answers[str(k)]
-        spot = None
-        for i in choice_paragraphs(doc, kit, k):
-            for t in ps[i].element.iter(q("hp", "t")):
-                if (t.text or "").startswith(mark):
-                    spot = (t, None)
-                else:
-                    spot = next(((t, ch) for ch in t if ch.tag == q("hp", "tab") and (ch.tail or "").startswith(mark)), None)
-                if spot:
-                    break
-            if spot:
-                break
+        spot = _mark_spot((x for i in choice_paragraphs(doc, kit, k) for x in (ps[i], *inner[i])), mark)
         if spot is None:
             raise ValueError(f"{k}번 정답 {mark}를 칠할 자리가 답지 줄에 없다")
-        _mark_at(*spot, mark)
-    doc.sections[0].mark_dirty()
+        spot.add_highlight(color=형광, match=mark)
+
+
+def _set_box_row(tbl, content, cc: int, cr: int, rails, h: int) -> None:
+    """박스 내용 행 높이를 h로 — 표 높이는 h − (내용 칸 옛 높이)만큼, 내용 칸과 내용 행에 앵커가 있는 레일 칸은 h로, 다른 칸은
+    그대로(양식의 행 높이와 칸 높이가 어긋나도 그 꼴을 지킨다). table.set_row_height가 표 높이를 그만큼 바꾸게 행 높이를 주고,
+    그 행을 지나며 함께 바뀐 칸을 칸마다 되돌린다."""
+    delta = h - content.height
+    # 표 높이를 delta만큼 — 내용 행부터, 줄일 때 한 행이 다 받지 못하면(행 높이는 1 이상) 높은 행부터 나눠 받는다
+    rows = tbl.row_heights
+    for r in [cr] + sorted((x for x in range(len(rows)) if x != cr), key=lambda x: -rows[x]):
+        if not delta:
+            break
+        rows = tbl.row_heights
+        take = delta if delta > 0 else max(delta, 1 - rows[r])
+        if not take:
+            continue
+        crossing = [x.cell for x in tbl.iter_grid() if x.is_anchor and x.row <= r < x.row + x.cell.span[0]]
+        before = [x.height for x in crossing]
+        tbl.set_row_height(r, rows[r] + take)
+        for cell, was in zip(crossing, before):
+            cell.set_size(height=was)
+        delta -= take
+    if delta:
+        raise ValueError(f"박스 표 높이를 줄일 행 높이가 모자란다(남은 {delta}, 행 높이 {list(tbl.row_heights)})")
+    anchors = {(x.column, x.row): x.cell for x in tbl.iter_grid() if x.is_anchor}
+    for col in (cc, *rails):
+        if (col, cr) in anchors:
+            anchors[(col, cr)].set_size(height=h)
 
 
 def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
@@ -1535,37 +1633,37 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
     내용 셀 글 문단 가운데 하나라도 lines에 없으면 그 박스는 그대로 둔다. 높이는 kit.box_min_height(양식 견본 내용 셀)
     밑으로 내리지 않는다 — 교사도 양식 박스에서 시작하고 한글은 셀을 늘리기만 해서 제출본 세 줄 박스는 모두 이 높이다.
     """
+    from .fit import inner_paragraphs
+
     ids = style_ids(doc)
     c = _Composer(doc, kit, Samples(None, None, None), answer_key=False)
-    shapes = {tuple(str(n) for n in spec["shape"]): k for k, spec in kit.boxes.items() if isinstance(spec, dict)}
+    shapes = {tuple(int(n) for n in spec["shape"]): k for k, spec in kit.boxes.items() if isinstance(spec, dict)}
     changed = 0
     paras = list(doc.sections[0].paragraphs)
+    inner = inner_paragraphs(doc)
     for i, p in enumerate(paras):
         if i == 0 or i == len(paras) - 1:  # 관리박스·꼬리 박스 문단의 표는 박스가 아니다(학교 B 꼬리 박스도 1×1)
             continue
-        subs = list(p.element.iter(q("hp", "p")))[1:]  # 키의 둘째 값 = 이 목록의 차례(fit.read_lines와 같다)
-        for tbl in _top_tables(p.element):
-            kind = shapes.get((tbl.get("rowCnt"), tbl.get("colCnt")))
+        subs = inner[i]  # 키의 둘째 값 = 이 목록의 차례(fit.read_lines와 같다)
+        for tbl in p.tables:
+            kind = shapes.get((tbl.row_count, tbl.column_count))
             if kind is None:
                 continue
             _, (cc, cr), rails, role = _박스(kit, kind)
-            cells = {(int(a.get("colAddr")), int(a.get("rowAddr"))): tc
-                     for tc in tbl.iter(q("hp", "tc")) for a in [tc.find(q("hp", "cellAddr"))]}
-            content = cells.get((cc, cr))
+            content = next((x.cell for x in tbl.iter_grid() if x.is_anchor and (x.column, x.row) == (cc, cr)), None)
             if content is None:
                 continue
-            paras = content.find(q("hp", "subList")).findall(q("hp", "p"))
-            if not paras or ids[kit.styles[role]][0] not in {x.get("styleIDRef") for x in paras}:
+            cell_ps = content.paragraphs
+            if not cell_ps or ids[kit.styles[role]][0] not in {str(x.style_id_ref) for x in cell_ps}:
                 continue  # 박스 모양이지만 우리 박스가 아니다(양식 견본 등)
             pitch, h, ok = c._line_pitch(role), 0, True
-            for para in paras:
-                obj = next((x for r in para.findall(q("hp", "run")) for x in r
-                            if x.tag in (q("hp", "tbl"), q("hp", "pic"))), None)
+            for para in cell_ps:
+                obj = next((it.object for r in para.runs for it in r.content if it.kind in ("table", "picture")), None)
                 if obj is not None:
-                    osz, om = obj.find(q("hp", "sz")), obj.find(q("hp", "outMargin"))
-                    h += int(osz.get("height")) + int(om.get("top")) + int(om.get("bottom")) + pitch - kit.metrics.char_height
+                    om = obj.out_margins
+                    h += obj.height + om.top + om.bottom + pitch - kit.metrics.char_height
                     continue
-                j = next((n for n, e in enumerate(subs) if e is para), None)
+                j = next((n for n, e in enumerate(subs) if e == para), None)
                 got = None if j is None else lines.get((i, j))
                 if got is None:
                     ok = False
@@ -1576,14 +1674,10 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
             h += kit.metrics.box_extra - pitch
             if kit.box_min_height is not None:
                 h = max(h, kit.box_min_height)  # 양식 견본 내용 셀 높이 밑으로 내리지 않는다
-            old = int(content.find(q("hp", "cellSz")).get("height"))
+            old = content.height
             if old == h:
                 continue
-            for col in (cc, *rails):
-                if (col, cr) in cells:
-                    cells[(col, cr)].find(q("hp", "cellSz")).set("height", str(h))
-            sz = tbl.find(q("hp", "sz"))
-            sz.set("height", str(int(sz.get("height")) - old + h))
+            _set_box_row(tbl, content, cc, cr, rails, h)
             changed += 1
     if changed:
         doc.sections[0].mark_dirty()
