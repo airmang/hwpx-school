@@ -27,6 +27,7 @@ from pathlib import Path
 
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
+from hwpx.objects import CellMargins
 from hwpx_automation.office.exam import profile_form
 from PIL import Image, ImageOps
 
@@ -378,6 +379,28 @@ class _그림:
     height: int
 
 
+@dataclass(frozen=True)
+class _칸:
+    """칸 문단의 계획 — segs의 charPr가 None이면 역할 스타일 charPr, pid가 None이면 역할의 칸 문단 모양, mark는 그 글자에 형광펜."""
+
+    segs: tuple
+    role: str
+    pid: str | None = None
+    mark: str | None = None
+
+
+@dataclass
+class _표:
+    """글자처럼 취급하는 표의 계획 — cells[행][열] = (칸 문단 계획, borderFill). 칸은 표 안여백을 쓴다(hasMargin=0)."""
+
+    cells: list
+    widths: list
+    heights: list
+    bf: str
+    in_margin: dict
+    out_margin: dict
+
+
 @dataclass
 class _Para:
     """삽입 전 문단 계획. segs의 charPr가 None이면 그 역할 스타일의 charPr."""
@@ -718,10 +741,10 @@ class _Composer:
             else:
                 bf = base
             wrapped = [wrap_words(text, w - pad, self.kit.metrics) for text, w in zip(row, widths)]
-            cells.append([(self._cell_p(self._segs(text, "normal"), "normal"), bf) for text in wrapped])
+            cells.append([(self._plan_cell(self._segs(text, "normal"), "normal"), bf) for text in wrapped])
             h = max(_칸_글_높이(text, w - pad, pitch, self.kit.metrics) for text, w in zip(wrapped, widths))
             heights.append(h + self.kit.metrics.char_height + self.kit.grid["in_margin"]["top"] + self.kit.grid["in_margin"]["bottom"])
-        return self._table(cells, widths, heights, bf=base, in_margin=self.kit.grid["in_margin"], out_margin=self.kit.grid["out_margin"])
+        return _표(cells, widths, heights, base, dict(self.kit.grid["in_margin"]), dict(self.kit.grid["out_margin"]))
 
     def answer_table(self, qn: Question, block: Block) -> ET._Element:
         """:::답항표 → 무테 표: 머리행(기호 밑줄) + ①~⑤, 첫 열 원문자 폭 self.kit.metrics.mark_col, 나머지 균등, 모든 칸 가운데."""
@@ -745,20 +768,20 @@ class _Composer:
         v = (pitch - self.kit.metrics.char_height) // 2  # 행 높이 = 5행 답지 줄 피치 — 위아래 여백으로 채운다
         in_m = {"left": 141, "right": 141, "top": v, "bottom": v}
         ul = self.underline(self.style["choice5"][2])
-        cells = [[(self._cell_p([("", None)], "choice5"), none)]
-                 + [(self._cell_p([(x, ul) for x in equation.pieces(*equation.mask(h))] or [("", ul)], "choice5"), none)
+        cells = [[(self._plan_cell([("", None)], "choice5"), none)]
+                 + [(self._plan_cell([(x, ul) for x in equation.pieces(*equation.mask(h))] or [("", ul)], "choice5"), none)
                     for h in head]]
         for c, row in zip(qn.choices, rows):
             mark = c.mark if (c.correct and self.answer_key) else None
-            cells.append([(self._cell_p([(row[0], None)], "choice5", mark=mark), none)]
-                         + [(self._cell_p(self._segs(wrap_words(t, w - 282, self.kit.metrics), "choice5"), "choice5"), none)
+            cells.append([(self._plan_cell([(row[0], None)], "choice5", mark=mark), none)]
+                         + [(self._plan_cell(self._segs(wrap_words(t, w - 282, self.kit.metrics), "choice5"), "choice5"), none)
                             for t, w in zip(row[1:], widths[1:])])
         heights = [self.kit.metrics.char_height + 2 * v]  # 머리행
         for row in rows:  # 칸 글이 접히면(wrap_words 줄 수) 그만큼 행이 높아진다 — grid()와 같다
             h = max(_칸_글_높이(wrap_words(t, w - 282, self.kit.metrics), w - 282, pitch, self.kit.metrics)
                     for t, w in zip(row[1:], widths[1:]))
             heights.append(h + self.kit.metrics.char_height + 2 * v)
-        return self._table(cells, widths, heights, bf=none, in_margin=in_m, out_margin=dict.fromkeys(self.kit.grid["out_margin"], 0))
+        return _표(cells, widths, heights, none, in_m, dict.fromkeys(self.kit.grid["out_margin"], 0))
 
     def picture(self, block: Block, avail: int) -> "_그림":
         """`![](경로){width=Ncm}` → 회색조 사본을 문서에 넣고 글자처럼 취급하는 그림(높이는 원본 비율)."""
@@ -791,6 +814,46 @@ class _Composer:
             im.convert("L" if self.kit.typeset["grayscale_pictures"] else "RGB").save(buf, "PNG")
         bid = str(self.doc.media.add_image(buf.getvalue(), "png"))
         return _그림(bid, w, h)
+
+    def _plan_cell(self, segs, role: str, *, pid: str | None = None, mark: str | None = None) -> "_칸":
+        """칸 문단 계획 — 문단 모양은 계획 때 정한다(정의가 만들어지는 차례를 옛 길과 같게)."""
+        return _칸(tuple(segs), role, pid or self.cell_pr(role), mark)
+
+    def _put_table(self, host, plan: "_표"):
+        """표를 host 문단의 첫 자리에 공개 API로 짓는다 — add_table(안여백·칸 여백, A3) → move_to(offset=0) → 칸 폭·행 높이·
+        바깥 여백·머리행 반복·가로 기준(문단) → 칸마다 테두리·세로 가운데·칸 문단(_fill_cell)."""
+        m = plan.in_margin
+        t = host.add_table(len(plan.cells), len(plan.widths), width=sum(plan.widths), border_fill_id_ref=plan.bf,
+                           char_pr_id_ref=host.runs[0].char_pr_id_ref,
+                           in_margins=CellMargins(left=m["left"], right=m["right"], top=m["top"], bottom=m["bottom"]))
+        t.move_to(host, offset=0)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run> — 첫 run 맨 앞
+        t.set_column_widths(plan.widths)
+        t.set_row_heights(plan.heights)
+        t.set_out_margins(**plan.out_margin)
+        t.repeat_header = True
+        t.set_position(horizontal_relative_to="PARA")
+        for r, row in enumerate(plan.cells):
+            for c, (k, bf) in enumerate(row):
+                cell = t.cell(r, c)
+                cell.border_fill_id_ref = bf
+                cell.vertical_alignment = "CENTER"
+                self._fill_cell(cell.paragraphs[0], k)
+        return t
+
+    def _fill_cell(self, cp, k: "_칸") -> None:
+        """칸 문단 cp를 계획 k대로 — 문단 모양·스타일, 조각마다 run(수식은 문단 끝에 수식 run), 형광펜(add_highlight)."""
+        sid, _, role_cp = self.style[k.role]
+        cp.para_pr_id_ref = k.pid or self.cell_pr(k.role)
+        cp.style_id_ref = sid
+        first = cp.runs[0]
+        for text, c in k.segs:
+            if isinstance(text, equation.Math):
+                self._수식(cp, text.script, c or role_cp)
+            else:
+                cp.add_run(text, char_pr_id_ref=c or role_cp)
+        first.remove()
+        if k.mark:
+            _mark_first(cp, k.mark, list(k.segs))
 
     def _put_picture(self, host, pic: "_그림"):
         """그림을 host 문단의 첫 자리에 — 임시 문단에 공개 API(add_picture)로 그리고 move_to로 옮긴 뒤 임시 문단을 지운다
@@ -929,7 +992,10 @@ class _Composer:
                 sub.append(self._cell_p(self._segs(part, role), role, pid=self.item_pr() if block.kind in _항목_박스 else pid))
                 continue
             if kind == "표":
-                obj = self.grid(part, first, f"L{block.line_no} :::자료 안의")
+                g = self.grid(part, first, f"L{block.line_no} :::자료 안의")
+                obj = self._table([[(self._cell_p(list(k.segs), k.role, pid=k.pid, mark=k.mark), bf) for k, bf in row]
+                                   for row in g.cells], g.widths, g.heights, bf=g.bf, in_margin=g.in_margin,
+                                  out_margin=g.out_margin)
             else:
                 g = self.picture(part, first)
                 obj = self._pic_element(g.bid, g.width, g.height)
@@ -1153,6 +1219,8 @@ class _Composer:
             obj = self._put_frame(p, obj)
         elif isinstance(obj, _그림):
             obj = self._put_picture(p, obj)
+        elif isinstance(obj, _표):
+            obj = self._put_table(p, obj)
         elif obj is not None:
             p.element.find(q("hp", "run")).insert(0, obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
         if spec.drawing is not None:
