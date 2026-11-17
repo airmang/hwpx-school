@@ -262,7 +262,7 @@ class Spacer:
         if self.box is None:
             raise ValueError("양식이 바뀌었다: hh:charProperties 없음")
         self.orig: dict[Key, list[str]] = {}   # 문단 → run charPr id(처음 값)
-        self.made = 0                          # 이번 set이 만든 charPr 수(목록 끝에 붙는다)
+        self.made: list[ET._Element] = []      # 이번 set이 만든 charPr(목록 끝에 붙는다)
 
     def charpr(self, base: str, s: int) -> str:
         src = self.box.find(f"{q('hh', 'charPr')}[@id='{base}']")
@@ -289,17 +289,21 @@ class Spacer:
         before = len(self.box)
         el = self.doc.parts.headers[0].ensure_char_property(predicate=같다, modifier=조이기, base_char_pr_id=base)
         if len(self.box) > before:
-            self.made += 1
+            self.made.append(el)
         return el.get("id")
 
     def _drop_made(self) -> None:
-        """이번 set이 만든 charPr를 걷어 낸다 — 런을 원래 id로 되돌린 뒤라 목록 끝의 쓰이지 않는 정의다
-        (doc.styles.remove_unused_definitions). 그보다 많이 걷히면(양식 끝에 원래 안 쓰는 정의가 있었다) 멈춘다."""
+        for el in reversed(self.made):
+            if self.box[-1] is not el:  # 걷어 낼 것은 늘 끝에 있다 — 아니면 id에 틈이 생긴다
+                raise RuntimeError(f"자간 charPr {el.get('id')}가 목록 끝에 있지 않아 걷어 낼 수 없다")
+            self.box.remove(el)
         if self.made:
-            gone = self.doc.styles.remove_unused_definitions(["char_properties"]).get("char_properties", ())
-            if len(gone) != self.made:
-                raise RuntimeError(f"자간 charPr {self.made}개를 걷어 내려 했는데 {len(gone)}개가 걷혔다({', '.join(gone)})")
-        self.made = 0
+            self.box.set("itemCnt", str(len(self.box.findall(q("hh", "charPr")))))
+            header = self.doc.parts.headers[0]
+            header.mark_dirty()
+            if header.document is not None:
+                header.document.invalidate_char_property_cache()
+        self.made = []
 
     def set(self, decisions: dict[Key, int]) -> None:
         """decisions 밖 문단은 원래 charPr로, 안의 문단은 run마다 원래 charPr의 자간 s 복제로."""
