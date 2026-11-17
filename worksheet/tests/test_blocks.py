@@ -24,7 +24,7 @@ HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 @pytest.fixture
 def 문서(킷_루트, tmp_path):
     kit = load_kit(킷_루트)
-    return HwpxDocument.open(kit.skeleton_path), kit, tmp_path
+    return HwpxDocument.open(kit.skeleton_path, seed=7), kit, tmp_path
 
 
 def _hwpx로_그린다(doc, kit, fence, base_dir) -> bool:
@@ -1324,7 +1324,7 @@ def test_본문_그림_폭은_check_markdown과_두_렌더러가_같은_판정�
     그림 = Figure("그림.png", width_mm=폭_mm)
     문제 = check_markdown(Sheet("시험킷", "t", None, False, (그림,)), kit, base_dir=tmp_path)
 
-    doc = HwpxDocument.open(kit.skeleton_path)
+    doc = HwpxDocument.open(kit.skeleton_path, seed=7)
     try:
         render_node(doc, kit, 그림, base_dir=tmp_path)
         hwpx_그림 = True

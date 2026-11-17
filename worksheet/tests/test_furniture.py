@@ -13,7 +13,7 @@ from worksheet.kit import load_kit
 @pytest.fixture
 def 문서(킷_루트, tmp_path):
     kit = load_kit(킷_루트)
-    doc = HwpxDocument.open(kit.skeleton_path)
+    doc = HwpxDocument.open(kit.skeleton_path, seed=7)
     return doc, kit, tmp_path
 
 

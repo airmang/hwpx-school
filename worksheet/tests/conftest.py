@@ -62,7 +62,7 @@ def 원본_hwpx(tmp_path_factory) -> Path:
     tests/test_skeleton.py가 본다.
     """
     dest = tmp_path_factory.mktemp("원본") / "더러운원본.hwpx"
-    doc = HwpxDocument.open(표준킷 / "skeleton.hwpx")
+    doc = HwpxDocument.open(표준킷 / "skeleton.hwpx", seed=7)
 
     doc.add_paragraph("더러운 원본 문단 1")
     doc.add_paragraph("더러운 원본 문단 2")

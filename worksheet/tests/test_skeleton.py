@@ -91,7 +91,7 @@ def test_스켈레톤은_미리보기_그림도_비운다(원본_hwpx, tmp_path)
 def 두_섹션_원본(tmp_path) -> Path:
     """섹션이 둘인 합성 원본 — 지금 코드는 sections[0]만 비워 뒤 섹션 본문이 통째로 남는다."""
     dest = tmp_path / "두섹션.hwpx"
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     doc.add_section()
     doc.save(dest)
     return dest
@@ -114,7 +114,7 @@ def 첫_run에_글자가_든_원본(tmp_path) -> Path:
     이런 구조일 가능성에 대비한 견고화다).
     """
     dest = tmp_path / "첫run글자.hwpx"
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     section = doc.sections[0]
     첫_run = section.element.findall(_q("p"))[0].findall(_q("run"))[0]
     글자 = 첫_run.makeelement(_q("t"), {})
@@ -156,7 +156,7 @@ def 메타데이터_심은_원본(tmp_path) -> Path:
     """lastsaveby·date에 더러운 값을 심은 합성 원본 — 이 둘은 set_document_metadata가 못 받는
     키라 extract_skeleton이 content.hpf를 직접 고쳐야 지워진다."""
     dest = tmp_path / "메타더러움.hwpx"
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     doc.package.set_document_metadata(
         created_date="2020-01-01T00:00:00Z", modified_date="2020-06-01T00:00:00Z",
     )
@@ -204,7 +204,7 @@ def 모르는_메타_심은_원본(tmp_path) -> Path:
     이 이름은 존재 자체를 모른다 — 다른 학교 원본에만 있는 한컴 자체 필드가 이 자리다.
     """
     dest = tmp_path / "모르는메타.hwpx"
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     _새_메타_심기(doc.package, "금칙필드", "금칙작성자")
     doc.save(dest)
     return dest
@@ -241,7 +241,7 @@ def test_같은_원본은_두_번_뽑아도_바이트가_같다(원본_hwpx, tmp
 
 
 def test_사후조건은_물리_BinData_부품이_남아있으면_거부한다(tmp_path):
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     doc.add_picture(_png(5, 5), "png", width_mm=5, height_mm=5)
     dirty = tmp_path / "dirty.hwpx"
     doc.save(dirty)
@@ -254,7 +254,7 @@ def test_사후조건은_끊어진_BinData_참조가_남아있으면_거부한�
     """물리 부품은 지워졌지만 content.hpf 매니페스트에 참조만 남은 경우(정규식이 항목을
     못 찾았을 때의 재현) — validate()도 물리 부품 수도 이 경우를 못 잡는다. 문자열 검사만
     잡는다(실측: 아래 두 assert가 이 사실 자체를 고정한다)."""
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     doc.add_picture(_png(5, 5), "png", width_mm=5, height_mm=5)
     src = tmp_path / "src.hwpx"
     doc.save(src)
@@ -322,7 +322,7 @@ def 컨트롤_안에_글자가_든_원본(tmp_path) -> Path:
     다른 학교 원본이 머리말에 학교명을 넣어 뒀다면 그대로 "중립" 스켈레톤에 남는다.
     """
     dest = tmp_path / "컨트롤글자.hwpx"
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     section = doc.sections[0]
     첫_run = section.element.findall(_q("p"))[0].findall(_q("run"))[0]
     ctrl = 첫_run.find(_q("ctrl"))
@@ -351,7 +351,7 @@ def test_컨트롤_안의_표도_거부한다(tmp_path):
     진짜 유효한 표를 하나 만든 뒤 그 XML을 통째로 복사해 ctrl 안에 심는다.
     """
     dest_src = tmp_path / "컨트롤표.hwpx"
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     표 = doc.add_table(1, 1, width=1000, height=1000)
     표_사본 = copy.deepcopy(표.element)
 
@@ -375,7 +375,7 @@ def test_컨트롤_안에서_탭_뒤에_든_글자도_거부한다(tmp_path):
     """`<hp:t><hp:tab/>이름</hp:t>`처럼 글자가 탭 **뒤**(자식의 tail)에 있으면 hp:t 자신의
     text는 비어 있다 — text만 보면 놓친다(core clear_body로 옮기기 전 이 도구가 그랬다)."""
     dest_src = tmp_path / "컨트롤탭글자.hwpx"
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     section = doc.sections[0]
     ctrl = section.element.findall(_q("p"))[0].findall(_q("run"))[0].find(_q("ctrl"))
     글자 = ctrl.makeelement(_q("t"), {})
@@ -396,7 +396,7 @@ def _둘째_run에_컨트롤_사본을_둔_원본(tmp_path, 이름: str, 내용:
     """첫 문단 둘째 run에 첫 run의 ctrl 사본을 둔 원본 — 한글은 단·쪽 번호 같은 컨트롤을
     둘째 run에 쓰기도 한다. *내용*을 주면 그 ctrl 안에 글자를 심는다."""
     dest = tmp_path / 이름
-    doc = HwpxDocument.open(_표준_스켈레톤)
+    doc = HwpxDocument.open(_표준_스켈레톤, seed=7)
     section = doc.sections[0]
     첫_문단 = section.element.findall(_q("p"))[0]
     첫_run = 첫_문단.findall(_q("run"))[0]
