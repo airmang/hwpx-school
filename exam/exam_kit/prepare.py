@@ -284,7 +284,8 @@ def prepare_document(form: Path, kit: Kit) -> tuple[HwpxDocument, Prepared]:
     got = sha256(form)
     if got != kit.form_sha256:
         raise ValueError(f"양식 sha256 불일치 — kit.json을 다시 재라: {got}")
-    doc = HwpxDocument.open(str(form))
+    # 새 개체·문단 id를 양식 지문에서 뽑는다 — 같은 양식·같은 원고면 두 판(문항지·답표시본)이 같은 id를 받는다
+    doc = HwpxDocument.open(str(form), seed=int(got[:8], 16))
     return doc, prepare_form(doc, kit)
 
 
