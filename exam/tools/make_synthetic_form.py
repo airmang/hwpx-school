@@ -109,14 +109,8 @@ def build(out: Path) -> None:
         par = doc.add_paragraph("", para_pr_id_ref=pid or roles.get(st, "0"),
                                 char_pr_id_ref=body, include_run=False, inherit_style=False)
         par.style_id_ref = style.get(st, st)
-        for t, cp in text_runs:
-            run = ET.SubElement(par.element, HP + "run", {"charPrIDRef": cp})
-            te = ET.SubElement(run, HP + "t")
-            pieces = t.split("\t")  # 탭은 글자가 아니라 hp:tab 요소
-            te.text = pieces[0]
-            for piece in pieces[1:]:
-                tab = ET.SubElement(te, HP + "tab", {"width": "0", "leader": "0", "type": "1"})
-                tab.tail = piece
+        for t, cp in text_runs:  # 탭은 폭 0을 적은 한/글 꼴 <hp:tab width="0" leader="0" type="1"/>(add_run(tab_widths=))
+            par.add_run(t, char_pr_id_ref=cp, tab_widths=[0] * t.count("\t") if "\t" in t else None)
         return par
 
     def table_in(par, rows, cols, widths, heights, *, inline=True):
