@@ -17,28 +17,21 @@ from hwpx.document import HwpxDocument
 from hwpx.tools.document_merge import insert_document
 
 from . import q
+from .read import flat
 
 # 보존 구간의 시작 — 문단 글이 이렇게 시작하면 서술형·논술형 구간이다(【서술형 1】·[논술형]·서답형 1. 등).
 START_RE = re.compile(r"^\s*[\[【〔<(■□◆◇▶]?\s*(?:서\s*[·ㆍ]?\s*논술형|서술형|논술형|서답형)")
 _책갈피 = re.compile(r"^(보존_\d+)_(시작|끝)$")
 
 
-#: nested_text가 글자로 내는 글리프(탭·줄 바꿈·특수 빈칸)와 토막 사이 줄 바꿈 — 옛 hp:t itertext처럼 글로 세지 않는다.
-_GLYPHS = re.compile("[\t\n 　­]")
 #: "빈 문단"을 가르는 개체 — 옛 판정(표·그림·수식·도형·묶음·OLE·글맵시)과 같은 종류
 _OBJECT_KINDS = ("table", "picture", "equation", "shape", "ole", "textart")
 
 
-def _plain(el) -> str:
-    """문단 자신의 글(hp:t만 — 수식 스크립트·설명 글은 넣지 않는다), 공백 하나로. (요소를 받는 옛 판 — reverse·roundtrip이
-    문단 객체로 옮기면 지운다. 새 판은 ``paragraph_text``.)"""
-    return re.sub(r"\s+", " ", "".join("".join(t.itertext()) for t in el.iter(q("hp", "t")))).strip()
-
-
 def paragraph_text(paragraph) -> str:
     """문단 글(문단 안 표 칸·글상자·캡션 글까지 문서 차례로 — ``nested_text``), 글리프는 빼고 공백 하나로.
-    수식 스크립트·설명 글은 넣지 않는다. 옛 ``_plain(p.element)``과 같은 값."""
-    return re.sub(r"\s+", " ", _GLYPHS.sub("", paragraph.nested_text())).strip()
+    수식 스크립트·설명 글은 넣지 않는다(read.flat)."""
+    return flat([paragraph])
 
 
 def ranges(doc: HwpxDocument) -> list[tuple[int, int]]:
@@ -57,25 +50,14 @@ def inside(i: int, spans: list[tuple[int, int]]) -> bool:
     return any(a <= i <= b for a, b in spans)
 
 
-def find_start(paras: list, first: int, end: int) -> int | None:
-    """보존 구간의 시작 문단 번호(first ≤ i < end) — 책갈피가 없는 원안지는 서술형·논술형 머리 글(START_RE)로 찾는다.
-    (문단 요소를 받는 옛 판. 새 판은 ``find_start_in``.)"""
-    return next((i for i in range(first, end) if START_RE.match(_plain(paras[i]))), None)
-
-
-def preview(paras: list) -> list[str]:
-    """읽기용 미리보기 — 구간 최상위 문단마다 글 한 줄(빈 문단은 뺀다). 조판은 이 줄을 쓰지 않는다.
-    (문단 요소를 받는 옛 판. 새 판은 ``preview_of``.)"""
-    return [t for p in paras if (t := _plain(p))]
-
-
 def find_start_in(paragraphs: list, first: int, end: int) -> int | None:
-    """``find_start``의 문단 객체 판 — paragraphs는 구역 0의 최상위 문단(``doc.sections[0].paragraphs``)."""
+    """보존 구간의 시작 문단 번호(first ≤ i < end) — 책갈피가 없는 원안지는 서술형·논술형 머리 글(START_RE)로 찾는다.
+    paragraphs는 구역 0의 최상위 문단(``doc.sections[0].paragraphs``)."""
     return next((i for i in range(first, end) if START_RE.match(paragraph_text(paragraphs[i]))), None)
 
 
 def preview_of(paragraphs: list) -> list[str]:
-    """``preview``의 문단 객체 판."""
+    """읽기용 미리보기 — 구간 최상위 문단마다 글 한 줄(빈 문단은 뺀다). 조판은 이 줄을 쓰지 않는다."""
     return [t for p in paragraphs if (t := paragraph_text(p))]
 
 

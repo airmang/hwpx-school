@@ -19,7 +19,8 @@ import re
 from hwpx.document import HwpxDocument
 
 from .reverse import GENERIC_BOXES, FormProfile
-from .verify import _nested_raw, _numbered_para_prs
+from .read import flat, table_paragraphs
+from .verify import _numbered_para_prs
 
 미등록 = "미등록"
 _번호 = re.compile(r"^\s*(\d{1,3})\s*[.．)]\s*\S")
@@ -28,17 +29,6 @@ _기본_필수 = ("양식", "학년도", "학년", "학기", "차", "과목", "�
 
 #: run.content 조각 중 hp:t 안의 글(글리프·표시는 빼고).
 _TEXT_KINDS = ("text", "unknown")
-
-
-def _flat(paragraphs) -> str:
-    """문단들의 글 — 문단 안 표 칸·글상자·캡션 글까지 문서 차례로(``nested_text``), 글리프는 빼고 공백을 하나로 접는다."""
-    return re.sub(r"\s+", " ", _nested_raw(paragraphs)).strip()
-
-
-def _table_paragraphs(table) -> list:
-    """표의 문단 — 캡션, 그리고 행·칸 차례(칸 안 표는 칸 문단의 nested_text가 읽는다)."""
-    out = list(table.caption.paragraphs) if table.caption is not None else []
-    return out + [p for row in table.rows for cell in row.cells for p in cell.paragraphs]
 
 
 def _own_text(p) -> str:
@@ -74,7 +64,7 @@ def tail(doc: HwpxDocument) -> int:
                 return i
     hs = heads(doc)
     for i in range(hs[-1] + 1 if hs else 1, len(ps)):
-        if any(_flat(_table_paragraphs(place.object)).startswith("※") for place in ps[i].iter_objects(kinds="table")):
+        if any(flat(table_paragraphs(place.object)).startswith("※") for place in ps[i].iter_objects(kinds="table")):
             return i
     return len(ps)
 
@@ -83,9 +73,9 @@ def front(doc: HwpxDocument) -> dict[str, str | None]:
     """첫 문항 앞의 글·머리말·꼬리말에서 찾은 머리 값 — 못 찾으면 None."""
     hs = heads(doc)
     ps = list(doc.sections[0].paragraphs)
-    before = " ".join(_flat([p]) for p in ps[:hs[0] if hs else len(ps)])
+    before = " ".join(flat([p]) for p in ps[:hs[0] if hs else len(ps)])
     first = doc.sections[0]
-    hf = " ".join(_flat(story.paragraphs) for story in (*doc.page.headers(section=first), *doc.page.footers(section=first)))
+    hf = " ".join(flat(story.paragraphs) for story in (*doc.page.headers(section=first), *doc.page.footers(section=first)))
     text = f"{hf} {before}"  # 머리말이 더 믿을 만하다 — 먼저 찾는다
 
     def find(rx: str) -> str | None:

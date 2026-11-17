@@ -8,7 +8,6 @@ finalize_form: (조판 뒤) 잔여 문단 제거 → 양식 원본 이미지·�
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,32 +16,11 @@ from hwpx.document import HwpxDocument
 
 from . import q
 from .kit import Kit, sha256, style_ids
+from .read import is_blank as _blank, nested_raw as _ptext, table_paragraphs as _table_paragraphs, table_text as _table_text
 
 
 
 # ---- 문단·표 읽기(공개 API) ---------------------------------------------------
-
-#: nested_text가 글자로 내는 글리프(탭·줄 바꿈·특수 빈칸)와 토막 사이 줄 바꿈 — 옛 itertext처럼 글로 세지 않는다.
-_GLYPHS = re.compile("[\t\n 　­]")
-
-
-def _ptext(paragraphs) -> str:
-    """문단들의 글 — 문단 안 표 칸·글상자·캡션·각주·메모 글까지 문서 차례로(``nested_text``), 글리프는 뺀다.
-
-    옛 ``_text(el)``(요소 아래 itertext)와 다른 점: 수식 스크립트·누름틀 매개변수 글은 들지 않고, 메모 글은 든다.
-    양식 판정은 사람에게 보이는 글(안내 문구·식별어)로 하므로 이쪽이 뜻에 맞다."""
-    return "".join(_GLYPHS.sub("", p.nested_text()) for p in paragraphs)
-
-
-def _table_paragraphs(table) -> list:
-    """표의 문단 — 캡션, 그리고 행·칸 차례(칸 안 표·글상자는 칸 문단의 nested_text가 읽는다)."""
-    out = list(table.caption.paragraphs) if table.caption is not None else []
-    return out + [p for row in table.rows for cell in row.cells for p in cell.paragraphs]
-
-
-def _table_text(table) -> str:
-    return _ptext(_table_paragraphs(table))
-
 
 def _style_ids(table) -> set[str]:
     """표 안(칸 안 표·글상자까지) 모든 문단의 스타일 id — 옛 ``_inner_style_ids``."""
@@ -55,17 +33,6 @@ def _style_ids(table) -> set[str]:
             out |= {str(x.paragraph.style_id_ref) if x.paragraph.style_id_ref is not None else "0"
                     for x in place.object.iter_paragraphs()}
     return out
-
-
-def _blank(paragraph) -> bool:
-    """글도 개체도 누름틀도 없는 문단 — 옛 ``_is_blank``(itertext가 비고 표·그림이 없다)의 뜻을 지킨다.
-
-    옛 판정은 수식 스크립트·누름틀 매개변수 글이 있으면 비지 않았다고 봤다: 그래서 수식·누름틀이 든 문단은 비지 않았다."""
-    if _ptext([paragraph]).strip():
-        return False
-    if next(iter(paragraph.iter_objects()), None) is not None:
-        return False
-    return not any(item.kind == "field_begin" for run in paragraph.runs for item in run.content)
 
 
 # ---- Task 5·6에서 옮겨 옴(변종 인자 없이 정리) — 요소를 받는 옛 판: 다른 lane(compose·slots·verify·reverse)이 옮기면 지운다 --
@@ -362,10 +329,6 @@ def prepare_document(form: Path, kit: Kit) -> tuple[HwpxDocument, Prepared]:
         raise ValueError(f"양식 sha256 불일치 — kit.json을 다시 재라: {got}")
     doc = HwpxDocument.open(str(form))
     return doc, prepare_form(doc, kit)
-
-
-def _is_blank(p_el) -> bool:
-    return "".join(p_el.itertext()).strip() == "" and p_el.find(f".//{q('hp', 'tbl')}") is None and p_el.find(f".//{q('hp', 'pic')}") is None
 
 
 def _drop_leftovers(doc: HwpxDocument, kit: Kit) -> int:

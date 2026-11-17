@@ -10,6 +10,7 @@ from hwpx.document import HwpxDocument
 
 from .geometry import equation_glyphs, measure, tail_box_rect, tail_box_top, text_lines
 from .kit import Kit, style_ids
+from .read import is_blank, nested_raw, script, tree
 from .render import RenderResult
 
 
@@ -34,84 +35,17 @@ def _numbered_para_prs(doc: HwpxDocument) -> set[str]:
 
 
 _글자_번호 = re.compile(r"^\d{1,3}\.\s?$")
-#: nested_text가 글자로 내는 글리프와 토막 사이 줄 바꿈 — 글을 찾을 때는 글로 세지 않는다(옛 itertext와 같게).
-_GLYPHS = re.compile("[\t\n\u00a0\u3000\u00ad]")
-
-
-def _nested_raw(paragraphs) -> str:
-    """문단들의 글을 문단 안 표 칸·글상자·캡션 글까지 문서 차례로(``nested_text``) — 글리프와 토막 사이 줄 바꿈은 빼고, 공백은 그대로."""
-    return "".join(_GLYPHS.sub("", p.nested_text()) for p in paragraphs)
-
-
-def _script(obj) -> str:
-    """수식 개체의 스크립트 — 문서 전체 걷기(iter_objects)가 준 개체는 그 문단의 수식 객체(paragraph.equations)로 읽는다."""
-    if hasattr(obj, "script"):
-        return obj.script
-    return next((eq.script for eq in obj.paragraph.equations if eq == obj), "") if obj.paragraph is not None else ""
-
-
-def _has_text(paras) -> bool:
-    """문단들 아래에 글이 있는가 — 글자(안쪽 표 칸·글상자·캡션·각주까지), 개체 설명(대체 글)·수식 스크립트, 누름틀
-    매개변수·찾아보기 표시·덧말 글까지 센다(옛 판정이 요소 아래 모든 글을 셌다). 글리프(탭·줄 바꿈·빈칸)는 글이 아니다."""
-    if _nested_raw(paras).strip():
-        return True
-    for p in paras:
-        for place in p.iter_objects():
-            o = place.object
-            if hasattr(o, "description") and o.description.strip():
-                return True
-            if place.kind == "equation" and _script(o).strip():
-                return True
-        for run in p.runs:
-            for item in run.content:
-                if item.kind in ("field_begin", "index_mark") or (item.kind == "unknown" and item.container != "t") \
-                        or item.name == "edit":  # 입력 상자는 제 글을 담는다
-                    # 모르는 요소(컨트롤 안에 잘못 든 글·표 등)는 내용으로 본다 — 빈 칸·빈 문단으로 지나치지 않는다
-                    return True
-                if item.kind == "ruby" and (item.object.text.strip() or item.object.ruby_text.strip()):
-                    return True
-    return False
-
-
-def _is_blank_paragraph(p) -> bool:
-    """빈 문단 — 글이 없고(_has_text) 안에 표·그림이 없다(prepare._is_blank의 문단 객체판)."""
-    return not _has_text([p]) and not any(True for _ in p.iter_objects(kinds=("table", "picture")))
-
-
-def _tree(p):
-    """문단과 그 안의 문단(표 캡션·칸, 도형 안, 그림 등 개체 캡션, 각주·미주, 메모 누름틀)을 문서 차례로."""
-    yield p
-    for run in p.runs:
-        for item in run.content:
-            o = item.object
-            if o is None:
-                continue
-            if item.kind == "table":
-                inner = list(o.caption.paragraphs) if o.caption is not None else []
-                inner += [q for row in o.rows for cell in row.cells for q in cell.paragraphs]
-                for q in inner:
-                    yield from _tree(q)
-            elif item.kind == "shape":
-                yield from (place.paragraph for place in o.iter_paragraphs())
-            elif item.kind in ("footnote", "endnote", "field_begin") and hasattr(o, "paragraphs"):
-                for q in o.paragraphs:
-                    yield from _tree(q)
-            elif getattr(o, "caption", None) is not None:
-                for q in o.caption.paragraphs:
-                    yield from _tree(q)
-
-
 def _section_text(doc: HwpxDocument) -> str:
     """구역 0의 글 — 문단 글(안쪽 표 칸·글상자·캡션·머리말·각주까지), 메모 글, 개체 설명·수식 스크립트, 누름틀 안내문·메모.
     금지 문구(서식 안내·샘플 글)가 남았는지 찾을 때 쓴다."""
     first = doc.sections[0]
-    parts = [_nested_raw(first.paragraphs)]
-    parts += [_nested_raw(memo.paragraphs) for memo in first.memos]
+    parts = [nested_raw(first.paragraphs)]
+    parts += [nested_raw(memo.paragraphs) for memo in first.memos]
     for place in doc.text.iter_objects():
         if place.section is first or place.section == first:
             o = place.object
             parts.append(o.description if hasattr(o, "description") else "")
-            parts.append(_script(o) if place.kind == "equation" else "")
+            parts.append(script(o) if place.kind == "equation" else "")
     parts += [f"{f.prompt}{f.memo}" for f in doc.fields.all]
     return "".join(parts)
 
@@ -157,7 +91,7 @@ def _tail_index(doc: HwpxDocument, marker: str | None = None) -> int:
     ps = list(doc.sections[0].paragraphs)
     for i in range(len(ps) - 1, 0 if marker is None else -1, -1):
         if marker is not None:
-            if marker in _nested_raw([ps[i]]):
+            if marker in nested_raw([ps[i]]):
                 return i
         elif any(not (pos := place.object.position).treat_as_char and pos.vertical_relative_to == "PAPER"
                  for place in ps[i].iter_objects(kinds="table")):
@@ -172,7 +106,7 @@ def extract_answers(doc: HwpxDocument) -> dict[str, str]:
     for k, start in enumerate(heads, 1):
         end = heads[k] if k < len(heads) else _tail_index(doc)
         for top in ps[start:end]:
-            for p in _tree(top):
+            for p in tree(top):
                 for run in p.runs:
                     items = run.content
                     for i, item in enumerate(items):
@@ -205,7 +139,7 @@ def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, st
     kept = ranges(doc)  # 보존 구간(원본 모양 그대로 심은 서술형 등)은 양식 모양 검사(M7a·M7b)에서 뺀다 — 원본 그대로가 목적이다
     if heads:
         for i in range(heads[0], tail):
-            if _is_blank_paragraph(ps[i]) and not inside(i, kept):
+            if is_blank(ps[i]) and not inside(i, kept):
                 fs.append(_f("M7a", f"빈 최상위 문단 (index {i})"))
     ids = style_ids(doc)
     allowed = {ids[n][0] for n in kit.styles.values() if n in ids}  # 킷 스타일 8종의 id

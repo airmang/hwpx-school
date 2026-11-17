@@ -29,7 +29,8 @@ from .kit import Kit
 from .scan import Overlay, overlay_line
 from .slots import read_text_slots
 from .source import Source, SourceError, open_source
-from .verify import _has_text, _nested_raw, _tail_index, question_heads
+from .read import has_text, nested_raw, table_paragraphs
+from .verify import _tail_index, question_heads
 
 원문자 = "①②③④⑤"
 노랑 = "#FFFF00"
@@ -305,17 +306,16 @@ def _join_items(lines: list[str]) -> list[str]:
 
 
 def _blank_cell(tc: TableCell | None) -> bool:
-    """빈 칸 — 글이 없고(_has_text) 칸 문단 바로 아래 그림·표가 없다. 글 없는 도형만 든 칸은 빈 칸이다."""
+    """빈 칸 — 글이 없고(read.has_text) 칸 문단 바로 아래 그림·표가 없다. 글 없는 도형만 든 칸은 빈 칸이다."""
     if tc is None:
         return False
     paras = _cell_paras(tc)
-    return not any(_pics(p) or p.tables for p in paras) and not _has_text(paras)
+    return not any(_pics(p) or p.tables for p in paras) and not has_text(paras)
 
 
 def _table_text(tbl: Table) -> str:
     """표의 글(캡션 → 행 → 칸 문단, 안쪽 표·글상자까지) — 글리프는 빼고 공백은 그대로."""
-    caption = list(tbl.caption.paragraphs) if tbl.caption is not None else []
-    return _nested_raw(caption + [p for tc in _cells(tbl) for p in _cell_paras(tc)])
+    return nested_raw(table_paragraphs(tbl))
 
 
 def _is_box_frame(tbl: Table, spec: dict) -> bool:
@@ -525,12 +525,12 @@ def kit_front(doc: HwpxDocument, kit: Kit) -> dict[str, str | None]:
         x = g(slot) or None
         return None if x is None or (digits and not x.isdigit()) else x
 
-    header = " ".join(_nested_raw(story.paragraphs) for story in doc.page.headers(section=doc.sections[0]))
+    header = " ".join(nested_raw(story.paragraphs) for story in doc.page.headers(section=doc.sections[0]))
     학년도 = re.search(r"(\d{4})학년도", header)
     tc = kit.teacher_cell or {"label": "출제교사", "template": "{name}", "placeholder": ""}  # 글자 자리 양식은 칸 글 그대로
     pre, post = (re.escape(x.strip()) for x in tc["template"].split("{name}"))
     teacher = re.search(rf"{re.escape(tc['label'])}\s*{pre}\s*(\S+?)\s*{post}",
-                        _nested_raw([doc.sections[0].paragraphs[kit.admin["paragraph"]]]))
+                        nested_raw([doc.sections[0].paragraphs[kit.admin["paragraph"]]]))
     grade = 값("학년", digits=True)
     names = set(kit.slots) | {n for t in kit.text_slots for n in re.findall(r"{(\w+)}", t["fill"])}
 
@@ -986,7 +986,7 @@ def reverse_body(paras: list[Paragraph], heads: set[int], underlined: set[str], 
 
     def stop(e: ValueError, i: int | None) -> ReverseStop:
         el = paras[i] if i is not None else None
-        snippet = "" if el is None else re.sub(r"\s+", " ", _nested_raw([el])).strip()[:20]
+        snippet = "" if el is None else re.sub(r"\s+", " ", nested_raw([el])).strip()[:20]
         page = None if not pages else pages[i if i is not None else -1]
         return ReverseStop(str(e), question=k or None, page=page, paragraph=i, snippet=snippet)
 
@@ -1053,7 +1053,7 @@ def reverse(src: Path | Source, kit: Kit | FormProfile, *, image_dir: Path | Non
     pages = page_guess(ps, _columns(doc))
     # 보존 구간(서술형·논술형 등 — 아직 조판하지 않는다): 다시 조판한 문서는 책갈피로, 원안지는 머리 글로 찾는다
     spans = preserve.ranges(doc)
-    keep = spans[0][0] if spans else _preserve_start(ps, heads[0] + 1, tail)
+    keep = spans[0][0] if spans else preserve.find_start_in(ps, heads[0] + 1, tail)
     end = tail if keep is None else keep
     gp = para_geometry(doc)
     geo = Geometry(column_width(doc), gp, para_tops(ps[first:end], gp))
@@ -1089,24 +1089,8 @@ def _preserved(src: Source, ps: list[Paragraph], start: int, end: int, image_dir
         raise ReverseStop("보존 구간(서술형·논술형 등)이 있는데 그 파일을 둘 자리(image_dir)가 없다", page=page, paragraph=start)
     name = "보존_01.hwpx"
     preserve.write_region(src.hwpx, start, end, Path(image_dir) / name)
-    lines = [re.sub(r"^\s*(```|:::)+", "", x) for x in _preserve_preview(ps[start:end])]  # 미리보기가 원고 문법을 깨지 않게
+    lines = [re.sub(r"^\s*(```|:::)+", "", x) for x in preserve.preview_of(ps[start:end])]  # 미리보기가 원고 문법을 깨지 않게
     return ["", "## 보존", f':::보존 src="{name}"', *[x for x in lines if x.strip()], ":::"]
-
-
-def _plain(p: Paragraph) -> str:
-    """문단 글(안쪽 표 칸·글상자까지, 수식 스크립트·설명 글은 넣지 않는다) 공백 하나로 — preserve._plain의 문단 객체판."""
-    return " ".join(_nested_raw([p]).split())
-
-
-def _preserve_start(paras: list[Paragraph], first: int, end: int) -> int | None:
-    """보존 구간의 시작 문단 번호(first ≤ i < end) — 책갈피가 없는 원안지는 서술형·논술형 머리 글(preserve.START_RE)로
-    찾는다(preserve.find_start의 문단 객체판)."""
-    return next((i for i in range(first, end) if preserve.START_RE.match(_plain(paras[i]))), None)
-
-
-def _preserve_preview(paras: list[Paragraph]) -> list[str]:
-    """읽기용 미리보기 — 구간 최상위 문단마다 글 한 줄(빈 문단은 뺀다; preserve.preview의 문단 객체판)."""
-    return [t for p in paras if (t := _plain(p))]
 
 
 def _given(pairs: list[str]) -> dict[str, str]:
