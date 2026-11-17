@@ -91,39 +91,40 @@ def _black_twin(doc: HwpxDocument, charpr_id: str, *, upright: bool = False) -> 
 
 
 def _unred(doc: HwpxDocument, run, *, upright: bool = False) -> None:
+    run = getattr(run, "element", run)  # 공개 run(값 run) · 요소(출제교사 칸의 옛 길)
     cpid = run.get("charPrIDRef")
     black = _black_twin(doc, cpid, upright=upright)
     if black != cpid:
         run.set("charPrIDRef", black)
 
 
-def _find_fieldbegin(root, field_id: str):
-    for el in root.iter():
-        tag = el.tag
-        if isinstance(tag, str) and tag.endswith("}fieldBegin"):
-            fid = el.get("id") or el.get("fieldid") or el.get("name")
-            if fid == field_id:
-                return el
-    return None
+def _field_value_runs(p0, field_id: str) -> list:
+    """p0(과 그 안 문단)에서 id가 field_id인 누름틀 시작(fieldBegin)을 찾아, 그 run 다음부터 다음 컨트롤(=fieldEnd) 전까지
+    글자가 있는 run들 — 그 필드가 화면에 보여주는 값. 없으면 [].
+
+    fieldBegin의 id는 옛 판처럼 id → fieldid → name 차례로 읽는다. fieldBegin 자신이 든 run(및 fieldEnd가 든 run)은
+    화면에 보이지 않는 빈 칸(공백)뿐이라 글자 판정에서 자연히 빠진다. 글자 판정은 옛 판처럼 run의 hp:t마다 첫 글(조각
+    앞)이 공백이 아닌가로 한다."""
+    for para in [p0, *(place.paragraph for place in p0.iter_paragraphs())]:
+        runs = para.runs
+        for i, run in enumerate(runs):
+            if not any(it.kind == "field_begin" and (it.attribute("id") or it.attribute("fieldid") or it.attribute("name"))
+                       == field_id for it in run.content):
+                continue
+            값_run: list = []
+            for nxt in runs[i + 1:]:
+                if any(it.container == "ctrl" for it in nxt.content):
+                    break  # 다음 컨트롤(=fieldEnd)에 도달
+                if any(_t_첫_글(nxt, k).strip() for k in {it.child_index for it in nxt.content if it.container == "t"}):
+                    값_run.append(nxt)
+            return 값_run
+    return []
 
 
-def _field_value_runs(fb) -> list:
-    """fieldBegin이 든 run부터 다음 컨트롤(=fieldEnd) 전까지, 글자가 있는 run들 — 그 필드가 화면에 보여주는 값.
-
-    fieldBegin 자신이 든 run(및 fieldEnd가 든 run)은 화면에 보이지 않는 빈 칸(공백)뿐이라
-    글자 판정에서 자연히 빠진다 — 여기서 따로 건너뛰지 않아도 된다.
-    """
-    control_run = fb.getparent().getparent()  # fieldBegin → ctrl → run
-    para = control_run.getparent()
-    siblings = para.findall(q("hp", "run"))
-    i = siblings.index(control_run)
-    값_run: list = []
-    for nxt in siblings[i + 1:]:
-        if nxt.find(q("hp", "ctrl")) is not None:
-            break  # 다음 컨트롤(=fieldEnd)에 도달
-        if any((t.text or "").strip() for t in nxt.findall(q("hp", "t"))):
-            값_run.append(nxt)
-    return 값_run
+def _t_첫_글(run, child_index: int) -> str:
+    """run의 child_index번 hp:t의 첫 글 — 그 안 첫 조각이 글이면 그 글(옛 ``t.text``), 표시·글리프로 시작하면 ''."""
+    first = next(it for it in run.content if it.container == "t" and it.child_index == child_index)
+    return first.text if first.kind == "text" else ""
 
 
 def slot_values(fm: FrontMatter, *, question_count: int, total_points: float, page_count: int | None) -> dict[str, str | None]:
@@ -297,7 +298,7 @@ def fill_slots(doc: HwpxDocument, kit: Kit, fm: FrontMatter, *, question_count: 
         tv = _text_values(fm, question_count=question_count, total_points=total_points, page_count=page_count)
         return {k: v for k, v in fill_text_slots(doc, kit, fm, tv).items() if v is not None}
     values = slot_values(fm, question_count=question_count, total_points=total_points, page_count=page_count)
-    p0 = doc.sections[0].paragraphs[0].element
+    p0 = doc.sections[0].paragraphs[0]
     채움: dict[str, str] = {}
     for slot, fid in kit.slot_ids().items():
         v = values.get(slot)
@@ -309,10 +310,8 @@ def fill_slots(doc: HwpxDocument, kit: Kit, fm: FrontMatter, *, question_count: 
         # run 자체가 빨강인 슬롯(선택형_문항수·선택형_만점·총쪽수)은 채워도 빨강으로 남는다.
         # 방금 채운 슬롯만 손보고, 아직 안 채운(초안) 자리표시는 건드리지 않는다 — 빨강은
         # verify.py의 초안 경고가 쓰는 신호다.
-        fb = _find_fieldbegin(p0, fid)
-        if fb is not None:
-            for run in _field_value_runs(fb):
-                _unred(doc, run)
+        for run in _field_value_runs(p0, fid):
+            _unred(doc, run)
     if kit.teacher_cell is not None:
         _fill_teacher(doc, kit, fm.출제교사)
     doc.sections[0].mark_dirty()
@@ -331,8 +330,6 @@ def fill_total_pages(doc: HwpxDocument, kit: Kit, pages: int) -> None:
         return
     fid = kit.slots["총쪽수"]
     doc.fields.fill(str(pages), field_id=fid)
-    fb = _find_fieldbegin(doc.sections[0].paragraphs[0].element, fid)
-    if fb is not None:
-        for run in _field_value_runs(fb):
-            _unred(doc, run)
+    for run in _field_value_runs(doc.sections[0].paragraphs[0], fid):
+        _unred(doc, run)
     doc.sections[0].mark_dirty()

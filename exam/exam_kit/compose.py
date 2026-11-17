@@ -362,6 +362,14 @@ class ComposeResult:
     notes: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _틀:
+    """:::도형 자리를 잡는 보이지 않는 틀의 계획(HWPUNIT) — materialize가 그린다."""
+
+    width: int
+    height: int
+
+
 @dataclass
 class _Para:
     """삽입 전 문단 계획. segs의 charPr가 None이면 그 역할 스타일의 charPr."""
@@ -1154,25 +1162,33 @@ class _Composer:
                     p.add_run(text, char_pr_id_ref=c or cp)
             if spec.mark:
                 _mark_first(p, spec.mark, spec.segs)
-        if spec.obj is not None:
-            p.element.find(q("hp", "run")).insert(0, spec.obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
+        obj = spec.obj
+        if isinstance(obj, _틀):
+            obj = self._put_frame(p, obj)
+        elif obj is not None:
+            p.element.find(q("hp", "run")).insert(0, obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
         if spec.drawing is not None:
-            self._draw(p, pid, spec.obj, spec.drawing)
+            self._draw(p, pid, obj, spec.drawing)
         if spec.overlays:
-            self._overlay(p, pid, spec.obj, spec.overlays)
+            self._overlay(p, pid, obj, spec.overlays)
         return p
 
     # ---- 좌표로 그리는 도형(:::도형) ------------------------------------------------------------------
 
-    def _frame(self, w: int, h: int) -> ET._Element:
-        """도형 자리를 잡는 보이지 않는 틀 — 글자처럼 취급한 선·채움 없는 사각형(그림 자리와 같은 구실)."""
+    def _frame(self, w: int, h: int) -> "_틀":
+        """도형 자리를 잡는 보이지 않는 틀(글자처럼 취급한 선·채움 없는 사각형, 그림 자리와 같은 구실)의 계획 — 그리기는
+        materialize가 한다(_put_frame)."""
+        return _틀(w, h)
+
+    def _put_frame(self, p, frame: "_틀"):
+        """틀을 p의 첫 자리에 — 임시 문단에 공개 API(add_rectangle)로 그리고 move_to로 옮긴 뒤 임시 문단을 지운다."""
         sec = self.doc.sections[0]
         tmp = sec.add_paragraph("")
-        el = tmp.add_rectangle(w, h, line_width_mm=0, treat_as_char=True).element
-        el.find(q("hp", "lineShape")).set("style", "NONE")
-        el.getparent().remove(el)
+        rect = tmp.add_rectangle(frame.width, frame.height, line_width_mm=0, treat_as_char=True)
+        rect.line_style = "NONE"
+        rect.move_to(p, offset=0, keep_order=True)
         sec.remove_paragraph(tmp)
-        return el
+        return rect
 
     def _drawing_labels(self, d) -> list[Overlay]:
         """얹을 글자·점 — 점 이름(정자, 이름 놓을 쪽으로 글자 반 크기 + 틈만큼), 길이 숫자(호 꼭대기 바깥), 점 찍기, 자유 글자."""
@@ -1242,7 +1258,7 @@ class _Composer:
     def _draw(self, p, pid: str, frame: ET._Element, d) -> None:
         """도형을 개체마다 따로 — 면(채운 다각형, 테두리 없음) → 선·점선 → 곡선 → 길이 점선 호 → 직각 표시. 글자·점은 _overlay가
         뒤에 얹는다(문단 안 차례 = 위에 그려지는 차례)."""
-        x0, y0 = self._origin(pid, int(frame.find(q("hp", "sz")).get("width")))
+        x0, y0 = self._origin(pid, frame.box_width)
 
         def hw(pts):  # cm 좌표들 → (단 기준 왼쪽 위, 그 기준의 상대 좌표들) HWPUNIT
             xs, ys = [round(x * CM) for x, _ in pts], [round(y * CM) for _, y in pts]
@@ -1310,10 +1326,10 @@ class _Composer:
                 out.append(f"${o.latex}$ {{x={o.x_cm}cm y={o.y_cm}cm}}")
         return out
 
-    def _overlay_room(self, pic: ET._Element, overlays: list[Overlay]) -> tuple[int, int]:
+    def _overlay_room(self, pic, overlays: list[Overlay]) -> tuple[int, int]:
         """얹은 것이 그림 위끝보다 위로, 아래끝보다 아래로 나가는 만큼(HWPUNIT). 한/글은 문단 기준 음수 세로 오프셋을 0으로
         자른다(실한컴 렌더 10-26: 그림 위로 0.3cm 나간 글자가 문단 위끝에 붙었다) — 위로 나가는 만큼 문단 앞 간격을 둔다."""
-        h = int(pic.find(q("hp", "sz")).get("height"))
+        h = int(pic.find(q("hp", "sz")).get("height")) if isinstance(pic, ET._Element) else pic.height  # 그림 요소 · 틀 계획
         above = below = 0
         for o in overlays:
             bh = self._overlay_box(o)[1]
@@ -1329,7 +1345,7 @@ class _Composer:
         **위**이고, 글자처럼 취급한 그림 혼자인 문단에서 그림 위끝은 원점 + prev다. 가운데 문단의 그림 왼끝은 줄 시작 +
         (줄 폭 − 그림 폭) / 2(실한컴 렌더 실측 10-26: 원점·그림 위끝 오차 0.2pt 안). 원고 좌표는 그림 왼쪽 위에서 잰
         얹을 것의 중심이다. 수식 글자는 상자 + 바깥 여백 안쪽에 찍힌다(hp:outMargin)."""
-        x0, y0 = self._origin(pid, int(pic.find(q("hp", "sz")).get("width")))
+        x0, y0 = self._origin(pid, int(pic.find(q("hp", "sz")).get("width")) if isinstance(pic, ET._Element) else pic.box_width)
         cp = self.style["number"][2]  # 발문 수식과 같은 글자 크기(발문 = 문항 번호 스타일 문단)
         for o in overlays:
             cx, cy = x0 + round(o.x_cm * CM), y0 + round(o.y_cm * CM)
