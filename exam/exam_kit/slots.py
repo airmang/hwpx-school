@@ -17,23 +17,17 @@ from .read import cells_deep, t_text, table_paragraphs
 _빨강 = "#FF0000"
 
 
-def _set_para_text(p_el, text: str) -> None:
-    """첫 run의 charPr를 지키고 본문을 text 하나로 바꾼다(탭·형광펜 등 자식 제거). prepare에서 옮겨 온 옛 길 — 공개
-    ``run.text``는 빈 글 조각을 남기고 줄 캐시를 지워 바이트가 달라진다(기준 1 밖이라 그대로 둔다)."""
-    runs = p_el.findall(q("hp", "run"))
+def _set_para_text(p, text: str) -> None:
+    """첫 run의 charPr를 지키고 본문을 text 하나로 바꾼다 — 공개 API: 둘째 run부터 지우고(run.remove) 첫 run의 글을
+    run.text로. B13(결정 전): 옛 판(next7/all)은 첫 run의 hp:t를 모두 지우고 새 hp:t 하나를 붙였다 — 공개 run.text는
+    첫 hp:t에 글을 쓰고 나머지 hp:t는 비워 남기며, 그 문단의 줄 캐시를 지운다."""
+    runs = p.runs
     if not runs:
-        run = p_el.makeelement(q("hp", "run"), {})
-        p_el.append(run)
-    else:
-        run = runs[0]
-        for extra in runs[1:]:
-            p_el.remove(extra)
-    for child in list(run):
-        if child.tag == q("hp", "t"):
-            run.remove(child)
-    t = run.makeelement(q("hp", "t"), {})
-    run.append(t)
-    t.text = text
+        p.add_run(text)
+        return
+    for extra in runs[1:]:
+        extra.remove()
+    runs[0].text = text
 
 
 def _fmt_points(x: float) -> str:
@@ -121,13 +115,12 @@ def _fill_teacher(doc: HwpxDocument, kit: Kit, name: str) -> None:
     p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]]
     결재란 = next(t for t in p0.tables if kit.teacher_cell["label"] in t_text(table_paragraphs(t)))
     cell = next(c for row in 결재란.rows for c in row.cells if kit.teacher_cell["label"] in t_text(c.paragraphs))
-    ps = [p.element for p in cell.paragraphs]
+    ps = list(cell.paragraphs)
     if len(ps) < 2:
         raise ValueError("출제교사 셀 문단이 2개 미만")
     _set_para_text(ps[1], kit.teacher_cell["template"].format(name=name))
-    run = ps[1].find(q("hp", "run"))  # _set_para_text가 남긴 단 하나의 run — 자리표시 charPr(빨강·기울임)를 그대로 물려받는다
-    if run is not None:
-        _unred(doc, run, upright=True)  # 출제교사 이름은 정자체로(09-23 요청)
+    if ps[1].runs:  # _set_para_text가 남긴 단 하나의 run — 자리표시 charPr(빨강·기울임)를 그대로 물려받는다
+        _unred(doc, ps[1].runs[0], upright=True)  # 출제교사 이름은 정자체로(09-23 요청)
     for extra in ps[2:]:
         _set_para_text(extra, "")
     doc.sections[0].mark_dirty()
