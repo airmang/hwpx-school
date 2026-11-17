@@ -55,17 +55,11 @@ def _black_twin(doc: HwpxDocument, charpr_id: str, *, upright: bool = False) -> 
 
 
 def _unred(doc: HwpxDocument, run, *, upright: bool = False) -> None:
-    """run(공개 run 또는 아직 요소로 다루는 run)의 글자 모양을 검정 쌍둥이로."""
-    if hasattr(run, "char_pr_id_ref"):
-        cpid = run.char_pr_id_ref
-        black = _black_twin(doc, cpid, upright=upright)
-        if black != cpid:
-            run.char_pr_id_ref = black
-        return
-    cpid = run.get("charPrIDRef")
+    """공개 run의 글자 모양을 검정 쌍둥이로(누름틀 값 run·출제교사 이름 run)."""
+    cpid = run.char_pr_id_ref
     black = _black_twin(doc, cpid, upright=upright)
     if black != cpid:
-        run.set("charPrIDRef", black)
+        run.char_pr_id_ref = black
 
 
 def _field_value_runs(p0, field_id: str) -> list:
