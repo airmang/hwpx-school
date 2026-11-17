@@ -29,7 +29,7 @@ from hwpx.document import HwpxDocument
 from hwpx.model import Paragraph
 
 from . import equation, q
-from .kit import Kit, Metrics, style_ids
+from .kit import Kit, Metrics, open_seeded, style_ids
 from .verify import question_heads
 
 역할 = {"number": "발문", "choice1": "답지", "choice2": "답지", "choice3": "답지", "choice5": "답지",
@@ -207,7 +207,7 @@ def targets(doc: HwpxDocument, kit: Kit) -> list[Target]:
 
 def read_lines(hwpx: Path) -> dict[Key, Lines]:
     """한컴이 저장한 hwpx의 줄 캐시(paragraph.line_segments) — 모든 문단(최상위·안쪽)의 Lines. 줄 캐시가 없는 문단은 뺀다."""
-    doc = HwpxDocument.open(str(hwpx))
+    doc = open_seeded(hwpx)
     out: dict[Key, Lines] = {}
     for i, (top, inner) in enumerate(zip(doc.sections[0].paragraphs, inner_paragraphs(doc))):
         for j, p in enumerate([top] + inner):
@@ -505,7 +505,7 @@ class Traits:
 
 def read_traits(hwpx: Path) -> dict[Key, Traits]:
     """hwpx의 모든 문단(최상위·안쪽)의 Traits — 키는 read_lines와 같다. 여백은 문단 모양의 case 분기(한/글 2016+가 읽는 것)."""
-    doc = HwpxDocument.open(str(hwpx))
+    doc = open_seeded(hwpx)
     styles = doc.styles
     out: dict[Key, Traits] = {}
     for i, (top, inner) in enumerate(zip(doc.sections[0].paragraphs, inner_paragraphs(doc))):
@@ -560,7 +560,7 @@ def fresh_layout(hwpx: Path, work: Path, *, oracle=None) -> dict[Key, Lines]:
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
     bare = work / f"캐시없음-{Path(hwpx).name}"
-    doc = HwpxDocument.open(str(hwpx))
+    doc = open_seeded(hwpx)
     for place in doc.text.iter_paragraphs():  # 본문·칸·머리말·꼬리말 … 모든 문단(바탕쪽은 구역 XML 밖)
         if place.where != "master_page":
             place.paragraph.clear_layout_cache()
@@ -636,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--kit", type=Path, required=True)
     a = ap.parse_args(argv)
     kit = load_kit(a.kit)
-    doc = HwpxDocument.open(str(a.ours))
+    doc = open_seeded(a.ours)
     with tempfile.TemporaryDirectory(prefix="줄대조-", dir=a.ours.resolve().parent) as work:
         ours = hancom_lines(a.ours, Path(work) / "엔진")
         fresh = fresh_layout(a.ref, Path(work) / "기준본")

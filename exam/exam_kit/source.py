@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hwpx.document import HwpxDocument
+from .kit import open_seeded
 
 HWP_SUFFIXES = (".hwp", ".hwpx")
 
@@ -38,12 +39,12 @@ def open_source(path: Path, work: Path) -> Source:
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".hwpx":
-        return Source(HwpxDocument.open(str(path)), path, path)
+        return Source(open_seeded(path), path, path)
     if suffix != ".hwp":
         raise SourceError(f"원안지는 {' 또는 '.join(HWP_SUFFIXES)}여야 한다: {path.name}")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # 바꾸지 못한 내용은 아래에서 conversion_report로 따로 멈춘다
-        doc = HwpxDocument.open(str(path))
+        doc = HwpxDocument.open(str(path))  # hwp 변환은 씨앗과 무관하게 같은 id를 낸다(확인 2026-11-17)
     report = doc.conversion_report
     notes = []
     if report is not None:
@@ -56,4 +57,4 @@ def open_source(path: Path, work: Path) -> Source:
     work.mkdir(parents=True, exist_ok=True)
     copy = work / f"{path.stem}_변환.hwpx"
     doc.save(str(copy))
-    return Source(HwpxDocument.open(str(copy)), path, copy, notes)
+    return Source(open_seeded(copy), path, copy, notes)

@@ -29,7 +29,7 @@ from hwpx.document import HwpxDocument
 from .compose import add_answer_marks, choice_paragraphs, compose
 from .fit import summary as spacing_summary
 from .geometry import PageLayout, hancom_windows_pdf, measure
-from .kit import Kit, load_kit, style_ids
+from .kit import Kit, load_kit, open_seeded, style_ids
 from .layout import GAPS, PACKS, head_places, settle
 from .lint import Violation, lint
 from .lint import errors as lint_errors
@@ -219,14 +219,14 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
     r.pages = (s.first_pages, s.render.page_count)
 
     # 답 표시본: 굳힌 문항지 파일 + 형광펜만
-    key = HwpxDocument.open(str(plain_path))
+    key = open_seeded(plain_path)
     add_answer_marks(key, kit, res.answers, draft=r.draft)
     key.save(str(key_path))
     key_rr = render_fn(key_path, work / "답표시본")
     r.renders["답표시본"] = 1
 
     # 기계 검사 — 저장된 파일을 다시 열어 본다
-    plain, key = HwpxDocument.open(str(plain_path)), HwpxDocument.open(str(key_path))
+    plain, key = open_seeded(plain_path), open_seeded(key_path)
     r.layouts = final_layouts(plain, kit)
     r.findings["문항지"] = (verify_document(plain, kit, expect_answers=None, answer_key=False, draft=r.draft)
                           + verify_render(s.render, plain, kit, expected_pages=None))

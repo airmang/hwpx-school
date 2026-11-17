@@ -34,7 +34,7 @@ from .build import final_layouts, same_layout, same_package
 from .compose import add_answer_marks, compose
 from .fit import Spacer, _has_object, inner_paragraphs, para_text
 from .geometry import hancom_windows_pdf, measure
-from .kit import Kit, load_kit
+from .kit import Kit, load_kit, open_seeded
 from .lint import errors as lint_errors
 from .lint import lint
 from .prepare import finalize_form, prepare_document
@@ -259,7 +259,7 @@ def patch(md_path: Path, prev: Path, kit: Kit | Path, *, form: Path, out_dir: Pa
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     old_md = reverse(old_key_path, kit_profile(kit), image_dir=work / "기존", front=None)
-    old = HwpxDocument.open(str(old_plain_path))
+    old = open_seeded(old_plain_path)
     layouts = final_layouts(old, kit)
     old_scan = scan_markdown(old_md, kit.front_matter)
     r.rebuild = check_small(old_scan, new_scan, layouts)
@@ -290,7 +290,7 @@ def patch(md_path: Path, prev: Path, kit: Kit | Path, *, form: Path, out_dir: Pa
     out_dir.mkdir(parents=True, exist_ok=True)
     plain_path, key_path = work / old_plain_path.name, work / old_key_path.name
     old.save(str(plain_path))
-    key = HwpxDocument.open(str(plain_path))
+    key = open_seeded(plain_path)
     add_answer_marks(key, kit, res.answers, draft=draft)
     key.save(str(key_path))
 
@@ -303,7 +303,7 @@ def patch(md_path: Path, prev: Path, kit: Kit | Path, *, form: Path, out_dir: Pa
         r.rebuild = [f"배치가 움직였다: {d}" for d in moved]
         return r
     key_rr = render_fn(key_path, work / "답표시본_렌더")
-    plain, keyd = HwpxDocument.open(str(plain_path)), HwpxDocument.open(str(key_path))
+    plain, keyd = open_seeded(plain_path), open_seeded(key_path)
     r.findings["문항지"] = (verify_document(plain, kit, expect_answers=None, answer_key=False, draft=draft)
                           + verify_render(after, plain, kit, expected_pages=before.page_count))
     fs = (verify_document(keyd, kit, expect_answers=res.answers, answer_key=True, draft=draft)

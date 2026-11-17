@@ -141,6 +141,12 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def open_seeded(path: Path) -> HwpxDocument:
+    """파일 지문(sha256 앞 8자리)을 씨앗으로 연다 — 새로 뽑는 문단·개체 id만 이 씨앗에서 나온다(읽어 온 id는 그대로).
+    같은 파일을 같은 차례로 고치면 같은 id를 받는다(소유자 승인 2026-11-17: 두 판 같음·같은 입력이면 같은 id)."""
+    return HwpxDocument.open(str(path), seed=int(sha256(path)[:8], 16))
+
+
 def _read(path: Path, required: frozenset, optional: frozenset) -> dict:
     d = json.loads(Path(path).read_text(encoding="utf-8"))
     missing, unknown = sorted(required - d.keys()), sorted(d.keys() - required - optional)

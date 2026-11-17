@@ -22,7 +22,7 @@ from hwpx.document import HwpxDocument
 
 from . import preserve
 from .compose import compose, 물결
-from .kit import Kit, load_kit
+from .kit import Kit, load_kit, open_seeded
 from .prepare import finalize_form, prepare_document
 from .reverse import FormProfile, ReverseStop, kit_profile, reverse
 from .scan import Scan, scan_markdown
@@ -134,7 +134,7 @@ def roundtrip(src: Path | Source, kit: Kit, form: Path, work: Path, *, front: di
     md2 = reverse(rebuilt, profile, image_dir=second, front=front)
     (second / "원고.md").write_text(md2, encoding="utf-8")
     pairs = kit.typeset.get("text_replace") or ()
-    ca, cb = counts(src.doc, source), counts(HwpxDocument.open(str(rebuilt)), profile)
+    ca, cb = counts(src.doc, source), counts(open_seeded(rebuilt), profile)
     s1 = scan_markdown(md1, kit.front_matter)
     unanswered = [q.number for q in s1.questions if not any(c.correct for c in q.choices)]
     notes = [f"정답 표시 없음 {len(unanswered)}문항({', '.join(unanswered)}번) — 정답은 견주지 못했다(빈 것끼리)"] if unanswered else []

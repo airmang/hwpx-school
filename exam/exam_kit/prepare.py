@@ -16,7 +16,7 @@ from hwpx.document import HwpxDocument
 from hwpx.errors import HwpxValueError
 
 from . import q
-from .kit import Kit, sha256, style_ids
+from .kit import Kit, open_seeded, sha256, style_ids
 from .read import is_blank as _blank, nested_raw as _ptext, table_paragraphs as _table_paragraphs, table_text as _table_text
 
 
@@ -285,7 +285,7 @@ def prepare_document(form: Path, kit: Kit) -> tuple[HwpxDocument, Prepared]:
     if got != kit.form_sha256:
         raise ValueError(f"양식 sha256 불일치 — kit.json을 다시 재라: {got}")
     # 새 개체·문단 id를 양식 지문에서 뽑는다 — 같은 양식·같은 원고면 두 판(문항지·답표시본)이 같은 id를 받는다
-    doc = HwpxDocument.open(str(form), seed=int(got[:8], 16))
+    doc = open_seeded(form)  # 양식 지문 씨앗 — got과 같은 지문
     return doc, prepare_form(doc, kit)
 
 

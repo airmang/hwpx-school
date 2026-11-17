@@ -17,6 +17,7 @@ from hwpx.document import HwpxDocument
 from hwpx.tools.document_merge import insert_document
 
 from . import q
+from .kit import open_seeded
 from .read import flat
 
 # 보존 구간의 시작 — 문단 글이 이렇게 시작하면 서술형·논술형 구간이다(【서술형 1】·[논술형]·서답형 1. 등).
@@ -64,7 +65,7 @@ def preview_of(paragraphs: list) -> list[str]:
 def write_region(src: Path, start: int, end: int, out: Path) -> None:
     """src(hwpx)의 최상위 문단 [start, end)만 남긴 hwpx를 out에 쓴다. 문단 0은 구역 설정(secPr)만 남긴다 — 넣을 때
     insert_document가 secPr·단 설정을 떼고, 머리말·꼬리말 같은 다른 컨트롤은 여기서 미리 뺀다(대상 문서에 겹치지 않게)."""
-    doc = HwpxDocument.open(str(src))
+    doc = open_seeded(src)
     sec = doc.sections[0]
     ps = list(sec.paragraphs)
     for run in ps[0].element.findall(q("hp", "run")):
