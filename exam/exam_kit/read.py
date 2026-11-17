@@ -109,21 +109,6 @@ def t_text(paragraphs) -> str:
 
 
 def tree(p) -> Iterator:
-    """문단과 그 안의 문단(표 캡션·칸, 도형 안, 그림 등 개체 캡션, 각주·미주, 메모 누름틀)을 문서 차례로."""
+    """문단과 그 안의 문단(표 캡션·칸, 글상자·도형 안, 캡션, 각주·미주, 메모 …)을 문서 차례로 — ``paragraph.iter_paragraphs()``."""
     yield p
-    for run in p.runs:
-        for item in run.content:
-            o = item.object
-            if o is None:
-                continue
-            if item.kind == "table":
-                for q in table_paragraphs(o):
-                    yield from tree(q)
-            elif item.kind == "shape":
-                yield from (place.paragraph for place in o.iter_paragraphs())
-            elif item.kind in ("footnote", "endnote", "field_begin") and hasattr(o, "paragraphs"):
-                for q in o.paragraphs:
-                    yield from tree(q)
-            elif getattr(o, "caption", None) is not None:
-                for q in o.caption.paragraphs:
-                    yield from tree(q)
+    yield from (place.paragraph for place in p.iter_paragraphs())
