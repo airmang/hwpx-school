@@ -1611,9 +1611,19 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
             h += kit.metrics.box_extra - pitch
             if kit.box_min_height is not None:
                 h = max(h, kit.box_min_height)  # 양식 견본 내용 셀 높이 밑으로 내리지 않는다
-            if content.height == h:
+            old = content.height
+            if old == h:
                 continue
-            tbl.set_row_height(cr, h)  # 그 행을 지나는 칸(내용 칸·레일)과 표 높이가 함께 바뀐다
+            # 표 높이는 h − (내용 칸 옛 높이)만큼, 내용 칸과 내용 행에 앵커가 있는 레일 칸은 h로 — 다른 칸은 그대로 둔다(양식의
+            # 행 높이와 칸 높이가 어긋나도 그 꼴을 지킨다). table.set_row_height가 표 높이를 그만큼 바꾸게 행 높이를 주고, 그
+            # 행을 지나며 함께 바뀐 칸을 칸마다 되돌린다.
+            crossing = [x.cell for x in tbl.iter_grid() if x.is_anchor and x.row <= cr < x.row + x.cell.span[0]]
+            before = [x.height for x in crossing]
+            tbl.set_row_height(cr, tbl.row_heights[cr] + h - old)
+            mine = {(cc, cr), *((col, cr) for col in rails)}
+            for cell, was in zip(crossing, before):
+                at = (cell.address[1], cell.address[0])
+                cell.set_size(height=h if at in mine else was)
             changed += 1
     if changed:
         doc.sections[0].mark_dirty()

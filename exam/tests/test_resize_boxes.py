@@ -57,12 +57,11 @@ def _옛_resize_boxes(doc, kit, lines) -> int:
     return changed
 
 
-@pytest.mark.parametrize("레일", ["한 칸", "위에서 걸침", "아래로 걸침"])
+@pytest.mark.parametrize("레일", ["한 칸", "위에서 걸침", "아래로 걸침", "칸 높이 어긋남"])
 def test_박스_높이_레일_칸_옛_길과_견주기(레일):
     """3×3 박스(가운데 열 = 제목·내용·꼬리, 양옆 열 = 레일) — resize_boxes(새 길: table.set_row_height)를 옛 길과 견준다.
-    레일이 내용 행 한 칸이면 모든 칸·표 높이가 같다. 레일이 내용 행을 가로질러 여러 행에 걸치면(rowSpan > 1) 옛 길은 그 칸을
-    그대로 두거나(내용 행에 앵커가 없으면) 내용 행 높이로 덮어써 표 격자와 어긋나고, 새 길은 그 칸을 바뀐 만큼 늘린다 — 그 칸만
-    다르고 내용 칸·표 높이는 같다."""
+    레일이 내용 행 한 칸이든 여러 행에 걸치든(rowSpan > 1) 모든 칸·표 높이가 옛 길과 같아야 한다 — 옛 길은 내용 칸과 내용 행에
+    앵커가 있는 레일 칸만 새 높이로, 표 높이는 그 차이만큼 바꾸고 다른 칸은 두었다."""
     import dataclasses
 
     from exam_kit.compose import resize_boxes
@@ -85,6 +84,8 @@ def test_박스_높이_레일_칸_옛_길과_견주기(레일):
         elif 레일 == "아래로 걸침":
             t.merge_cells(1, 0, 2, 0)
             t.merge_cells(1, 2, 2, 2)
+        elif 레일 == "칸 높이 어긋남":  # 내용 칸만 행보다 높게 적힌 양식(격자와 칸 높이가 어긋남)
+            t.cell(1, 1).set_size(height=5300)
         sid = style_ids(doc)[kit.styles["box_guide"]][0]
         cell_p = t.cell(1, 1).paragraphs[0]
         cell_p.style_id_ref = sid
@@ -103,13 +104,4 @@ def test_박스_높이_레일_칸_옛_길과_견주기(레일):
     _, b, _, _ = 짓기()
     assert _옛_resize_boxes(a, kit, lines) == 1 and resize_boxes(b, kit, lines) == 1
     (ta, ca), (tb, cb) = 높이(a, i), 높이(b, i)
-    assert ta == tb and ca[("1", "1")] == cb[("1", "1")]  # 표 높이·내용 칸은 늘 같다
-    if 레일 == "한 칸":
-        assert ca == cb
-    else:
-        rows = {"위에서 걸침": ("0", "1", "2"), "아래로 걸침": ("1", "2")}[레일]
-        rails = {(c, rows[0]) for c in ("0", "2")}  # 걸친 레일 칸의 앵커
-        assert {k: ca[k] for k in ca if k not in rails} == {k: cb[k] for k in cb if k not in rails}
-        want = sum(cb[("1", r)] for r in rows)  # 걸친 행 높이의 합(가운데 열 칸)
-        assert all(cb[k] == want for k in rails)  # 새 길: 표 격자와 맞는다
-        assert all(ca[k] != want for k in rails)  # 옛 길: 걸친 레일 칸이 격자와 어긋난다
+    assert (ta, ca) == (tb, cb)  # 레일이 어떻게 걸쳐도 칸·표 높이가 옛 길과 같다(기준 1)
