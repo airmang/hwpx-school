@@ -601,12 +601,6 @@ class _Composer:
                 margins={"left": 0, "right": 0, "intent": 0})
         return self._pp[key]
 
-    def _border_fills(self) -> ET._Element:
-        fills = self.header.element.find(f".//{q('hh', 'borderFills')}")
-        if fills is None:
-            raise ValueError("양식이 바뀌었다: hh:borderFills 없음")
-        return fills
-
     def plain_bf(self) -> str:
         """양식의 사방 SOLID 0.12 mm 검정·채움 없음 borderFill(격자표의 바탕)."""
         for b in self.doc.styles.border_fills.values():  # 정의 차례(id 두 꼴로 같은 값이 두 번 나올 수 있다 — 처음 것이 이긴다)
@@ -619,42 +613,12 @@ class _Composer:
         """base borderFill에서 지정 변(top/bottom/left/right)만 (type, width)로 바꾼 것 — 같은 것이 있으면 재사용
         (doc.styles.ensure_border_fill(base_border_fill_id_ref=)). width는 "0.4 mm" 꼴."""
         key = (base, tuple(sorted(sides.items())))
-        if any(t == "NONE" for t, _ in sides.values()):
-            return self._bf_variant_xml(base, **sides)
-        if key not in self._bf:
+        if key not in self._bf:  # NONE 면은 None(선 없음 — 한/글처럼 0.1 mm, A2)
             self._bf[key] = self.doc.styles.ensure_border_fill(
                 base_border_fill_id_ref=base,
                 sides={side: None if typ == "NONE" else {"type": typ, "width_mm": float(width.split()[0])}
                        for side, (typ, width) in sides.items()})
         return self._bf[key]
-
-    def _bf_variant_xml(self, base: str, **sides: tuple[str, str]) -> str:
-        """base borderFill에서 지정 변(top/bottom/left/right)만 (type, width)로 바꾼 것 — 같은 것이 있으면 재사용."""
-        key = (base, tuple(sorted(sides.items())))
-        if key in self._bf:
-            return self._bf[key]
-        fills = self._border_fills()
-        src = fills.find(f"{q('hh', 'borderFill')}[@id='{base}']")
-        want = deepcopy(src)
-        for side, (typ, width) in sides.items():
-            b = want.find(q("hh", f"{side}Border"))
-            b.set("type", typ)
-            b.set("width", width)
-
-        def 모양(b) -> bytes:
-            c = deepcopy(b)
-            c.attrib.pop("id", None)
-            return ET.tostring(c, method="c14n")
-
-        found = next((b.get("id") for b in fills.findall(q("hh", "borderFill")) if 모양(b) == 모양(want)), None)
-        if found is None:
-            found = str(max(int(b.get("id")) for b in fills.findall(q("hh", "borderFill"))) + 1)
-            want.set("id", found)
-            fills.append(want)
-            fills.set("itemCnt", str(len(fills.findall(q("hh", "borderFill")))))
-            self.header.mark_dirty()
-        self._bf[key] = found
-        return found
 
     def _cell_p(self, segs: list[tuple[str | equation.Math, str | None]], role: str, *, pid: str | None = None,
                 mark: str | None = None) -> ET._Element:
