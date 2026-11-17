@@ -19,10 +19,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import lxml.etree as ET
 from hwpx.document import HwpxDocument
-
-HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 
 W, H = 72852, 103180
 M = {"left": 5000, "right": 5000, "top": 5669, "bottom": 4000, "header": 0, "footer": 2000}
@@ -40,18 +37,6 @@ def _char(doc, *, height: int, font: str, bold: bool = False) -> str:
 def _tab(doc, positions: list[int]) -> str:
     """한컴 저장본과 같은 탭 모양 — 탭마다 hp:switch(case = HWPUNIT, default = 2배)(doc.styles.ensure_tab_definition)."""
     return doc.styles.ensure_tab_definition(tab_stops=[{"pos": pos, "type": "LEFT", "leader": "NONE"} for pos in positions])
-
-
-def _tab_run(par, text: str, cp: str) -> None:
-    """탭 든 run — 한/글 저장본처럼 hp:tab에 width·leader·type을 적는다. core add_run은 속성 없는 hp:tab을 써서
-    (CORE-ASKS) 이 run만 직접 쓴다."""
-    run = ET.SubElement(par.element, HP + "run", {"charPrIDRef": cp})
-    te = ET.SubElement(run, HP + "t")
-    pieces = text.split("	")
-    te.text = pieces[0]
-    for piece in pieces[1:]:
-        tab = ET.SubElement(te, HP + "tab", {"width": "0", "leader": "0", "type": "1"})
-        tab.tail = piece
 
 
 def _para(doc, *, line: int, left: int = 0, intent: int = 0, tab: str | None = None) -> str:
@@ -87,15 +72,12 @@ def build(out: Path) -> None:
     normal = "0"
 
     def p(text_runs, st=normal, pid=None):
-        """문단 하나 — text_runs = [(글, charPr)]. 탭은 hp:t 안 hp:tab(paragraph.add_run)."""
+        """문단 하나 — text_runs = [(글, charPr)]."""
         par = doc.add_paragraph("", para_pr_id_ref=pid or roles.get(st, "0"),
                                 char_pr_id_ref=body, include_run=False, inherit_style=False)
         par.style_id_ref = style.get(st, st)
-        for t, cp in text_runs:
-            if "	" in t:
-                _tab_run(par, t, cp)
-            else:
-                par.add_run(t, char_pr_id_ref=cp)
+        for t, cp in text_runs:  # 탭은 폭 0을 적은 한/글 꼴 <hp:tab width="0" leader="0" type="1"/>(add_run(tab_widths=))
+            par.add_run(t, char_pr_id_ref=cp, tab_widths=[0] * t.count("\t") if "\t" in t else None)
         return par
 
     def table_in(par, rows, cols, widths, heights, *, inline=True):
