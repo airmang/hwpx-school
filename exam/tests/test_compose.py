@@ -294,8 +294,7 @@ def 박스(양식_hwpx):
 
 
 def _표(p_el):
-    from exam_kit.prepare import _top_tables
-    return _top_tables(p_el)
+    return [t for run in p_el.findall(q("hp", "run")) for t in run.findall(q("hp", "tbl"))]
 
 
 def _셀(tbl, col, row):
@@ -1255,14 +1254,15 @@ def test_코드_블록은_고정폭_왼쪽_정렬(양식_hwpx):
     """(Task 30) 코드 줄 = 문단 하나씩, 글자 그대로(공백), 고정폭(kit.code_font)·장평 100·자간 0, 왼쪽 정렬·들여쓰기 0.
     자료 박스 안 코드도 같다. 자간 맞춤 대상(fit.targets)에서 빠진다. 역변환은 ``` 펜스로 되돌린다."""
     from exam_kit.fit import targets
+    from exam_kit.read import tree
     from exam_kit.reverse import is_code, mono_char_prs, reverse_body, underlined_char_prs
 
     md = (픽스처 / "기본_5문항.md").read_text(encoding="utf-8").split("## 1.")[0].replace("만점: 20", "만점: 4") + 코드_md
     kit, doc, prepared, res = _조판(양식_hwpx, md, answer_key=False)
     hdr = _헤더(doc)
     mono = mono_char_prs(doc)
-    body_ps = [x for p in 최상위_문단(doc)[1:-1] for x in p.element.iter(q("hp", "p"))]  # 관리박스·꼬리(굴림체) 뺀 본문
-    code_ps = [p for p in body_ps if is_code(p, mono)]
+    body_ps = [x for p in 최상위_문단(doc)[1:-1] for x in tree(p)]  # 관리박스·꼬리(굴림체) 뺀 본문과 그 안 문단
+    code_ps = [p.element for p in body_ps if is_code(p, mono)]
     assert ["".join(p.itertext()) for p in code_ps] == ["합성값    3", "길이       12", "열A   0", "열B  17"]
     font = {f.get("id"): f.get("face") for ff in hdr.iter(q("hh", "fontface")) if ff.get("lang") == "HANGUL"
             for f in ff.findall(q("hh", "font"))}
@@ -1274,7 +1274,7 @@ def test_코드_블록은_고정폭_왼쪽_정렬(양식_hwpx):
         assert pp.find(q("hh", "align")).get("horizontal") == "LEFT"
     finalize_form(doc, kit, prepared)
     assert not [t for t in targets(doc, kit) if "합성값" in t.text or "열A" in t.text]
-    ps = [p.element for p in 최상위_문단(doc)]
+    ps = list(최상위_문단(doc))
     heads = question_heads(doc)
     body = reverse_body(ps[1:-1], {h - 1 for h in heads}, underlined_char_prs(doc), mono=mono, boxes=kit.boxes)
     text = "\n".join(body)
@@ -1363,16 +1363,17 @@ def test_렌더_코드_블록은_열이_맞는다(양식_hwpx, 오라클, tmp_pa
 
 def test_코드_블록_빈_줄은_빈_문단으로_남는다(양식_hwpx):
     """(m-3) 코드 속 빈 줄 = 고정폭 빈 문단 하나 — 줄 수가 그대로이고, 역변환도 빈 줄을 그대로 되돌린다(박스 안·밖)."""
+    from exam_kit.read import tree
     from exam_kit.reverse import is_code, mono_char_prs, reverse_body, underlined_char_prs
 
     빈줄_md = 코드_md.replace("합성값    3\n길이", "합성값    3\n\n길이").replace("열A   0\n열B", "열A   0\n\n열B")
     md = (픽스처 / "기본_5문항.md").read_text(encoding="utf-8").split("## 1.")[0].replace("만점: 20", "만점: 4") + 빈줄_md
     kit, doc, prepared, res = _조판(양식_hwpx, md, answer_key=False)
     mono = mono_char_prs(doc)
-    body_ps = [x for p in 최상위_문단(doc)[1:-1] for x in p.element.iter(q("hp", "p"))]
-    assert ["".join(p.itertext()) for p in body_ps if is_code(p, mono)] == [
+    body_ps = [x for p in 최상위_문단(doc)[1:-1] for x in tree(p)]
+    assert ["".join(p.element.itertext()) for p in body_ps if is_code(p, mono)] == [
         "합성값    3", "", "길이       12", "열A   0", "", "열B  17"]
     finalize_form(doc, kit, prepared)
-    ps = [p.element for p in 최상위_문단(doc)]
+    ps = list(최상위_문단(doc))
     text = "\n".join(reverse_body(ps[1:-1], {h - 1 for h in question_heads(doc)}, underlined_char_prs(doc), mono=mono, boxes=kit.boxes))
     assert "```\n합성값    3\n\n길이       12\n```" in text and "```\n열A   0\n\n열B  17\n```" in text

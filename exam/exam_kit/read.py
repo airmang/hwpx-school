@@ -70,6 +70,44 @@ def is_blank(paragraph) -> bool:
     return not has_text([paragraph]) and not any(True for _ in paragraph.iter_objects(kinds=("table", "picture")))
 
 
+def t_text(paragraphs) -> str:
+    """문단들의 글 조각(글 요소 안의 글)을 문서 차례로 — 안쪽 표 캡션·칸, 도형 안, 개체 캡션, 각주·메모까지.
+
+    옛 ``"".join(t.itertext() …)``과 같은 글: 글 안에 글자로 적힌 빈칸·탭(묶음 빈칸 문자 등)은 그대로 두고, 탭·줄 바꿈·
+    빈칸 요소(글리프)는 글로 세지 않는다(``nested_raw``는 글자로 적힌 것까지 지운다)."""
+    out: list[str] = []
+
+    def own(p) -> None:
+        for run in p.runs:
+            for item in run.content:
+                if item.container == "t" and item.kind in ("text", "unknown"):
+                    out.append(item.text)
+                    continue
+                o = item.object
+                if o is None:
+                    continue
+                if item.kind == "table":
+                    for q in table_paragraphs(o):
+                        own(q)
+                elif item.kind == "shape":
+                    for place in o.iter_paragraphs():  # 도형 안 모든 문단(안쪽 표 칸까지) — 문단마다 제 글만
+                        own_flat(place.paragraph)
+                elif item.kind in ("footnote", "endnote", "field_begin") and hasattr(o, "paragraphs"):
+                    for q in o.paragraphs:
+                        own(q)
+                elif getattr(o, "caption", None) is not None:
+                    for q in o.caption.paragraphs:
+                        own(q)
+
+    def own_flat(p) -> None:
+        out.extend(item.text for run in p.runs for item in run.content
+                   if item.container == "t" and item.kind in ("text", "unknown"))
+
+    for p in paragraphs:
+        own(p)
+    return "".join(out)
+
+
 def tree(p) -> Iterator:
     """문단과 그 안의 문단(표 캡션·칸, 도형 안, 그림 등 개체 캡션, 각주·미주, 메모 누름틀)을 문서 차례로."""
     yield p

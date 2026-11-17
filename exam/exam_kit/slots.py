@@ -12,9 +12,28 @@ from hwpx.document import HwpxDocument
 from . import q
 from .frontmatter import FrontMatter
 from .kit import Kit
-from .prepare import _set_para_text, _text, _top_tables
+from .read import t_text, table_paragraphs
 
 _빨강 = "#FF0000"
+
+
+def _set_para_text(p_el, text: str) -> None:
+    """첫 run의 charPr를 지키고 본문을 text 하나로 바꾼다(탭·형광펜 등 자식 제거). prepare에서 옮겨 온 옛 길 — 공개
+    ``run.text``는 빈 글 조각을 남기고 줄 캐시를 지워 바이트가 달라진다(기준 1 밖이라 그대로 둔다)."""
+    runs = p_el.findall(q("hp", "run"))
+    if not runs:
+        run = p_el.makeelement(q("hp", "run"), {})
+        p_el.append(run)
+    else:
+        run = runs[0]
+        for extra in runs[1:]:
+            p_el.remove(extra)
+    for child in list(run):
+        if child.tag == q("hp", "t"):
+            run.remove(child)
+    t = run.makeelement(q("hp", "t"), {})
+    run.append(t)
+    t.text = text
 
 
 def _fmt_points(x: float) -> str:
@@ -122,10 +141,10 @@ def slot_values(fm: FrontMatter, *, question_count: int, total_points: float, pa
 
 
 def _fill_teacher(doc: HwpxDocument, kit: Kit, name: str) -> None:
-    p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]].element
-    결재란 = next(t for t in _top_tables(p0) if kit.teacher_cell["label"] in _text(t))
-    cell = next(c for c in 결재란.iter(q("hp", "tc")) if kit.teacher_cell["label"] in _text(c))
-    ps = cell.find(q("hp", "subList")).findall(q("hp", "p"))
+    p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]]
+    결재란 = next(t for t in p0.tables if kit.teacher_cell["label"] in t_text(table_paragraphs(t)))
+    cell = next(c for row in 결재란.rows for c in row.cells if kit.teacher_cell["label"] in t_text(c.paragraphs))
+    ps = [p.element for p in cell.paragraphs]
     if len(ps) < 2:
         raise ValueError("출제교사 셀 문단이 2개 미만")
     _set_para_text(ps[1], kit.teacher_cell["template"].format(name=name))
@@ -142,20 +161,20 @@ def _fill_teacher(doc: HwpxDocument, kit: Kit, name: str) -> None:
 def _slot_paragraphs(doc: HwpxDocument, kit: Kit, where: dict) -> list:
     """슬롯 위치 → 문단 요소들. admin_table_with+cell(+para) · notice · footer_with."""
     sec = doc.sections[0].element
-    p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]].element
+    p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]]
     if "admin_table_with" in where:
-        tbl = next(t for t in _top_tables(p0) if where["admin_table_with"] in _text(t))
+        tbl = next(t for t in p0.tables if where["admin_table_with"] in t_text(table_paragraphs(t)))
         row, col = where["cell"]
-        tc = next(c for c in tbl.iter(q("hp", "tc")) for a in [c.find(q("hp", "cellAddr"))]
-                  if (int(a.get("rowAddr")), int(a.get("colAddr"))) == (row, col))
-        ps = tc.find(q("hp", "subList")).findall(q("hp", "p"))
+        tc = next(c for r in tbl.rows for c in r.cells if c.address == (row, col))
+        ps = [p.element for p in tc.paragraphs]
         return [ps[where["para"]]] if "para" in where else ps
     if where.get("notice"):
-        tbl = next(t for t in _top_tables(p0) if kit.admin["notice_table_with"] in _text(t))
-        return [p for tr in tbl.findall(q("hp", "tr")) for tc in tr.findall(q("hp", "tc"))
-                for p in tc.find(q("hp", "subList")).findall(q("hp", "p"))]
+        tbl = next(t for t in p0.tables if kit.admin["notice_table_with"] in t_text(table_paragraphs(t)))
+        return [p.element for tr in tbl.rows for tc in tr.cells for p in tc.paragraphs]
     if "footer_with" in where:
-        return [p for f in sec.iter(q("hp", "footer")) if where["footer_with"] in _text(f) for p in f.iter(q("hp", "p"))]
+        # 꼬리말 요소를 직접 훑는다: 6.x가 꼬리말을 두 벌(구역 설정 안·컨트롤) 쓴 양식은 둘 다 채워야 한다. 공개 읽기
+        # (doc.page.footers)는 한 벌만 내놓는다.
+        return [p for f in sec.iter(q("hp", "footer")) if where["footer_with"] in "".join(f.itertext()) for p in f.iter(q("hp", "p"))]
     raise ValueError(f"글자 자리 슬롯 위치를 모른다: {where}")
 
 

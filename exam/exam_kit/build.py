@@ -26,7 +26,6 @@ from pathlib import Path
 
 from hwpx.document import HwpxDocument
 
-from . import q
 from .compose import add_answer_marks, choice_paragraphs, compose
 from .fit import summary as spacing_summary
 from .geometry import PageLayout, hancom_windows_pdf, measure
@@ -127,7 +126,7 @@ def final_layouts(doc: HwpxDocument, kit: Kit) -> dict[str, str]:
     out = {}
     for k in range(1, len(question_heads(doc)) + 1):
         rows = choice_paragraphs(doc, kit, k)
-        if len(rows) == 1 and ps[rows[0]].element.find(f".//{q('hp', 'tbl')}") is not None:
+        if len(rows) == 1 and any(True for _ in ps[rows[0]].iter_objects(kinds="table")):
             out[str(k)] = "답항표"
         elif rows:
             out[str(k)] = kinds.get(str(ps[rows[0]].style_id_ref), "?")

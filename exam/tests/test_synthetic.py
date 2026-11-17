@@ -14,7 +14,17 @@ from exam_kit.compose import _body_region, compose, harvest_samples
 from exam_kit.kit import load_kit, verify_kit
 from exam_kit.lint import errors, lint
 from exam_kit.onboard import scan
-from exam_kit.prepare import _text, _top_tables, finalize_form, prepare_document
+from exam_kit.prepare import finalize_form, prepare_document
+
+
+def _text(el) -> str:
+    """요소 아래 모든 글(시험이 산출물 XML을 직접 볼 때)."""
+    return "".join(el.itertext())
+
+
+def _top_tables(p_el) -> list:
+    """문단 run 바로 아래 표 요소(시험이 산출물 XML을 직접 볼 때)."""
+    return [t for run in p_el.findall(q("hp", "run")) for t in run.findall(q("hp", "tbl"))]
 from exam_kit.scan import scan_markdown
 from exam_kit.slots import fill_slots, read_total_pages
 from exam_kit.verify import extract_answers, question_heads, verify_document

@@ -35,32 +35,6 @@ def _style_ids(table) -> set[str]:
     return out
 
 
-# ---- Task 5·6에서 옮겨 옴(변종 인자 없이 정리) — 요소를 받는 옛 판: 다른 lane(compose·slots·verify·reverse)이 옮기면 지운다 --
-
-def _text(el) -> str:
-    return "".join(el.itertext())
-
-
-def _top_tables(p_el) -> list:
-    return [t for run in p_el.findall(q("hp", "run")) for t in run.findall(q("hp", "tbl"))]
-
-
-def _set_para_text(p_el, text: str) -> None:
-    """첫 run의 charPr를 지키고 본문을 text 하나로 바꾼다(탭·형광펜 등 자식 제거)."""
-    runs = p_el.findall(q("hp", "run"))
-    if not runs:
-        run = ET.SubElement(p_el, q("hp", "run"))
-    else:
-        run = runs[0]
-        for extra in runs[1:]:
-            p_el.remove(extra)
-    for child in list(run):
-        if child.tag == q("hp", "t"):
-            run.remove(child)
-    t = ET.SubElement(run, q("hp", "t"))
-    t.text = text
-
-
 def _remove_paragraphs(sec, paragraphs) -> None:
     for p in reversed(list(paragraphs)):
         p.remove()
@@ -74,22 +48,8 @@ def _find(paras, pred, *, what: str) -> int:
     raise ValueError(f"양식에서 찾지 못함: {what}")
 
 
-def _inner_style_ids(tbl) -> set[str]:
-    return {p.get("styleIDRef") or "0" for p in tbl.iter(q("hp", "p"))}
-
-
-def is_sample_box(tbl, spec: dict, style_id: str) -> bool:
-    """양식 샘플 구역의 견본 박스 표인가 — 킷 boxes 한 항목(제목·표 모양·내용 스타일)으로 본다."""
-    text = _text(tbl)
-    return ([int(tbl.get("rowCnt")), int(tbl.get("colCnt"))] == spec["shape"]
-            and (spec["title"] is None or spec["title"] in text)
-            and ("sample_with" not in spec or spec["sample_with"] in text)
-            and ("sample_without" not in spec or spec["sample_without"] not in text)
-            and style_id in _inner_style_ids(tbl))
-
-
 def is_sample_table(table, spec: dict, style_id: str) -> bool:
-    """``is_sample_box``의 표 객체 판."""
+    """양식 샘플 구역의 견본 박스 표인가 — 킷 boxes 한 항목(제목·표 모양·내용 스타일)으로 본다."""
     text = _table_text(table)
     return ([table.row_count, table.column_count] == spec["shape"]
             and (spec["title"] is None or spec["title"] in text)
