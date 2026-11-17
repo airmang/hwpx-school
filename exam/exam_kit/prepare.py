@@ -255,22 +255,18 @@ _그리기 = ("line", "rect", "ellipse", "arc", "polygon", "curve", "connectLine
 
 
 def _remove_marks(doc: HwpxDocument, kit: Kit) -> None:
-    """킷 remove: 메모(MEMO 필드 — 앵커 글은 남기고 필드 틀과 메모 글만)·그리기 개체(안내 화살표·동그라미)를 머리말·꼬리말
-    안까지 모두 지운다. python-hwpx notes.memos는 HWP 변환본의 MEMO 필드를 보지 못해 XML로 지운다."""
-    sec = doc.sections[0].element
+    """킷 remove: 메모(앵커 글은 남기고 누름틀 틀과 메모 글만)·그리기 개체(안내 화살표·동그라미)를 머리말·꼬리말
+    안까지 모두 지운다 — doc.notes.remove_memo·공개 개체 remove()(비게 된 run도 지운다, B6 승인 2026-11-17)."""
+    sec = doc.sections[0]
     if kit.remove["memos"]:
-        begins = [f for f in sec.iter(q("hp", "fieldBegin")) if f.get("type") == "MEMO"]
-        ids = {f.get("id") for f in begins}
-        ends = [f for f in sec.iter(q("hp", "fieldEnd")) if f.get("beginIDRef") in ids]
-        for el in begins + ends:
-            ctrl = el.getparent()
-            ctrl.remove(el)
-            if len(ctrl) == 0:
-                ctrl.getparent().remove(ctrl)
+        for memo in sec.memos:
+            doc.notes.remove_memo(memo)
     if kit.remove["drawings"]:
-        for el in [e for e in sec.iter() if e.tag in {q("hp", t) for t in _그리기}]:
-            el.getparent().remove(el)
-    doc.sections[0].mark_dirty()
+        shapes = [place.object for place in doc.text.iter_objects(kinds="shape")
+                  if place.section == sec and place.object.shape_type in _그리기]
+        for shape in reversed(shapes):
+            shape.remove()
+    sec.mark_dirty()
 
 
 def prepare_form(doc: HwpxDocument, kit: Kit) -> Prepared:
