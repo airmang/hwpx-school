@@ -1152,31 +1152,19 @@ class _Composer:
         for run in p.runs:
             run.remove()
         texts = [t for t, _ in spec.segs if not isinstance(t, equation.Math)]
-        if spec.mark and _mark_first_ok(spec.segs, spec.mark) is False:
-            # 옛 꼴을 지키려 run을 직접 쓴다 — 정답 원문자가 칠할 자리보다 앞에도 있을 때(add_highlight는 처음 나오는 곳을
-            # 칠한다) — CORE-ASKS. 글의 CR은 B12(결정 전): 공개 add_run이 줄바꿈 hp:lineBreak로 쓴다(옛 판은 hp:t에 CR 그대로).
-            mark, tabs = spec.mark, iter(spec.tabs)
-            for text, c in spec.segs:
-                if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
-                    self._수식(p, text.script, c or cp)
-                    continue
-                run = ET.SubElement(p.element, q("hp", "run"), {"charPrIDRef": c or cp})
-                mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
-            if mark:
-                raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
-        else:  # 공개 API — 조각마다 run(탭은 잰 폭으로 hp:tab, 줄바꿈은 hp:lineBreak — 둘 다 hp:t 안), 수식은 문단 끝에 수식 run
-            for t in texts:
-                _xml_글(t)
-            tabs = iter(spec.tabs)
-            for text, c in spec.segs:
-                if isinstance(text, equation.Math):
-                    self._수식(p, text.script, c or cp)
-                elif "\t" in text:
-                    p.add_run(text, char_pr_id_ref=c or cp, tab_widths=[next(tabs) for _ in range(text.count("\t"))])
-                else:
-                    p.add_run(text, char_pr_id_ref=c or cp)
-            if spec.mark:
-                _mark_first(p, spec.mark, spec.segs)
+        # 공개 API — 조각마다 run(탭은 잰 폭으로 hp:tab, 줄바꿈은 hp:lineBreak — 둘 다 hp:t 안), 수식은 문단 끝에 수식 run
+        for t in texts:
+            _xml_글(t)
+        tabs = iter(spec.tabs)
+        for text, c in spec.segs:
+            if isinstance(text, equation.Math):
+                self._수식(p, text.script, c or cp)
+            elif "\t" in text:
+                p.add_run(text, char_pr_id_ref=c or cp, tab_widths=[next(tabs) for _ in range(text.count("\t"))])
+            else:
+                p.add_run(text, char_pr_id_ref=c or cp)
+        if spec.mark:
+            _mark_first(p, spec.mark, spec.segs)
         obj = spec.obj
         if isinstance(obj, _틀):
             obj = self._put_frame(p, obj)
@@ -1428,33 +1416,28 @@ def _mark_first_ok(segs, mark: str) -> bool | None:
 
 def _mark_first(p, mark: str, segs) -> None:
     """문단의 조각 첫머리 정답 원문자에 형광펜(paragraph.add_highlight) — 자리가 없으면 멈춘다. 원문자가 그 자리보다 앞에도
-    있는 문단은 materialize가 옛 길로 쓴다(_mark_first_ok)."""
-    if _mark_first_ok(segs, mark) is None:
+    있는 문단은 그 자리를 글자 자리로 칠한다(_mark_offset)."""
+    ok = _mark_first_ok(segs, mark)
+    if ok is None:
         raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
-    p.add_highlight(color=형광, match=mark)
+    if ok:
+        p.add_highlight(color=형광, match=mark)
+        return
+    at = _mark_offset(p, mark, "\t\n")  # 조각 첫머리(조각 시작·탭 뒤·줄바꿈 뒤) 가운데 처음 — 옛 길이 칠하던 곳
+    p.add_highlight(color=형광, start=at, end=at + len(mark))
 
 
-def _fill_t(t: ET._Element, text: str, mark: str | None, tabs=None) -> str | None:
-    """hp:t 채우기 — \t는 hp:tab(제출본 모양 `① ㄱ, ㄴ<hp:tab …/>② …`, width는 tabs에서), \n은 hp:lineBreak, mark로 시작하는
-    조각은 원문자에 형광펜(add_highlight와 같은 모양 <markpenBegin/>①<markpenEnd/>). 칠했으면 None, 못 칠했으면 mark를 돌려준다."""
-    tabs = iter(()) if tabs is None else tabs
-    last = None  # 다음 글자를 붙일 자리 — None이면 t.text, 아니면 last.tail
-    for piece in re.split(r"(\t|\n)", text):
-        if piece == "\n":
-            last = ET.SubElement(t, q("hp", "lineBreak"))
-            continue
-        if piece == "\t":
-            last = ET.SubElement(t, q("hp", "tab"), {"width": str(next(tabs)), "leader": "0", "type": "1"})
-            continue
-        if mark and piece.startswith(mark):
-            ET.SubElement(t, q("hp", "markpenBegin"), {"color": 형광}).tail = mark
-            last, piece, mark = ET.SubElement(t, q("hp", "markpenEnd")), piece[len(mark):], None
-        if piece:
-            if last is None:
-                t.text = (t.text or "") + piece
-            else:
-                last.tail = (last.tail or "") + piece
-    return mark
+def _mark_offset(p, mark: str, seps: str) -> int | None:
+    """문단에서 칠할 자리의 글자 자리 — 런 글의 첫머리나 seps(탭·줄바꿈) 바로 뒤가 원문자로 시작하는 첫 곳(런 차례).
+    런 글을 이은 것이 문단 글이다(수식·컨트롤은 글자를 차지하지 않는다)."""
+    off = 0
+    for r in p.runs:
+        t = r.text
+        for i in [0] + [k + 1 for k, ch in enumerate(t) if ch in seps]:
+            if t.startswith(mark, i):
+                return off + i
+        off += len(t)
+    return None
 
 
 def _box_parts(block: Block) -> list[tuple[str, object]]:
@@ -1617,38 +1600,12 @@ def _mark_spot(paragraphs, mark: str):
     return None, False
 
 
-def _mark_at_xml(paragraphs, mark: str) -> None:
-    """옛 길 — 칠할 자리(hp:t 첫 글·탭 뒤 글이 원문자로 시작)를 XML에서 찾아 감싼다. 원문자가 그 자리보다 앞에도 있어
-    add_highlight(처음 나오는 곳을 칠한다)로는 그 자리를 칠할 수 없을 때만 쓴다(CORE-ASKS: 칠할 자리를 고르는 형광펜)."""
-    for p in paragraphs:
-        for t in p.element.iter(q("hp", "t")):
-            if (t.text or "").startswith(mark):
-                spot = (t, None)
-            else:
-                spot = next(((t, ch) for ch in t if ch.tag == q("hp", "tab") and (ch.tail or "").startswith(mark)), None)
-            if spot:
-                t, anchor = spot
-                rest = (t.text if anchor is None else anchor.tail)[len(mark):]
-                if anchor is None:
-                    t.text = None
-                else:
-                    anchor.tail = None
-                at = 0 if anchor is None else list(t).index(anchor) + 1
-                begin = ET.SubElement(t, q("hp", "markpenBegin"), {"color": 형광})
-                end = ET.SubElement(t, q("hp", "markpenEnd"))
-                t.insert(at, begin)
-                t.insert(at + 1, end)
-                begin.tail, end.tail = mark, rest or None
-                p.section.mark_dirty()
-                return
-
-
 def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, draft: bool = False) -> None:
     """굳힌 문항지에 정답 형광펜만 더한다(답 표시본) — 조판의 answer_key와 같은 자리·모양, 글자·서식·나눔은 그대로.
 
     자리 = 그 문항 답지 줄 문단(답항표면 그 표의 칸)에서 조각 첫머리가 정답 원문자인 곳(줄 첫머리 또는 탭 뒤).
     draft(초안)면 정답 표시 없는 문항은 칠하지 않고 넘어간다(한/글 초안을 되돌린 원고 — 10-01). 최종판은 멈춘다.
-    칠하기는 공개 API(paragraph.add_highlight — <markpenBegin/>①<markpenEnd/>)로.
+    칠하기는 공개 API(paragraph.add_highlight — <markpenBegin/>①<markpenEnd/>, 자리가 앞에 또 있으면 start=·end=)로.
     """
     from .fit import inner_paragraphs
 
@@ -1668,8 +1625,9 @@ def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, dr
             raise ValueError(f"{k}번 정답 {mark}를 칠할 자리가 답지 줄에 없다")
         if first:
             spot.add_highlight(color=형광, match=mark)
-        else:  # 원문자가 칠할 자리보다 앞에도 있다 — add_highlight는 처음 나오는 곳을 칠하므로 옛 길로
-            _mark_at_xml([ps[i] for i in rows], mark)
+        else:  # 원문자가 칠할 자리보다 앞에도 있다 — 그 자리를 글자 자리로 칠한다(본체 #782)
+            at = _mark_offset(spot, mark, "\t")
+            spot.add_highlight(color=형광, start=at, end=at + len(mark))
 
 
 def _set_box_row(tbl, content, cc: int, cr: int, rails, h: int) -> None:
