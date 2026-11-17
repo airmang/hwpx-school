@@ -211,6 +211,18 @@ def _개체_태그(item) -> str | None:
     return None
 
 
+def _ctrl_안의_금지_태그(run) -> list[str]:
+    """run의 컨트롤(hp:ctrl) 안쪽에 든 글자·개체 — run 바로 아래 글·개체는 보지 않는다(어차피 지운다)."""
+    찾음: list[str] = []
+    for item in run.content:
+        if item.container != "ctrl":
+            continue
+        태그 = "t" if (item.kind == "text" and (item.text or "").strip()) else _개체_태그(item)
+        if 태그 is not None and f"hp:{태그}" not in 찾음:
+            찾음.append(f"hp:{태그}")
+    return 찾음
+
+
 def _story(paragraph, item):
     """머리말·꼬리말 컨트롤 조각의 story — 구역 설정에서 id로 찾는다."""
     props = paragraph.section.properties
@@ -347,37 +359,32 @@ def extract_skeleton(
         raise ValueError(f"{_실패_머리말}: 첫 문단에 secPr이 없다 — 원본 구조가 예상과 다르다")
 
 
-    # 세 번째 문단(P2)은 남긴다 — 1단→2단 전환을 이루는 colPr을 담은 hp:run 하나만
-    # 남기고(그 run 안에서도 hp:ctrl 외 자식 제거) 줄 캐시를 지운다. 나머지
-    # 문단(P1, P3 이후)은 전부 지운다.
+    # 세 번째 문단(P2)은 남긴다 — 1단→2단 전환을 이루는 colPr을 담은 hp:run 하나만 남긴다. 나머지 문단(P1, P3 이후)은
+    # 먼저 지우고(다른 단 바꿈 문단이 있어도 남지 않게), 첫 문단은 첫 run만 남긴 뒤 본체 clear_body가 한 번에 비운다:
+    # 첫 run의 secPr·ctrl 말고 자식, 첫 문단 줄 캐시, 그리고 keep_column_changes=True로 전환 문단은 id 그대로 두고
+    # 그 run에는 단 컨트롤만 남긴다(본체 #780).
     전환_문단 = paragraphs[2]
     전환_run = _단_정의(전환_문단, 2)
     for run in 전환_문단.runs:
         if run != 전환_run:
             run.remove()
-    for child in list(전환_run.element):  # (위와 같은 까닭으로 요소로 — CORE-ASKS)
-        if child.tag != _q("ctrl"):
-            전환_run.element.remove(child)
-
-    # 첫 문단과 같은 이유로 전환 run의 ctrl **안쪽**까지 본다 — colPr만 있어야 할
-    # 자리에 표·그림·도형이 같이 실려 있으면 그대로 새 나간다. 여기서 걸리면 자동으로
-    # 지우지 않고 통째로 거부한다.
-    금지_태그 = _보존_run_안의_금지_태그(전환_문단, 전환_run)
+    # 첫 문단과 같은 이유로 전환 run의 ctrl **안쪽**까지 본다 — colPr만 있어야 할 자리에 표·그림·도형이 같이
+    # 실려 있으면 새 나갈 뻔한 원본이다. clear_body(keep_column_changes=True)는 그것을 조용히 지우지만,
+    # 이 도구는 fail closed — 자동으로 지우지 않고 통째로 거부한다(고치기 전에 본다).
+    금지_태그 = _ctrl_안의_금지_태그(전환_run)
     if 금지_태그:
         raise ValueError(
             f"{_실패_머리말}: 2단 전환 문단(세 번째 문단)의 컨트롤 안에 내용이 있다"
             f" — {', '.join(금지_태그)}"
         )
-    전환_문단.clear_layout_cache()
-
-    # 첫 문단: 첫 run 말고 다른 run은 지우고(컨트롤이 든 run도 — 옛 판 그대로), 본체 clear_body로
-    # 첫 run의 secPr·ctrl 말고 자식·둘째 문단부터 모든 문단·줄 캐시를 걷는다. 전환 문단은 clear_body가
-    # 함께 지우므로 insert_paragraphs로 사본을 다시 넣는다(secPr이 없는 문단이라 colPr은 그대로 따라온다).
+    for paragraph in paragraphs[1:]:
+        if paragraph != 전환_문단:
+            paragraph.remove()
     첫_run, *나머지_run = first.runs
     for run in 나머지_run:
         run.remove()
     try:
-        보고 = section.clear_body(on_control_content="raise")
+        보고 = section.clear_body(on_control_content="raise", keep_column_changes=True)
     except HwpxValueError as exc:
         if exc.code != "section-clear-control-content":
             raise
@@ -392,7 +399,7 @@ def extract_skeleton(
             f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
             f"(머리말·꼬리말일 수 있다) — {', '.join(금지_태그)}"
         )
-    section.insert_paragraphs(1, [전환_문단])
+    전환_문단.clear_layout_cache()
 
     package = doc.package
     for item_id in _bindata_items(doc):
