@@ -1106,7 +1106,10 @@ class _Composer:
             p.column_break, p.page_break = spec.brk == "column", spec.brk == "page"
         for run in p.runs:
             run.remove()
-        if spec.tabs:  # 탭 든 답지 줄 — 탭 폭(hp:tab width)을 적는 길이 core에 없어 run을 직접 쓴다(CORE-ASKS)
+        texts = [t for t, _ in spec.segs if not isinstance(t, equation.Math)]
+        if spec.tabs or any("\r" in t for t in texts):
+            # 탭 든 답지 줄 — 탭 폭(hp:tab width)을 적는 길이 core에 없어 run을 직접 쓴다(CORE-ASKS). 글에 CR이 있어도
+            # 옛 꼴(hp:t 안 글자 그대로)을 지키려 여기로 — add_run은 CR을 줄바꿈(hp:lineBreak)으로 쓴다.
             mark, tabs = spec.mark, iter(spec.tabs)
             for text, c in spec.segs:
                 if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
@@ -1117,6 +1120,8 @@ class _Composer:
             if mark:
                 raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
         else:  # 공개 API — 조각마다 run(줄바꿈은 hp:t 안 hp:lineBreak), 수식은 문단 끝에 수식 run(조각 차례 그대로)
+            for t in texts:
+                _xml_글(t)
             for text, c in spec.segs:
                 if isinstance(text, equation.Math):
                     self._수식(p, text.script, c or cp)
@@ -1333,6 +1338,18 @@ def wrap_words(text: str, avail: int, m: Metrics) -> str:
         sep = nxt
     out.append(cur)
     return equation.unmask("\n".join(out), maths)
+
+
+_XML_밖 = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+
+
+def _xml_글(text: str) -> None:
+    """XML에 쓸 수 없는 글자가 든 글이면 run을 직접 쓸 때(lxml)와 같은 예외로 멈춘다 — add_run은 그 글자를 걸러 쓰지만 조판은
+    옛 길처럼 멈춘다. 탭·줄바꿈으로 나눈 조각마다 본다(옛 길이 hp:t 글에 넣던 단위 — 짝 없는 대리 글자 오류의 자리가 같게)."""
+    for piece in re.split(r"[\t\n]", text):
+        if _XML_밖.search(piece):
+            raise ValueError("All strings must be XML compatible: Unicode or ASCII, no NULL bytes or control characters")
+        piece.encode("utf-8")  # 짝 없는 대리 글자 — UnicodeEncodeError
 
 
 def _mark_first(p, mark: str, segs) -> None:
@@ -1579,6 +1596,34 @@ def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, dr
         spot.add_highlight(color=형광, match=mark)
 
 
+def _set_box_row(tbl, content, cc: int, cr: int, rails, h: int) -> None:
+    """박스 내용 행 높이를 h로 — 표 높이는 h − (내용 칸 옛 높이)만큼, 내용 칸과 내용 행에 앵커가 있는 레일 칸은 h로, 다른 칸은
+    그대로(양식의 행 높이와 칸 높이가 어긋나도 그 꼴을 지킨다). table.set_row_height가 표 높이를 그만큼 바꾸게 행 높이를 주고,
+    그 행을 지나며 함께 바뀐 칸을 칸마다 되돌린다."""
+    delta = h - content.height
+    # 표 높이를 delta만큼 — 내용 행부터, 줄일 때 한 행이 다 받지 못하면(행 높이는 1 이상) 높은 행부터 나눠 받는다
+    rows = tbl.row_heights
+    for r in [cr] + sorted((x for x in range(len(rows)) if x != cr), key=lambda x: -rows[x]):
+        if not delta:
+            break
+        rows = tbl.row_heights
+        take = delta if delta > 0 else max(delta, 1 - rows[r])
+        if not take:
+            continue
+        crossing = [x.cell for x in tbl.iter_grid() if x.is_anchor and x.row <= r < x.row + x.cell.span[0]]
+        before = [x.height for x in crossing]
+        tbl.set_row_height(r, rows[r] + take)
+        for cell, was in zip(crossing, before):
+            cell.set_size(height=was)
+        delta -= take
+    if delta:
+        raise ValueError(f"박스 표 높이를 줄일 행 높이가 모자란다(남은 {delta}, 행 높이 {list(tbl.row_heights)})")
+    anchors = {(x.column, x.row): x.cell for x in tbl.iter_grid() if x.is_anchor}
+    for col in (cc, *rails):
+        if (col, cr) in anchors:
+            anchors[(col, cr)].set_size(height=h)
+
+
 def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
     """〈보기〉·자료 박스의 내용 행 높이를 한컴이 잰 실제 줄 수(lines: fit.Lines, 키 = (최상위 문단, 안 문단 차례))로
     다시 맞춘다 — 바뀐 박스 수. 조판은 추정 줄 수로 셀 높이를 잡는데 한글은 셀을 늘리기만 하고 줄이지 않는다. 그래서
@@ -1632,16 +1677,7 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
             old = content.height
             if old == h:
                 continue
-            # 표 높이는 h − (내용 칸 옛 높이)만큼, 내용 칸과 내용 행에 앵커가 있는 레일 칸은 h로 — 다른 칸은 그대로 둔다(양식의
-            # 행 높이와 칸 높이가 어긋나도 그 꼴을 지킨다). table.set_row_height가 표 높이를 그만큼 바꾸게 행 높이를 주고, 그
-            # 행을 지나며 함께 바뀐 칸을 칸마다 되돌린다.
-            crossing = [x.cell for x in tbl.iter_grid() if x.is_anchor and x.row <= cr < x.row + x.cell.span[0]]
-            before = [x.height for x in crossing]
-            tbl.set_row_height(cr, tbl.row_heights[cr] + h - old)
-            mine = {(cc, cr), *((col, cr) for col in rails)}
-            for cell, was in zip(crossing, before):
-                at = (cell.address[1], cell.address[0])
-                cell.set_size(height=h if at in mine else was)
+            _set_box_row(tbl, content, cc, cr, rails, h)
             changed += 1
     if changed:
         doc.sections[0].mark_dirty()
