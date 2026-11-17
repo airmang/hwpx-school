@@ -709,24 +709,31 @@ def test_칸_문단에_칠할_원문자가_없으면_거부(양식_hwpx):
 _객체 = ("tbl", "pic", "rect", "ellipse", "line", "container", "equation")
 
 
-def test_새_객체_id는_모든_객체_id_위에서_발급(양식_hwpx):
+def test_새_객체_id는_겹치지_않고_두_판과_같은_입력에서_같다(양식_hwpx):
+    """개체 id는 양식 지문 씨앗으로 뽑는다(소유자 승인 2026-11-17): 문서 안에서 겹치지 않고,
+    문항지·답표시본이 같은 id를 받고, 같은 입력을 다시 조판하면 같은 id를 받는다."""
     def 큰_id_도형(doc):  # 관리박스 문단에 id가 큰 도형 하나 — 표·그림이 아니어도 id 공간을 공유한다
         run = doc.sections[0].paragraphs[0].element.find(q("hp", "run"))
         ET_ = __import__("lxml.etree", fromlist=["SubElement"])
         ET_.SubElement(run, q("hp", "rect"), {"id": "2000000000", "zOrder": "500"})
 
     md = (픽스처 / "표그림_3문항.md").read_text(encoding="utf-8")
-    _, doc, _, _ = _조판(양식_hwpx, md, answer_key=False, doctor=큰_id_도형)
-    ps = 최상위_문단(doc)
-    heads = question_heads(doc)
-    new = [int(e.get("id")) for p in ps[heads[0]:-1] for e in p.element.iter(*(q("hp", t) for t in _객체))]
-    old = [int(e.get("id")) for p in ps[:heads[0]] + ps[-1:] for e in p.element.iter(*(q("hp", t) for t in _객체))]
+
+    def ids(answer_key: bool) -> tuple[list[int], list[int], list[int]]:
+        _, doc, _, _ = _조판(양식_hwpx, md, answer_key=answer_key, doctor=큰_id_도형)
+        ps = 최상위_문단(doc)
+        heads = question_heads(doc)
+        모두 = [int(e.get("id")) for s in doc.sections for e in s.element.iter(*(q("hp", t) for t in _객체))]
+        new = [int(e.get("id")) for p in ps[heads[0]:-1] for e in p.element.iter(*(q("hp", t) for t in _객체))]
+        zs = [int(e.get("zOrder")) for p in ps[heads[0]:-1] for e in p.element.iter(*(q("hp", t) for t in _객체))]
+        return 모두, new, zs
+
+    모두, new, zs = ids(False)
     assert len(new) == 5  # 격자표, 그림, 자료 박스와 그 안의 표, 답항표
-    assert min(new) > max(old) >= 2000000000
-    assert new == sorted(new) and len(set(new)) == len(new)  # 차례대로, 겹침 없음
-    zs = [int(e.get("zOrder")) for p in ps[heads[0]:-1] for e in p.element.iter(*(q("hp", t) for t in _객체))]
-    old_z = [int(e.get("zOrder")) for p in ps[:heads[0]] + ps[-1:] for e in p.element.iter(*(q("hp", t) for t in _객체))]
-    assert max(old_z) == 500 and zs == list(range(501, 501 + len(zs)))  # zOrder도 차례로, 기존 개체 위
+    assert len(set(모두)) == len(모두) and 2000000000 in 모두  # 겹치지 않음(이미 있던 큰 id 포함)
+    assert ids(True) == (모두, new, zs)  # 두 판이 같음
+    assert ids(False) == (모두, new, zs)  # 같은 입력이면 같은 id
+    assert min(zs) > 500  # zOrder는 기존 개체 위
 
 
 def test_양식_분기가_없으면_양식이_바뀌었다(양식_hwpx):
