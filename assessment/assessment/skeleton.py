@@ -211,18 +211,6 @@ def _개체_태그(item) -> str | None:
     return None
 
 
-def _ctrl_안의_금지_태그(run) -> list[str]:
-    """run의 컨트롤(hp:ctrl) 안쪽에 든 글자·개체 — run 바로 아래 글·개체는 보지 않는다(어차피 지운다)."""
-    찾음: list[str] = []
-    for item in run.content:
-        if item.container != "ctrl":
-            continue
-        태그 = "t" if (item.kind == "text" and (item.text or "").strip()) else _개체_태그(item)
-        if 태그 is not None and f"hp:{태그}" not in 찾음:
-            찾음.append(f"hp:{태그}")
-    return 찾음
-
-
 def _story(paragraph, item):
     """머리말·꼬리말 컨트롤 조각의 story — 구역 설정에서 id로 찾는다."""
     props = paragraph.section.properties
@@ -368,15 +356,6 @@ def extract_skeleton(
     for run in 전환_문단.runs:
         if run != 전환_run:
             run.remove()
-    # 첫 문단과 같은 이유로 전환 run의 ctrl **안쪽**까지 본다 — colPr만 있어야 할 자리에 표·그림·도형이 같이
-    # 실려 있으면 새 나갈 뻔한 원본이다. clear_body(keep_column_changes=True)는 그것을 조용히 지우지만,
-    # 이 도구는 fail closed — 자동으로 지우지 않고 통째로 거부한다(고치기 전에 본다).
-    금지_태그 = _ctrl_안의_금지_태그(전환_run)
-    if 금지_태그:
-        raise ValueError(
-            f"{_실패_머리말}: 2단 전환 문단(세 번째 문단)의 컨트롤 안에 내용이 있다"
-            f" — {', '.join(금지_태그)}"
-        )
     for paragraph in paragraphs[1:]:
         if paragraph != 전환_문단:
             paragraph.remove()
@@ -388,9 +367,13 @@ def extract_skeleton(
     except HwpxValueError as exc:
         if exc.code != "section-clear-control-content":
             raise
+        태그 = ", ".join(exc.context.get("tags", []))
+        # 본체는 남기는 단 바꿈 문단의 컨트롤 안 내용도 같은 코드로 거부한다(#782) — 어느 문단인지는 글로만 갈린다
+        if str(exc).startswith("a column change kept"):
+            raise ValueError(f"{_실패_머리말}: 2단 전환 문단(세 번째 문단)의 컨트롤 안에 내용이 있다 — {태그}") from exc
         raise ValueError(
             f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
-            f"(머리말·꼬리말일 수 있다) — {', '.join(exc.context.get('tags', []))}"
+            f"(머리말·꼬리말일 수 있다) — {태그}"
         ) from exc
     first_run_stripped = 보고.stripped_run_children
     금지_태그 = _보존_run_안의_금지_태그(first, 첫_run)
