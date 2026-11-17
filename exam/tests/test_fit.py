@@ -485,7 +485,8 @@ def test_측정은_한_번_더_해_본다(tmp_path):
     from exam_kit.fit import hancom_lines
     from exam_kit.render import RenderUnavailable
 
-    src = _꾸러미(tmp_path / "a.hwpx")
+    src = tmp_path / "a.hwpx"  # read_lines는 문서를 연다 — 공개 API로 지은 빈 문서
+    HwpxDocument.new().save(str(src))
 
     class 오라클:
         def __init__(self, 실패):
@@ -496,7 +497,7 @@ def test_측정은_한_번_더_해_본다(tmp_path):
             return self.호출 > self.실패
 
     o = 오라클(1)
-    assert hancom_lines(src, tmp_path / "m", oracle=o) == {} and o.호출 == 2
+    assert hancom_lines(src, tmp_path / "m", oracle=o) == read_lines(src) and o.호출 == 2
     names = [p.name for p in (tmp_path / "m").iterdir()]
     assert len(names) == 2 and len(set(names)) == 2  # (m-1) 재시도는 새 무작위 이름의 새 사본으로
     with pytest.raises(RenderUnavailable, match="2회"):
