@@ -344,31 +344,6 @@ def extract_skeleton(
     if not _구역_설정이_있다(first):
         raise ValueError(f"{_실패_머리말}: 첫 문단에 secPr이 없다 — 원본 구조가 예상과 다르다")
 
-    첫_run, *나머지_run = first.runs
-    for run in 나머지_run:
-        run.remove()
-
-    # 보존하는 첫 run에 secPr·ctrl 말고 글자(hp:t)·표·그림·도형이 같이 들어 있으면 그대로
-    # 새 나갔다 — 화이트리스트(secPr·ctrl만 남긴다)로 나머지 자식을 전부 지운다.
-    # (run 안에서 구역 설정·컨트롤만 남기는 공개 길이 없어 요소로 지운다 — r6/CORE-ASKS.md)
-    보존할_자식 = {_q("secPr"), _q("ctrl")}
-    first_run_stripped = 0
-    for child in list(첫_run.element):
-        if child.tag not in 보존할_자식:
-            첫_run.element.remove(child)
-            first_run_stripped += 1
-
-    # 보존한 secPr·ctrl **안쪽**까지 본다. ctrl은 머리말·꼬리말도 담는 범용
-    # 컨테이너라, 위 화이트리스트만으로는 그 안에 든 내용을 놓친다. 여기서 걸리면
-    # 자동으로 지우지 않고 통째로 거부한다 — 무엇을 지워도 되는지 이 함수가 판단할 만큼
-    # 확신할 수 없어서다.
-    금지_태그 = _보존_run_안의_금지_태그(first, 첫_run)
-    if 금지_태그:
-        raise ValueError(
-            f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
-            f"(머리말·꼬리말일 수 있다) — {', '.join(금지_태그)}"
-        )
-    first.clear_layout_cache()
 
     # 세 번째 문단(P2)은 남긴다 — 1단→2단 전환을 이루는 colPr을 담은 hp:run 하나만
     # 남기고(그 run 안에서도 hp:ctrl 외 자식 제거) 줄 캐시를 지운다. 나머지
@@ -393,10 +368,29 @@ def extract_skeleton(
         )
     전환_문단.clear_layout_cache()
 
-    for paragraph in paragraphs[1:]:
-        if paragraph != 전환_문단:
-            paragraph.remove()
-    section.mark_dirty()
+    # 첫 문단: 첫 run 말고 다른 run은 지우고(컨트롤이 든 run도 — 옛 판 그대로), 본체 clear_body로
+    # 첫 run의 secPr·ctrl 말고 자식·둘째 문단부터 모든 문단·줄 캐시를 걷는다. 전환 문단은 clear_body가
+    # 함께 지우므로 insert_paragraphs로 사본을 다시 넣는다(secPr이 없는 문단이라 colPr은 그대로 따라온다).
+    첫_run, *나머지_run = first.runs
+    for run in 나머지_run:
+        run.remove()
+    try:
+        보고 = section.clear_body(on_control_content="raise")
+    except HwpxValueError as exc:
+        if exc.code != "section-clear-control-content":
+            raise
+        raise ValueError(
+            f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
+            f"(머리말·꼬리말일 수 있다) — {', '.join(exc.context.get('tags', []))}"
+        ) from exc
+    first_run_stripped = 보고.stripped_run_children
+    금지_태그 = _보존_run_안의_금지_태그(first, 첫_run)
+    if 금지_태그:
+        raise ValueError(
+            f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
+            f"(머리말·꼬리말일 수 있다) — {', '.join(금지_태그)}"
+        )
+    section.insert_paragraphs(1, [전환_문단])
 
     package = doc.package
     for item_id in _bindata_items(doc):
