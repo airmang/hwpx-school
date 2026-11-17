@@ -521,7 +521,10 @@ class _Composer:
         key = ("코드", role, color)
         if key in self._ul:
             return self._ul[key]
-        if not self.doc.styles.fonts("HANGUL"):  # 옛 code_font_ids와 같은 멈춤 — 한글 글꼴 목록이 없는 양식
+        # 옛 code_font_ids와 같은 멈춤 — HANGUL fontface 블록 자체가 없는 양식(빈 블록이면 옛 판처럼 글꼴을 더해 간다).
+        # 공개 읽기(styles.fonts)는 '블록 없음'과 '빈 블록'을 둘 다 {}로 내어 가르지 못해 헤더를 읽는다(CORE-ASK).
+        if not self.doc.styles.fonts("HANGUL") and not any(
+                ff.get("lang") == "HANGUL" for ff in self.doc.oxml.headers[0].element.iter(q("hh", "fontface"))):
             raise ValueError("양식이 바뀌었다: hh:fontface lang=HANGUL 없음")
         cid = self.doc.styles.ensure_run(base_char_pr_id_ref=self.style[role][2], font=self.kit.code_font,
                                          ratio=100, letter_spacing=0, color=color)
