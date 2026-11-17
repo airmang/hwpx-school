@@ -186,7 +186,7 @@ def test_합성_수학_두_판_조판(answer_key, tmp_path):
         assert e.find(q("hp", "pos")).get("treatAsChar") == "1"
         assert run.find(q("hp", "t")) is None  # 수식 run에는 글이 없다
     ids = [e.get("id") for e in sec.iter(*(q("hp", t) for t in ("tbl", "pic", "equation")))]
-    assert len(ids) == len(set(ids))  # 개체 id가 겹치지 않는다(_renumber)
+    assert len(ids) == len(set(ids))  # 개체 id가 겹치지 않는다(코어 A4)
     # 표 칸(자료 표·답항표) 안에도 수식이 있다 — 절댓값 `|x-1|`은 칸을 나누지 않았다
     in_cells = [e for e in eqs if any(a.tag == q("hp", "tc") for a in e.iterancestors())]
     assert {e.find(q("hp", "script")).text for e in in_cells} >= {"| x - 1 |", "sqrt {3}", "1", "9"}

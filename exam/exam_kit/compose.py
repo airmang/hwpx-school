@@ -127,9 +127,6 @@ def natural_width_cm(px: int) -> float:
 # 둘째 행에서만 본다 — 대시 하나 이상(GFM). `:-:`도 구분행(G5-4: 전에는 3개 미만이면 글자 행으로 찍혔다)
 _구분행 = re.compile(r"^\|?(\s*:?-+:?\s*\|)+\s*(:?-+:?\s*)?$")
 _코드_번호 = re.compile(r"^(\d{2})  (.*)$")  # 코드 줄 번호 'NN␣␣' (kit.code_style = gutter, G5-2)
-# 새 id를 매길 때 겹치면 안 되는 개체 — 표·그림만이 아니라 도형·수식도 같은 id 공간을 쓴다
-_개체 = tuple(q("hp", t) for t in ("tbl", "pic", "rect", "ellipse", "line", "arc", "polygon", "curve", "connectLine",
-                                  "container", "equation", "ole", "textart", "video", "chart"))
 
 
 def _가림(text: str, m: Metrics):
@@ -1496,25 +1493,6 @@ def _box_parts(block: Block) -> list[tuple[str, object]]:
     return out
 
 
-def _renumber(doc: HwpxDocument, fresh: list[ET._Element]) -> None:
-    """새로 넣은 문단 속 개체(표·그림·…)에 id와 zOrder를 차례로 — 문서의 다른 모든 개체보다 크게.
-
-    insert_paragraphs는 복제하면서 개체 id를 무작위(31비트)로 다시 매긴다 — 겹침이 확률로만 막히므로 여기서 확정한다.
-    """
-    mine = [e for p in fresh for e in p.iter(*_개체)]
-    skip = set(mine)
-    used = [int(e.get("id")) for s in doc.sections for e in s.element.iter(*_개체)
-            if e not in skip and (e.get("id") or "").isdigit()]
-    n = max(used, default=0)
-    if n + len(mine) > 0x7FFFFFFF:
-        raise ValueError(f"새 개체 id가 31비트를 넘는다(기존 최댓값 {n}) — 양식의 id가 너무 크다")
-    z = max((int(e.get("zOrder")) for s in doc.sections for e in s.element.iter(*_개체)
-             if e not in skip and (e.get("zOrder") or "").lstrip("-").isdigit()), default=-1)
-    for k, e in enumerate(mine, 1):
-        e.set("id", str(n + k))
-        e.set("zOrder", str(z + k))  # 견본 사본·새 표가 같은 zOrder로 겹치지 않게 차례로
-
-
 def compose(doc: HwpxDocument, scan: Scan, kit: Kit, *, answer_key: bool, image_root: Path | None = None) -> ComposeResult:
     """prepare_form(+fill_slots+refresh)을 거친 문서의 샘플 구역을 견본 채집 뒤 문항으로 바꾼다."""
     samples = harvest_samples(doc, kit)
@@ -1533,7 +1511,6 @@ def compose(doc: HwpxDocument, scan: Scan, kit: Kit, *, answer_key: bool, image_
         sec.remove_paragraph(w)
     for w in reversed(old):
         sec.remove_paragraph(w)
-    _renumber(doc, [p.element for p in new])
     after = start + len(new) - 1  # 보존 블록(서술형·논술형 등)은 문항 뒤·꼬리 박스 앞에 원본 모양 그대로(preserve)
     for k, b in enumerate(scan.preserved, 1):
         after = preserve.insert_region(doc, (Path(image_root) if image_root else Path(".")) / b.attrs["src"], after,
