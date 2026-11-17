@@ -40,58 +40,34 @@ def _fmt_points(x: float) -> str:
     return str(int(x)) if float(x).is_integer() else f"{x:.1f}"
 
 
-def _charpr_모양(el, *, drop_italic: bool = False) -> tuple:
-    """id·색(그리고 drop_italic이면 기울임)을 뺀 나머지 속성·자식으로 만든 서명 — 이게 같으면 쌍둥이."""
-    속성 = tuple(sorted((k, v) for k, v in el.attrib.items() if k not in ("id", "textColor")))
-    자식 = tuple((c.tag, tuple(sorted(c.attrib.items()))) for c in el
-                if not (drop_italic and c.tag == q("hh", "italic")))
-    return (속성, 자식)
-
-
-def _needs_black_twin(el, *, upright: bool) -> bool:
-    if el.get("textColor") == _빨강:
+def _needs_black_twin(style, *, upright: bool) -> bool:
+    if style.attributes.get("textColor") == _빨강:
         return True
-    return upright and el.find(q("hh", "italic")) is not None
+    return upright and "italic" in style.child_attributes
 
 
 def _black_twin(doc: HwpxDocument, charpr_id: str, *, upright: bool = False) -> str:
-    """charpr_id가 빨강이면(upright=True면 기울임까지 있으면) 검정(+정자체) 쌍둥이의 id를 찾거나 만들어 돌려준다.
+    """charpr_id가 빨강이면(upright=True면 기울임까지 있으면) 검정(+정자체) 쌍둥이의 id를 돌려준다 — 공개
+    ``styles.ensure_run(base_char_pr_id_ref=, color="#000000", italic=False)``(같은 모양이 있으면 그것, 없으면 새 id).
 
-    fill_form_field는 채운 값 run의 charPr을 그 값을 감싸는 run에 맞춘다 — 대개는
-    검정이라 자연히 정리되지만, 원본 양식에서 감싸는 run 자체가 빨강인 슬롯
-    (선택형_문항수·선택형_만점·총쪽수)은 채워도 빨강으로 남는다.
-
-    upright=True(출제교사 이름 run 전용)는 색뿐 아니라 hh:italic 자식도 지운 쌍둥이를
-    찾는다 — 자리표시 charPr(11pt·빨강·굵게·기울임)이 그대로 남기던 기울임을 없애
-    "정자체"로 만든다. 이미 같은 모양(기울임 제외)·검정인 charPr이 있으면 그걸 재사용하고,
-    없을 때만 ensure_char_property로 복제해 새 id를 발급한다.
-    """
-    header = doc.parts.headers[0]
-    src = header.element.find(f".//{q('hh', 'charPr')}[@id='{charpr_id}']")
+    fill_form_field는 채운 값 run의 charPr을 그 값을 감싸는 run에 맞춘다 — 대개는 검정이라 자연히 정리되지만, 원본
+    양식에서 감싸는 run 자체가 빨강인 슬롯(선택형_문항수·선택형_만점·총쪽수)은 채워도 빨강으로 남는다. upright=True(출제교사
+    이름 run 전용)는 기울임도 끈다(정자체). B11(소유자 결정 전) — 옛 판은 요소 술어로 쌍둥이를 찾고 textColor·hh:italic만
+    고쳤다(next7/all)."""
+    src = doc.styles.char_property(charpr_id)
     if src is None or not _needs_black_twin(src, upright=upright):
         return charpr_id
-    모양 = _charpr_모양(src, drop_italic=upright)
-
-    def _같은_모양_검정(c) -> bool:
-        if c.get("id") == charpr_id or c.get("textColor") != "#000000":
-            return False  # "빨강만 아니면" 이 아니라 "정말 검정"이어야 한다 — 다른 색(예: #FF0052) 오인 매치 방지
-        if upright and c.find(q("hh", "italic")) is not None:
-            return False
-        return _charpr_모양(c, drop_italic=upright) == 모양
-
-    def _검정칠(c) -> None:
-        c.set("textColor", "#000000")
-        if upright:
-            italic = c.find(q("hh", "italic"))
-            if italic is not None:
-                c.remove(italic)
-
-    twin = header.ensure_char_property(predicate=_같은_모양_검정, modifier=_검정칠, base_char_pr_id=charpr_id)
-    return twin.get("id")
+    return doc.styles.ensure_run(base_char_pr_id_ref=charpr_id, color="#000000", italic=False if upright else None)
 
 
 def _unred(doc: HwpxDocument, run, *, upright: bool = False) -> None:
-    run = getattr(run, "element", run)  # 공개 run(값 run) · 요소(출제교사 칸의 옛 길)
+    """run(공개 run 또는 아직 요소로 다루는 run)의 글자 모양을 검정 쌍둥이로."""
+    if hasattr(run, "char_pr_id_ref"):
+        cpid = run.char_pr_id_ref
+        black = _black_twin(doc, cpid, upright=upright)
+        if black != cpid:
+            run.char_pr_id_ref = black
+        return
     cpid = run.get("charPrIDRef")
     black = _black_twin(doc, cpid, upright=upright)
     if black != cpid:
