@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tempfile
@@ -329,7 +330,8 @@ def extract_skeleton(
     title: str = "수행평가 양식 스켈레톤",
     font_map: dict[str, str] | None = None,
 ) -> dict[str, int]:
-    doc = HwpxDocument.open(source)
+    # 전환 문단 사본이 새 id를 받는다 — 원본 지문을 씨앗으로 열어 같은 원본이면 같은 스켈레톤(바이트)이 나오게
+    doc = HwpxDocument.open(source, seed=int(hashlib.sha256(Path(source).read_bytes()).hexdigest()[:8], 16))
     if len(doc.sections) > 1:
         raise ValueError(
             f"{_실패_머리말}: 섹션이 둘 이상인 원본은 지원하지 않는다: {len(doc.sections)}개"
