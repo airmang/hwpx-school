@@ -1457,17 +1457,31 @@ def compose(doc: HwpxDocument, scan: Scan, kit: Kit, *, answer_key: bool, image_
 LOOSER = {"1행": "2행", "2행": "3행", "3행": "5행"}  # 답지가 접히면 한 단계 느슨한 형으로(렌더 루프)
 
 
-def _문단_글(paragraphs) -> str:
-    """문단들(최상위 문단과 그 안 문단)의 글(hp:t의 글자) — 수식은 그 한/글 수식 문자열로(수식 설명 글 '수식입니다.'는
-    넣지 않는다). 탭·줄바꿈 같은 글자 요소는 글로 세지 않는다."""
+def _문단_글(paragraph) -> str:
+    """문단의 글(hp:t의 글자)을 문서 차례로 — 표가 있는 자리에는 그 칸 문단의 글이(같은 방식으로), 글상자 따위 도형 안 문단의
+    글도 그 자리에 든다. 수식은 그 한/글 수식 문자열로(수식 설명 글 '수식입니다.'는 넣지 않는다). 탭·줄바꿈 같은 글자 요소는
+    글로 세지 않는다."""
     out = []
-    for p in paragraphs:
-        for r in p.runs:
-            for it in r.content:
-                if it.kind == "equation":
-                    out.append(it.object.script or "")
-                elif it.container == "t" and it.kind == "text":
-                    out.append(it.text)
+    for r in paragraph.runs:
+        for it in r.content:
+            if it.kind == "equation":
+                out.append(it.object.script or "")
+            elif it.container == "t" and it.kind == "text":
+                out.append(it.text)
+            elif it.kind == "table":
+                cap = it.object.caption  # 캡션은 표 XML에서 칸보다 앞
+                out += [_문단_글(cp) for cp in (cap.paragraphs if cap is not None else ())]
+                out += [_문단_글(cp) for row in it.object.rows for cell in row.cells for cp in cell.paragraphs]
+            elif it.container == "ctrl" and hasattr(it.object, "paragraphs"):  # 메모 누름틀·각주·미주의 문단
+                out += [_문단_글(cp) for cp in it.object.paragraphs]
+            elif it.container == "run" and not hasattr(it.object, "iter_paragraphs") \
+                    and getattr(it.object, "caption", None) is not None:  # 그림 따위의 캡션
+                out += [_문단_글(cp) for cp in it.object.caption.paragraphs]
+            elif it.container == "run" and hasattr(it.object, "iter_paragraphs"):
+                out += ["".join(x.object.script or "" if x.kind == "equation" else x.text
+                                for rr in pl.paragraph.runs for x in rr.content
+                                if x.kind == "equation" or (x.container == "t" and x.kind == "text"))
+                        for pl in it.object.iter_paragraphs()]
     return "".join(out)
 
 
@@ -1494,13 +1508,10 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
     old = choice_paragraphs(doc, kit, int(qn.number))
     if not old:
         raise ValueError(f"{qn.number}번 답지 줄 문단이 없다")
-    from .fit import inner_paragraphs
-
     sec = doc.sections[0]
     ps = list(sec.paragraphs)
-    inner = inner_paragraphs(doc)
     victims = [ps[i] for i in old]
-    have = re.sub(r"\s", "", _문단_글(x for i in old for x in (ps[i], *inner[i])))
+    have = re.sub(r"\s", "", "".join(_문단_글(ps[i]) for i in old))
     want = re.sub(r"\s", "", "".join(_원고_글(f"{c.mark}{c.text}".replace("__", "")) for c in qn.choices))
     if have != want:  # 원고가 이 문서와 다르다 — 다른 문항의 답지로 덮어쓰지 않게 멈춘다
         raise ValueError(f"{qn.number}번 답지가 원고와 다르다: 문서 {have!r} ≠ 원고 {want!r}")
@@ -1520,17 +1531,24 @@ def relayout_choices(doc: HwpxDocument, kit: Kit, qn: Question, kind: str, *, an
     sec.mark_dirty()
 
 
+def _mark_eligible(run, mark: str) -> bool:
+    """런 글(hp:t)이 정답 원문자로 시작하거나 탭 바로 뒤 글이 정답 원문자로 시작하는가 — 형광펜 표지 뒤(이미 칠한 자리)는 아니다."""
+    items = [it for it in run.content if it.container == "t"]
+    if items and items[0].kind == "text" and items[0].text.startswith(mark):
+        return True
+    return any(a.kind == "tab" and b.kind == "text" and b.text.startswith(mark) for a, b in zip(items, items[1:]))
+
+
 def _mark_spot(paragraphs, mark: str):
-    """정답 형광펜을 칠할 문단 — 런 글(hp:t)이 정답 원문자로 시작하거나 탭 바로 뒤가 정답 원문자인 런이 있는 첫 문단.
-    그 문단에서 원문자가 처음 나오는 곳이 그 자리여야 한다(paragraph.add_highlight는 처음 나오는 곳을 칠한다)."""
+    """정답 형광펜을 칠할 문단 — 칠할 자리(_mark_eligible)가 있는 런이 든 첫 문단. 그 문단에서 원문자가 처음 나오는 런이 그
+    런이어야 하고 그 런에서 처음 나오는 곳이 그 자리여야 한다(paragraph.add_highlight는 처음 나오는 곳을 칠한다)."""
     for p in paragraphs:
         for r in p.runs:
-            text = r.text
-            if not (text.startswith(mark) or "	" + mark in text):
+            if not _mark_eligible(r, mark):
                 continue
             first = next(x for x in p.runs if mark in x.text)
             at = first.text.index(mark)
-            if first != r or not (at == 0 or first.text[at - 1] == "	"):
+            if first != r or not (at == 0 or first.text[at - 1] == "\t"):
                 raise ValueError(f"정답 {mark}가 칠할 자리보다 앞에도 있다 — 형광펜을 엉뚱한 곳에 칠하지 않게 멈춘다")
             return p
     return None
