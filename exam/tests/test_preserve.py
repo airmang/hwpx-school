@@ -27,7 +27,9 @@ def _원안지(tmp_path: Path) -> Path:
     doc = HwpxDocument.open(str(base))
     sec = doc.sections[0]
     tail = _tail_index(doc, kit.tailbox["match_text"])
-    added = [doc.add_paragraph(서술형), doc.add_paragraph("(1) 합성 첫째 물음")]
+    # 글자 모양은 본문 스타일(킷 normal)의 것으로 — 앞 문단(꼬리 박스)의 run을 물려받으면 양식의 run 꼴에 따라 글꼴이 달라진다
+    본문 = doc.styles[kit.styles["normal"]].char_pr_id_ref
+    added = [doc.add_paragraph(서술형, char_pr_id_ref=본문), doc.add_paragraph("(1) 합성 첫째 물음", char_pr_id_ref=본문)]
     t = doc.add_table(2, 2)
     t.cell(0, 0).text, t.cell(1, 1).text = "가", "나"
     added.append(list(sec.paragraphs)[-1])
