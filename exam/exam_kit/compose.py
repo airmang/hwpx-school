@@ -643,11 +643,11 @@ class _Composer:
             raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
         return p
 
-    def _수식(self, p, script: str, cp: str) -> ET._Element:
+    def _수식(self, p, script: str, cp: str):
         """문단 끝에 한/글 수식 run을 붙인다(공개 API add_equation) — 그 자리 글자 크기, 글꼴은 킷 typeset.equation_font
-        (없으면 수식_글꼴). 수식 요소를 돌려준다."""
+        (없으면 수식_글꼴). 수식 개체를 돌려준다."""
         return p.add_equation(script, font_size=self.글자_크기(cp) / 100, char_pr_id_ref=cp,
-                              font=self.kit.typeset.get("equation_font", 수식_글꼴)).element
+                              font=self.kit.typeset.get("equation_font", 수식_글꼴))
 
     def 글자_크기(self, cp: str) -> int:
         """charPr의 글자 크기(height, HWPUNIT) — 수식 기준 크기(baseUnit)로 쓴다(한/글도 넣는 자리의 글자 크기로 만든다)."""
@@ -1199,13 +1199,23 @@ class _Composer:
         return start + ((line_w - w) // 2 if center else 0), m.get("prev", 0)
 
     @staticmethod
-    def _float(el: ET._Element, x: int, y: int) -> ET._Element:
-        el.set("textWrap", "IN_FRONT_OF_TEXT")
-        el.find(q("hp", "pos")).attrib.update({
-            "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
-            "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
-            "vertOffset": str(y), "horzOffset": str(x)})
-        return el
+    def _float(obj, x: int, y: int):
+        """떠 있는 개체로 — 글 앞, 문단 기준 세로·단 기준 가로 (x, y), 쪽 영역 안으로 제한, 겹침 허용(obj.set_position).
+        음수 오프셋은 옛 꼴(부호 있는 글 "-N")을 지키려 직접 쓴다 — set_position은 한/글처럼 부호 없는 32비트 꼴로 쓴다
+        (compose-x float-negative-offset)."""
+        if x < 0 or y < 0:
+            el = obj.element
+            el.set("textWrap", "IN_FRONT_OF_TEXT")
+            el.find(q("hp", "pos")).attrib.update({
+                "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
+                "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
+                "vertOffset": str(y), "horzOffset": str(x)})
+            obj.paragraph.section.mark_dirty()
+            return obj
+        obj.set_position(treat_as_char=False, text_wrap="IN_FRONT_OF_TEXT", flow_with_text=True, allow_overlap=True,
+                         vertical_relative_to="PARA", horizontal_relative_to="COLUMN", vertical_alignment="TOP",
+                         horizontal_alignment="LEFT", vertical_offset=y, horizontal_offset=x)
+        return obj
 
     def _draw(self, p, pid: str, frame: ET._Element, d) -> None:
         """도형을 개체마다 따로 — 면(채운 다각형, 테두리 없음) → 선·점선 → 곡선 → 길이 점선 호 → 직각 표시. 글자·점은 _overlay가
@@ -1217,36 +1227,36 @@ class _Composer:
             mx, my = min(xs), min(ys)
             return (x0 + mx, y0 + my), [(x - mx, y - my) for x, y in zip(xs, ys)]
 
-        def style(el, kind: str, dash: bool) -> None:
-            ls = el.find(q("hp", "lineShape"))
-            ls.set("width", str(선_굵기[kind]))
+        def style(shape, kind: str, dash: bool) -> None:
+            # 선 굵기는 HWPUNIT 그대로 — line_width_mm은 mm × 283을 자른 값을 쓰므로 반 단위를 더해 넘긴다
+            shape.line_width_mm = (선_굵기[kind] + 0.5) / 283
             if dash:
-                ls.set("style", "DASH")
+                shape.line_style = "DASH"
 
         for ns, color in d.faces:
             (x, y), pts = hw([d.points[n] for n in ns])
-            el = p.add_polygon(pts, line_width_mm=0, fill_color=color, treat_as_char=False).element
-            el.find(q("hp", "lineShape")).set("style", "NONE")
+            el = p.add_polygon(pts, line_width_mm=0, fill_color=color, treat_as_char=False)
+            el.line_style = "NONE"
             self._float(el, x, y)
         for a, b, dash in d.lines:
             (x, y), [(ax, ay), (bx, by)] = hw([d.points[a], d.points[b]])
-            el = p.add_line(ax, ay, bx, by, treat_as_char=False).element
+            el = p.add_line(ax, ay, bx, by, treat_as_char=False)
             style(el, "점선" if dash else "선", dash)
             self._float(el, x, y)
         for pts_cm, dash in d.curves:
             (x, y), pts = hw(pts_cm)
-            el = p.add_curve(pts, treat_as_char=False).element
+            el = p.add_curve(pts, treat_as_char=False)
             style(el, "점선" if dash else "선", dash)
             self._float(el, x, y)
         for a, b, _, side in d.lengths:
             (x, y), pts = hw(drawing.length_arc(d.points[a], d.points[b], side)[0])
-            el = p.add_curve(pts, treat_as_char=False).element
+            el = p.add_curve(pts, treat_as_char=False)
             style(el, "호", True)
             self._float(el, x, y)
         for h, a, b in d.rights:
             for seg in drawing.right_mark(d.points[h], d.points[a], d.points[b]):
                 (x, y), [(ax, ay), (bx, by)] = hw(list(seg))
-                el = p.add_line(ax, ay, bx, by, treat_as_char=False).element
+                el = p.add_line(ax, ay, bx, by, treat_as_char=False)
                 style(el, "직각", False)
                 self._float(el, x, y)
 
@@ -1303,11 +1313,11 @@ class _Composer:
             cx, cy = x0 + round(o.x_cm * CM), y0 + round(o.y_cm * CM)
             bw, bh = self._overlay_box(o)
             if o.kind == "점":
-                el = p.add_ellipse(점_지름, 점_지름, line_color="#000000", fill_color="#000000", treat_as_char=False).element
+                el = p.add_ellipse(점_지름, 점_지름, line_color="#000000", fill_color="#000000", treat_as_char=False)
             else:
                 el = self._수식(p, equation.to_script(o.latex), cp)
-            om = el.find(q("hp", "outMargin"))
-            ol, ot = (int(om.get("left") or 0), int(om.get("top") or 0)) if om is not None else (0, 0)
+            om = el.out_margins
+            ol, ot = (int(om.left or 0), int(om.top or 0)) if om is not None else (0, 0)
             left, top = cx - bw // 2, cy - bh // 2
             if left < 0 or left + bw > self.kit.columns["width"]:
                 what = "점" if o.kind == "점" else f"${o.latex}$"
