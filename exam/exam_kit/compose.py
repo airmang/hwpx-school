@@ -33,6 +33,7 @@ from PIL import Image, ImageOps
 from . import HP, drawing, equation, preserve, q
 from .kit import STEM_WORD_BREAKS, Kit, Metrics, style_ids
 from .prepare import is_sample_table
+from .read import cells_deep
 from .scan import IMG_RE, OVERLAY_RE, TABLE_ROW_RE, Block, Overlay, Question, QuestionSet, Scan, figure_parts, img_attrs
 from .verify import question_heads
 
@@ -1668,8 +1669,17 @@ def _set_box_row(tbl, content, cc: int, cr: int, rails, h: int) -> None:
     """박스 내용 행 높이를 h로 — 표 높이는 h − (내용 칸 옛 높이)만큼, 내용 칸과 내용 행에 앵커가 있는 레일 칸은 h로, 다른 칸은
     그대로(양식의 행 높이와 칸 높이가 어긋나도 그 꼴을 지킨다). table.set_row_height가 표 높이를 그만큼 바꾸게 행 높이를 주고,
     그 행을 지나며 함께 바뀐 칸을 칸마다 되돌린다."""
-    delta = h - content.height
-    # 표 높이를 delta만큼 — 내용 행부터, 줄일 때 한 행이 다 받지 못하면(행 높이는 1 이상) 높은 행부터 나눠 받는다
+    _표_높이만(tbl, h - content.height, first=cr)
+    anchors = {(x.column, x.row): x.cell for x in tbl.iter_grid() if x.is_anchor}
+    for col in (cc, *rails):
+        if (col, cr) in anchors:
+            anchors[(col, cr)].set_size(height=h)
+
+
+def _표_높이만(tbl, delta: int, first: int = 0) -> None:
+    """표 높이(hp:sz)만 delta만큼 — 칸 높이는 그대로 둔다. table.set_row_height가 표 높이를 그만큼 바꾸게 행 높이를 주고,
+    그 행을 지나며 함께 바뀐 칸을 칸마다 되돌린다. first 행부터, 줄일 때 한 행이 다 받지 못하면(행 높이는 1 이상) 높은 행부터."""
+    cr = first
     rows = tbl.row_heights
     for r in [cr] + sorted((x for x in range(len(rows)) if x != cr), key=lambda x: -rows[x]):
         if not delta:
@@ -1686,10 +1696,6 @@ def _set_box_row(tbl, content, cc: int, cr: int, rails, h: int) -> None:
         delta -= take
     if delta:
         raise ValueError(f"박스 표 높이를 줄일 행 높이가 모자란다(남은 {delta}, 행 높이 {list(tbl.row_heights)})")
-    anchors = {(x.column, x.row): x.cell for x in tbl.iter_grid() if x.is_anchor}
-    for col in (cc, *rails):
-        if (col, cr) in anchors:
-            anchors[(col, cr)].set_size(height=h)
 
 
 def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
@@ -1718,7 +1724,11 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
             if kind is None:
                 continue
             _, (cc, cr), rails, role = _박스(kit, kind)
-            content = next((x.cell for x in tbl.iter_grid() if x.is_anchor and (x.column, x.row) == (cc, cr)), None)
+            # 옛 판의 뜻을 그대로 둔 것이며 고침은 `-x`에 있다: 옛 판은 칸을 `tbl.iter(hp:tc)`로 모아 주소 → 칸을 만들었다.
+            # 안쪽 표의 같은 주소 칸이 바깥 칸을 덮으므로(문서 차례로 마지막 것) 안에 표가 든 박스는 대개 스타일 검사에서
+            # 건너뛰었다. 그 차례를 cells_deep으로 그대로 따른다.
+            cells = {(c.address[1], c.address[0]): c for c in cells_deep(tbl)}
+            content = cells.get((cc, cr))
             if content is None:
                 continue
             cell_ps = content.paragraphs
@@ -1745,7 +1755,14 @@ def resize_boxes(doc: HwpxDocument, kit: Kit, lines: dict) -> int:
             old = content.height
             if old == h:
                 continue
-            _set_box_row(tbl, content, cc, cr, rails, h)
+            anchors = {(x.column, x.row): x.cell for x in tbl.iter_grid() if x.is_anchor}
+            if all(cells.get((col, cr)) == anchors.get((col, cr)) for col in (cc, *rails)):
+                _set_box_row(tbl, content, cc, cr, rails, h)
+            else:  # 옛 판처럼 덮어쓴 칸(안쪽 표의 칸)에 높이를 쓰고, 바깥 표 높이는 h − (그 칸 옛 높이)만큼
+                for col in (cc, *rails):
+                    if (col, cr) in cells:
+                        cells[(col, cr)].set_size(height=h)
+                _표_높이만(tbl, h - old)
             changed += 1
     if changed:
         doc.sections[0].mark_dirty()

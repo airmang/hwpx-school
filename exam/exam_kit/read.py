@@ -30,6 +30,19 @@ def table_paragraphs(table) -> list:
     return out + [p for row in table.rows for cell in row.cells for p in cell.paragraphs]
 
 
+def cells_deep(table) -> Iterator:
+    """표의 칸을 옛 ``tbl.iter(hp:tc)`` 차례로 — 바깥 칸, 그 칸 문단에 든 표의 칸(재귀), 다음 바깥 칸 …(앞 순회).
+
+    옛 판이 주소(cellAddr)로 칸을 찾을 때 안쪽 표의 같은 주소 칸까지 함께 훑던 뜻을 그대로 둘 때 쓴다. 칸 문단의 run에
+    바로 든 표만 내려간다(칸 안 글상자 속 표는 옛 판만 훑었다 — 그런 양식은 아직 없다)."""
+    for row in table.rows:
+        for cell in row.cells:
+            yield cell
+            for p in cell.paragraphs:
+                for inner in p.tables:
+                    yield from cells_deep(inner)
+
+
 def table_text(table) -> str:
     """표의 글(``table_paragraphs``의 ``nested_raw``)."""
     return nested_raw(table_paragraphs(table))
