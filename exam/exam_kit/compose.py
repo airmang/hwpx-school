@@ -21,7 +21,6 @@ from __future__ import annotations
 import dataclasses
 import io
 import re
-from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,7 +30,7 @@ from hwpx.objects import CellMargins
 from hwpx_automation.office.exam import profile_form
 from PIL import Image, ImageOps
 
-from . import HP, drawing, equation, preserve, q
+from . import drawing, equation, preserve, q
 from .kit import STEM_WORD_BREAKS, Kit, Metrics, style_ids
 from .prepare import is_sample_table
 from .scan import IMG_RE, OVERLAY_RE, TABLE_ROW_RE, Block, Overlay, Question, QuestionSet, Scan, figure_parts, img_attrs
