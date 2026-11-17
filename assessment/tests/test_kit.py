@@ -10,10 +10,10 @@ def test_킷을_읽는다(킷_루트):
     k = load_kit(킷_루트)
     assert k.name == "standard"
     assert k.border_fill["underline"] == 7
-    assert k.char_pr["answer_label"] == 12
+    assert k.char_pr["answer_label"] == 1  # 씨앗을 공개 API로 다시 만든 판(C2): 같은 내용의 템플릿 정의를 다시 쓴다
     assert "answerLinePadUnit" not in k.furniture
     assert k.border_fill["none"] == 4 and k.furniture["widths"]["answerGap"] > 0
-    assert k.char_pr["hint"] == 13
+    assert k.char_pr["hint"] == 2
     assert k.skeleton.exists()
     assert k.para_pr["caption_left"] == 21  # 왼쪽 정렬 캡션 — 학번 줄과 같은 paraPr
 

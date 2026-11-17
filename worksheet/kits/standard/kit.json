@@ -17,19 +17,19 @@
       "rule_last": 6
     },
     "charPr": {
-      "headline": 13,
+      "headline": 12,
       "circle_num": 7,
-      "stamp": 11,
+      "stamp": 10,
       "body": 0,
-      "band_left": 8,
-      "band_teacher": 9,
-      "band_title": 10,
-      "band_name": 9,
-      "cell": 9,
-      "label": 9,
-      "heading_ref": 14,
-      "keyword_head": 10,
-      "prompt": 12
+      "band_left": 1,
+      "band_teacher": 8,
+      "band_title": 9,
+      "band_name": 8,
+      "cell": 8,
+      "label": 8,
+      "heading_ref": 13,
+      "keyword_head": 9,
+      "prompt": 11
     },
     "paraPr": {
       "body": 22,

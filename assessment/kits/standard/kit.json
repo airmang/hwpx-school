@@ -11,12 +11,12 @@
     "paraPr": {
       "title": 20,
       "id_line": 21,
-      "body": 22,
-      "passage": 23,
+      "body": 0,
+      "passage": 9,
       "center": 20,
       "footer_gap": 21,
-      "score_value": 24,
-      "memo": 22,
+      "score_value": 22,
+      "memo": 0,
       "caption_left": 21
     },
     "charPr": {
@@ -24,9 +24,9 @@
       "title_suffix": 8,
       "score": 9,
       "note": 10,
-      "body": 11,
-      "answer_label": 12,
-      "hint": 13,
+      "body": 6,
+      "answer_label": 1,
+      "hint": 2,
       "blank": 0
     },
     "memoStyle": 17

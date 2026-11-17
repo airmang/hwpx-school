@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
-from copy import deepcopy
 from pathlib import Path
 
 from hwpx import HwpxDocument
@@ -20,13 +19,9 @@ from hwpx import HwpxDocument
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from worksheet.skeleton import extract_skeleton  # noqa: E402
 
-HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
-HC = "{http://www.hancom.co.kr/hwpml/2011/core}"
-HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 킷 = Path(__file__).resolve().parents[1] / "kits" / "standard"
 
-DOTUM, BATANG = "0", "1"                       # 기본 템플릿 글꼴 id
-LANGS = ("hangul", "latin", "hanja", "japanese", "other", "symbol", "user")
+DOTUM, BATANG = "함초롬돋움", "함초롬바탕"         # 기본 템플릿 글꼴(모든 언어)
 검정, 옅은회색, 회색 = "#000000", "#BFBFBF", "#808080"
 음영 = "#DEE7F1"                                # 합성 씨앗의 옅은 청회색
 여백 = {"left": 4251, "right": 4251, "top": 2834, "bottom": 2834, "header": 2834, "footer": 2834}
@@ -68,66 +63,26 @@ LANGS = ("hangul", "latin", "hanja", "japanese", "other", "symbol", "user")
 }
 
 
-def _더하기(묶음, 원형, 속성들: dict) -> str:
-    새것 = deepcopy(원형)
-    새것.set("id", str(max(int(e.get("id")) for e in 묶음) + 1))
-    for k, v in 속성들.items():
-        새것.set(k, v)
-    묶음.append(새것)
-    묶음.set("itemCnt", str(len(묶음)))
-    return 새것
-
-
-def _모양들(머리):
-    charprs = next(머리.iter(HH + "charProperties"))
-    paraprs = next(머리.iter(HH + "paraProperties"))
-    fills = next(머리.iter(HH + "borderFills"))
-    char0 = next(e for e in charprs if e.get("id") == "0")
-    para0 = next(e for e in paraprs if e.get("id") == "0")
-    fill1 = next(e for e in fills if e.get("id") == "1")
-
+def _모양들(doc: HwpxDocument) -> dict[str, dict[str, int]]:
+    """킷 역할의 글자·문단·테두리 모양을 정해진 차례로 보장하고 그 번호를 돌려준다(`doc.styles.ensure_*`).
+    기준은 기본 템플릿의 글자 모양 0·문단 모양 0이다. 내용이 같은 모양이 이미 있으면 그 번호를 쓴다."""
     번호: dict[str, dict[str, int]] = {"borderFill": {}, "charPr": {"body": 0}, "paraPr": {}}
-    이미: dict[tuple, str] = {}
     for 역할, (크기, 굵게, 색, 자간, 글꼴) in 글자.items():
-        열쇠 = ("c", 크기, 굵게, 색, 자간, 글꼴)
-        if 열쇠 not in 이미:
-            e = _더하기(charprs, char0, {"height": str(크기), "textColor": 색})
-            for k in LANGS:
-                e.find(HH + "fontRef").set(k, 글꼴)
-                e.find(HH + "spacing").set(k, str(자간))
-            if 굵게:
-                e.find(HH + "underline").addprevious(e.makeelement(HH + "bold", {}))
-            이미[열쇠] = e.get("id")
-        번호["charPr"][역할] = int(이미[열쇠])
+        번호["charPr"][역할] = int(doc.styles.ensure_run(
+            base_char_pr_id_ref="0", size=크기 / 100, bold=굵게, color=색, letter_spacing=자간, font=글꼴))
     for 역할, (정렬, 내어, 줄) in 문단.items():
-        열쇠 = ("p", 정렬, 내어, 줄)
-        if 열쇠 not in 이미:
-            e = _더하기(paraprs, para0, {})
-            e.find(HH + "align").set("horizontal", 정렬)
-            case, default = e.find(HP + "switch")
-            for 가지, 배 in ((case, 1), (default, 2)):  # case = HWPUNIT, default = 2배
-                가지.find(f"{HH}margin/{HC}intent").set("value", str(내어 * 배))
-                가지.find(HH + "lineSpacing").set("value", str(줄))
-            이미[열쇠] = e.get("id")
-        번호["paraPr"][역할] = int(이미[열쇠])
+        번호["paraPr"][역할] = int(doc.styles.ensure_paragraph_format(
+            base_para_pr_id_ref="0", alignment=정렬, margins={"intent": 내어}, line_spacing=줄))
     for 역할, (위, 아래, 좌우, 채움) in 테두리.items():
-        e = _더하기(fills, fill1, {})
-        for 쪽, 색 in (("left", 좌우), ("right", 좌우), ("top", 위), ("bottom", 아래)):
-            선 = e.find(f"{HH}{쪽}Border")
-            선.set("type", "SOLID"), 선.set("width", "0.12 mm"), 선.set("color", 색)
-        if 채움:
-            붓 = e.makeelement(HC + "fillBrush", {})
-            붓.append(붓.makeelement(HC + "winBrush", {"faceColor": 채움, "hatchColor": 검정, "alpha": "0"}))
-            e.append(붓)
-        번호["borderFill"][역할] = int(e.get("id"))
+        면 = {쪽: {"type": "SOLID", "width_mm": 0.12, "color": 색}
+             for 쪽, 색 in (("left", 좌우), ("right", 좌우), ("top", 위), ("bottom", 아래))}
+        번호["borderFill"][역할] = int(doc.styles.ensure_border_fill(sides=면, fill_color=채움))
     return 번호
 
 
 def main() -> None:
-    doc = HwpxDocument.new(empty_first_line=True)
-    머리 = doc.oxml.headers[0]
-    번호 = _모양들(머리.element)
-    머리.mark_dirty()  # 요소를 직접 고쳤다 — 저장 때 다시 쓰게 한다
+    doc = HwpxDocument.new(empty_first_line=True, seed=0)
+    번호 = _모양들(doc)
     doc.page.set_margins(**여백)
     with tempfile.TemporaryDirectory() as tmp:
         원형 = Path(tmp) / "seed.hwpx"

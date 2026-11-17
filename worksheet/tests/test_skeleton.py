@@ -23,8 +23,9 @@ def test_스켈레톤은_문단1개와_스타일을_남긴다(원본_hwpx, tmp_p
     dest = tmp_path / "skeleton.hwpx"
     보고 = extract_skeleton(원본_hwpx, dest)
 
-    # 스타일표는 원본(= 씨앗 스켈레톤에 본문만 채운 것)의 것을 그대로 남긴다 — 개수는 씨앗에서 읽는다.
-    씨앗 = HwpxDocument.open(_표준_스켈레톤).styles
+    # 스타일표는 원본(= 씨앗 스켈레톤에 본문만 채운 것)의 것을 그대로 남긴다 — 개수는 원본에서 읽는다(원본에 넣은 표가
+    # 테두리 정의를 하나 더할 수 있다 — 씨앗을 공개 API로 다시 만든 판(C2)에서는 더한다).
+    씨앗 = HwpxDocument.open(원본_hwpx).styles
     개수 = (len(씨앗.border_fills), len(씨앗.char_properties), len(씨앗.paragraph_properties))
     assert 보고 == {
         "paragraphs": 1,
