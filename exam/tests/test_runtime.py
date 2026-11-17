@@ -6,9 +6,9 @@ import exam_kit
 
 
 def test_런타임_범위():
-    assert Version(version("python-hwpx-automation")) >= Version("7.2.0")
-    assert Version(version("python-hwpx-automation")) < Version("8")
-    assert Version(version("python-hwpx")) >= Version("6.5.0")
+    # pyproject 핀(python-hwpx>=7.0,<8 · python-hwpx-automation>=8.0,<9)과 같게.
+    assert Version("8.0") <= Version(version("python-hwpx-automation")) < Version("9")
+    assert Version("7.0") <= Version(version("python-hwpx")) < Version("8")
     assert exam_kit.__version__ == "0.1.0"
 
 
