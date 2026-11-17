@@ -1,17 +1,42 @@
 {
-  "schemaVersion": "hwpx.design.profile.v1",
+  "schemaVersion": "hwpx.design.profile.v2",
   "kind": "marked",
   "id": "standard",
   "template": "template.hwpx",
+  "fragments_document": "fragments.hwpx",
   "fragments": {
-    "표제": "fragments/00.xml",
-    "날짜": "fragments/01.xml",
-    "쪽나눔": "fragments/02.xml",
-    "띠": "fragments/03.xml",
-    "1단계": "fragments/04.xml",
-    "2단계": "fragments/05.xml",
-    "3단계": "fragments/06.xml",
-    "참고": "fragments/07.xml"
+    "표제": {
+      "start": 1,
+      "count": 2
+    },
+    "날짜": {
+      "start": 3,
+      "count": 2
+    },
+    "쪽나눔": {
+      "start": 5,
+      "count": 2
+    },
+    "띠": {
+      "start": 7,
+      "count": 2
+    },
+    "1단계": {
+      "start": 9,
+      "count": 2
+    },
+    "2단계": {
+      "start": 11,
+      "count": 1
+    },
+    "3단계": {
+      "start": 12,
+      "count": 1
+    },
+    "참고": {
+      "start": 13,
+      "count": 1
+    }
   },
   "slots": {
     "표제": [

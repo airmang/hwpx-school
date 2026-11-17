@@ -15,7 +15,7 @@ from hwpx_automation.office.authoring.design.marked import harvest_marked_profil
 
 
 def register(template: str | Path, kit_dir: str | Path) -> dict[str, Any]:
-    """견본을 수확해 *kit_dir* 에 킷(profile.json·template.hwpx·fragments/)을 쓴다."""
+    """견본을 수확해 *kit_dir* 에 킷(profile.json·template.hwpx·fragments.hwpx)을 쓴다."""
 
     kit_dir = Path(kit_dir)
     manifest = harvest_marked_profile(template, kit_dir.name, kit_dir.parent)
