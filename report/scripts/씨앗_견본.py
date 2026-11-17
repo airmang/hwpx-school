@@ -16,6 +16,8 @@ from pathlib import Path
 
 from hwpx import HwpxDocument
 
+_고정_시각 = __import__("datetime").datetime(2026, 1, 1, tzinfo=__import__("datetime").timezone.utc)
+
 킷 = Path(__file__).resolve().parents[1] / "kits" / "standard"
 
 DOTUM, BATANG = "0", "1"  # 기본 템플릿 글꼴 id
@@ -57,7 +59,7 @@ def _칸(table, 행: int, 열: int, 글: str, 글자: str, 문단: str | None = 
 
 
 def main() -> None:
-    doc = HwpxDocument.new()
+    doc = HwpxDocument.new(seed=0, now=_고정_시각)  # 다시 돌려도 같은 견본(바이트)
     글자 = {
         "표제": doc.styles.ensure_run(bold=True, size=크기["표제"], font="함초롬돋움"),
         "날짜": doc.styles.ensure_run(bold=True, size=크기["날짜"], font="함초롬바탕"),

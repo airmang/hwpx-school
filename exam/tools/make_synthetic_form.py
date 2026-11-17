@@ -21,6 +21,8 @@ from pathlib import Path
 
 from hwpx.document import HwpxDocument
 
+_고정_시각 = __import__("datetime").datetime(2026, 1, 1, tzinfo=__import__("datetime").timezone.utc)
+
 W, H = 72852, 103180
 M = {"left": 5000, "right": 5000, "top": 5669, "bottom": 4000, "header": 0, "footer": 2000}
 GAP = 1400
@@ -45,7 +47,7 @@ def _para(doc, *, line: int, left: int = 0, intent: int = 0, tab: str | None = N
 
 
 def build(out: Path) -> None:
-    doc = HwpxDocument.new(empty_first_line=True)  # 7.0: 6.x처럼 빈 첫 줄(구역 설정)에서 시작한다
+    doc = HwpxDocument.new(empty_first_line=True, seed=0, now=_고정_시각)  # 다시 돌려도 같은 양식(바이트) · 7.0: 6.x처럼 빈 첫 줄(구역 설정)에서 시작한다
     sec = doc.sections[0]
 
     # ---- 쪽·단 ----
