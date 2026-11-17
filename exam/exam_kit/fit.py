@@ -115,17 +115,9 @@ def _has_object(p: Paragraph) -> bool:
 
 
 def inner_paragraphs(doc: HwpxDocument) -> list[list[Paragraph]]:
-    """구역 0 최상위 문단마다 그 안의 문단들(표 칸·글상자·머리말 …, 문서 차례) — 키의 둘째 값이 이 차례다."""
-    sec = doc.sections[0]
-    out: list[list[Paragraph]] = []
-    for place in doc.text.iter_paragraphs():
-        if place.section is not sec:
-            continue
-        if place.where == "body" and place.depth == 0:
-            out.append([])
-        elif out:
-            out[-1].append(place.paragraph)
-    return out
+    """구역 0 최상위 문단마다 그 안의 문단들(표 칸·글상자·캡션·머리말 …, 문서 차례 — paragraph.iter_paragraphs())
+    — 키의 둘째 값이 이 차례다."""
+    return [[place.paragraph for place in top.iter_paragraphs()] for top in doc.sections[0].paragraphs]
 
 
 def paragraph_at(doc: HwpxDocument, key: Key, inner: list[list[Paragraph]] | None = None) -> Paragraph:
@@ -145,14 +137,29 @@ def code_char_prs(doc: HwpxDocument, kit: Kit) -> set[str]:
 
 
 def _run_has_text(r) -> bool:
-    """런에 공백 아닌 글이 있는가 — 글, 수식 글, 안에 든 개체(표·글상자)의 글까지."""
+    """런에 공백 아닌 글이 있는가 — 글, 수식 글, 안에 든 개체(표·글상자)의 글, 컨트롤 안 문단(머리말·꼬리말·각주·메모)의 글,
+    누름틀 매개변수 글까지(옛 판정이 런의 모든 글 노드를 보던 것과 같게)."""
     if r.text.strip():
         return True
     for it in r.content:
         if it.kind == "equation" and (it.object.script or "").strip():
             return True
+        if it.container == "run" and (getattr(it.object, "description", None) or "").strip():
+            return True  # 개체 설명 글(hp:shapeComment)
+        if it.kind == "ruby" and ((it.object.text or "").strip() or (it.object.ruby_text or "").strip()):
+            return True  # 덧말
+        cap = getattr(it.object, "caption", None) if it.container == "run" else None
+        if cap is not None and any(_run_has_text(rr) for cp in cap.paragraphs for rr in cp.runs):
+            return True  # 캡션
+        if it.container == "ctrl" and it.object is not None:
+            if hasattr(it.object, "paragraphs") and any(cp.nested_text().strip() for cp in it.object.paragraphs):
+                return True
+            if any((prm.value or "").strip() or (prm.name or "").strip() and False
+                   for prm in getattr(it.object, "parameters", ()) or ()):
+                return True
         if it.kind == "table":
-            if any(cp.nested_text().strip() for row in it.object.rows for cell in row.cells for cp in cell.paragraphs):
+            if any(_run_has_text(rr) for row in it.object.rows for cell in row.cells for cp in cell.paragraphs
+                   for rr in cp.runs):
                 return True
         elif it.container == "run" and hasattr(it.object, "iter_paragraphs"):
             if any(pl.paragraph.text.strip() for pl in it.object.iter_paragraphs()):

@@ -101,9 +101,10 @@ def _units(doc: HwpxDocument, region: list[int], inner: list[list[Paragraph]]) -
     return [p for i in region for p in (ps[i], *inner[i])]
 
 
-def _pictures(units: list[Paragraph]) -> list[str | None]:
-    """글 단위 문단마다 바로 든 그림의 이진 항목 id — 그림이 바뀌었는지 견준다."""
-    return [pic.item_id for p in units for pic in p.pictures]
+def _pictures(doc: HwpxDocument, region: list[int]) -> list[str | None]:
+    """문항 구간의 그림(안쪽 표 칸·글상자의 것까지, 문서 차례)의 이진 항목 id — 그림이 바뀌었는지 견준다."""
+    ps = doc.sections[0].paragraphs
+    return [place.object.item_id for i in region for place in ps[i].iter_objects(kinds="picture")]
 
 
 _떠_있는_것 = {"equation", "ellipse", "line", "polygon", "curve", "rect", "arc"}
@@ -180,7 +181,7 @@ def apply_patch(old: HwpxDocument, new: HwpxDocument, kit: Kit) -> list[str]:
     changed: list[str] = []
     for k, (ra, rb) in enumerate(zip(ro, rn), 1):
         ua, ub = _units(old, ra, io), _units(new, rb, inn)
-        if [ho.get(x) for x in _pictures(ua)] != [hn.get(x) for x in _pictures(ub)]:
+        if [ho.get(x) for x in _pictures(old, ra)] != [hn.get(x) for x in _pictures(new, rb)]:
             raise NeedsRebuild(f"{k}번 그림이 바뀌었다")
         if len(ua) != len(ub):
             raise NeedsRebuild(f"{k}번 문단 수 {len(ua)} ≠ {len(ub)}")
