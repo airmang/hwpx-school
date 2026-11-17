@@ -64,7 +64,7 @@ import worksheet.compose as compose_module
 from _helpers import _png
 from worksheet.backends.docx import twip
 from worksheet.compose import compose
-from worksheet.kit import REQUIRED_KEYS, load_kit, verify_kit
+from worksheet.kit import REQUIRED_KEYS, load_kit, stamp_kit, verify_kit
 from worksheet.ns import HP
 from worksheet.kit_style import resolve_kit
 
@@ -333,6 +333,7 @@ def _변이_킷_만들기(tmp_path: Path) -> tuple[dict, dict, Path]:
     (변이_루트 / "kit.json").write_text(
         json.dumps(변이_데이터, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    stamp_kit(변이_루트)  # 변이 모양을 심은 스켈레톤과 변이 kit.json이 짝이다
     return 원본_데이터, 변이_데이터, 변이_루트
 
 

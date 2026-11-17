@@ -366,6 +366,7 @@ def load_kit(root: Path) -> Kit:
         raise ValueError(f"kit.json 을 읽을 수 없다: {kit_json_path} — {e}") from e
 
     _필수_키_검사(data)
+    _지문_검사(root, data, skeleton, "python -m worksheet.cli stamp-kit")
     if "fontMap" in data:
         validate_font_map(data["fontMap"])
     if "docx" in data:
@@ -428,3 +429,39 @@ def verify_kit(kit: Kit) -> list[str]:
         f"엔진이 모르는 블록 이름: {이름}" for 이름 in kit.blocks if 이름 not in 알려진_블록
     ]
     return 문제
+
+
+# ---- 스켈레톤 지문 ------------------------------------------------------------
+# kit.json의 역할 번호(styles)는 그 킷의 skeleton.hwpx header 번호다. 다른 스켈레톤과 섞이면(옛 kit.json + 새
+# 스켈레톤) 멈추지 않고 다른 글자·문단 모양으로 조판한다 — 그래서 exam의 양식 지문(form.sha256)과 같은 꼴로
+# kit.json `skeleton.sha256`에 스켈레톤 파일의 sha256을 적고, 킷을 읽을 때 맞춰 본다.
+
+def skeleton_sha256(path: Path) -> str:
+    """스켈레톤 파일 바이트의 sha256(16진) — exam `kit.sha256`과 같은 계산."""
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def stamp_kit(root: Path) -> str:
+    """<킷 폴더>/skeleton.hwpx의 지문을 kit.json `skeleton.sha256`에 적고 그 값을 돌려준다. 다른 값은 건드리지 않는다."""
+    root = Path(root)
+    kit_json = root / "kit.json"
+    data = json.loads(kit_json.read_text(encoding="utf-8"))
+    sha = skeleton_sha256(root / "skeleton.hwpx")
+    data["skeleton"] = {**(data.get("skeleton") or {}), "sha256": sha}
+    kit_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return sha
+
+
+def _지문_검사(root: Path, data: dict, skeleton: Path, 명령: str) -> None:
+    적힌 = (data.get("skeleton") or {}).get("sha256") if isinstance(data.get("skeleton"), dict) else None
+    다시 = (f"씨앗 스크립트(scripts/씨앗_스켈레톤.py)나 extract-kit으로 스켈레톤과 kit.json을 함께 다시 만들거나, "
+          f"둘이 짝임을 확인했다면 `{명령} {root}`로 지문을 적는다")
+    if not 적힌:
+        raise ValueError(f"kit.json 에 스켈레톤 지문(skeleton.sha256)이 없다: {root / 'kit.json'} — 이 킷 설정이 지금 "
+                         f"skeleton.hwpx와 짝인지 알 수 없어 조판하지 않는다. {다시}")
+    실제 = skeleton_sha256(skeleton)
+    if 실제 != 적힌:
+        raise ValueError(f"스켈레톤과 킷 설정이 짝이 아니다: skeleton.hwpx sha256 {실제} ≠ kit.json skeleton.sha256 {적힌} "
+                         f"({root}) — 역할 번호가 다른 모양을 가리킬 수 있어 조판하지 않는다. {다시}")

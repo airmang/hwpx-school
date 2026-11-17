@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from worksheet.kit import load_kit
+from worksheet.kit import load_kit, stamp_kit
 from worksheet.kit_style import resolve_kit
 
 _HH = "{http://www.hancom.co.kr/hwpml/2011/head}"
@@ -59,6 +59,7 @@ def test_charPr이_가리키는_글꼴_id가_HANGUL_목록에_없으면_조판_�
     with zipfile.ZipFile(스켈레톤, "w") as zout:
         for i, (정보, 데이터) in enumerate(조각들):
             zout.writestr(정보, 새_헤더 if i == 헤더_위치 else 데이터)
+    stamp_kit(root)  # 스켈레톤을 일부러 고쳤다 — 지문 검사가 아니라 그 뒤의 글꼴 검사를 본다
 
     with pytest.raises(ValueError, match="스켈레톤에 없는 글꼴: charPr.prompt의 fontRef hangul='999'"):
         resolve_kit(load_kit(root))
@@ -102,6 +103,7 @@ def _스켈레톤_고치기(킷_루트, tmp_path, 부품: str, 고치기) -> "Pa
     with zipfile.ZipFile(스켈레톤, "w") as zout:
         for 정보, 데이터 in 조각들:
             zout.writestr(정보, 데이터)
+    stamp_kit(root)  # 스켈레톤을 일부러 고쳤다 — 지문 검사가 아니라 그 뒤의 값 읽기 검사를 본다
     return root
 
 

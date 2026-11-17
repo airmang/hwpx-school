@@ -13,7 +13,7 @@ from worksheet.checks import (
 )
 from worksheet.compose import compose as _compose
 from worksheet.compose import output_format
-from worksheet.kit import load_kit, seed_kit_path, validate_font_map, verify_kit
+from worksheet.kit import load_kit, seed_kit_path, stamp_kit, validate_font_map, verify_kit  # noqa: F401
 from worksheet.md import parse_sheet
 from worksheet.skeleton import extract_skeleton
 
@@ -62,7 +62,18 @@ def _extract_kit(args: argparse.Namespace) -> int:
 
     보고 = extract_skeleton(source, root / "skeleton.hwpx", font_map=font_map)
 
-    print(json.dumps({**보고, "kit_json": kit_json}, ensure_ascii=False))
+    # 지문은 적지 않는다 — kit.json의 스타일 ID를 이 스켈레톤에 맞춘 뒤 사람이 stamp-kit으로 적는다(짝이 맞는다는 확인).
+    다음 = f"kit.json 스타일 ID를 이 스켈레톤에 맞추고 verify_kit을 본 뒤 `python -m worksheet.cli stamp-kit {root}`"
+    print(json.dumps({**보고, "kit_json": kit_json, "다음": 다음}, ensure_ascii=False))
+    return 0
+
+
+def _stamp_kit_cmd(args: argparse.Namespace) -> int:
+    root = Path(args.kit)
+    for 이름 in ("kit.json", "skeleton.hwpx"):
+        if not (root / 이름).exists():
+            raise ValueError(f"킷 폴더에 {이름} 이 없다: {root}")
+    print(json.dumps({"kit": str(root), "skeleton.sha256": stamp_kit(root)}, ensure_ascii=False))
     return 0
 
 
@@ -123,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("--kit", required=True)
     k.add_argument("--out", "--hwpx", dest="out", required=True, help="조판 결과(.hwpx 또는 .docx)")
     k.set_defaults(func=_check_cmd)
+
+    s = sub.add_parser("stamp-kit", help="스켈레톤 지문(skeleton.sha256)을 kit.json에 적는다 — 둘이 짝임을 확인한 뒤에만")
+    s.add_argument("kit")
+    s.set_defaults(func=_stamp_kit_cmd)
 
     args = parser.parse_args(argv)
     try:

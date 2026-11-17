@@ -74,5 +74,8 @@
       ]
     }
   },
-  "fontMap": {}
+  "fontMap": {},
+  "skeleton": {
+    "sha256": "94d279c04ee778271899d426b7ab42e6835fd8b39ea70f695cf2d24803f285b6"
+  }
 }

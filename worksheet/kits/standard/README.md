@@ -48,3 +48,14 @@ hwpx로 킷을 하나 더 뽑는다:
 같은 스켈레톤이어도 안전하다:
 
     uv run python -m worksheet.cli extract-kit kits/<이름>/skeleton.hwpx kits/<이름>
+
+## 스켈레톤 지문(skeleton.sha256)
+
+`kit.json`의 역할 번호(`styles`)는 같은 폴더 `skeleton.hwpx`의 서식 정의 번호다. 그래서 `kit.json`에
+`skeleton.sha256`(스켈레톤 파일의 sha256 — exam 킷의 `form.sha256`과 같은 계산)을 적고, 킷을 읽을 때 맞춰 본다.
+지문이 다르면(옛 `kit.json` + 다른 스켈레톤) 다른 글자·문단 모양을 가리킬 수 있어 조판하지 않고 멈춘다. 지문이
+없는 옛 `kit.json`도 짝인지 알 수 없어 멈춘다. 씨앗 스크립트(`scripts/씨앗_스켈레톤.py`)는 둘을 함께 다시 만들며
+지문도 적는다. 스켈레톤을 따로 다시 뽑았거나 지문이 없는 킷이면, 역할 번호가 그 스켈레톤에 맞는지 확인한 뒤
+다음으로 지문만 적는다(다른 값은 건드리지 않는다):
+
+    uv run python -m worksheet.cli stamp-kit kits/<이름>

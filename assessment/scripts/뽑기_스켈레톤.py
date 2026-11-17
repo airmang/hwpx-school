@@ -24,3 +24,5 @@ font_map = 킷_데이터.get("fontMap") or {}
 validate_font_map(font_map)
 
 print(extract_skeleton(원본, 대상, font_map=font_map))
+# 지문은 적지 않는다 — kit.json의 역할 번호를 이 스켈레톤에 맞춘 뒤 사람이 적는다(짝이 맞는다는 확인).
+print(f"다음: kit.json 역할 번호를 맞춘 뒤 `python -m assessment.cli stamp-kit {킷_루트}`")

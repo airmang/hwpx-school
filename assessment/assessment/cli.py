@@ -10,7 +10,7 @@ from pathlib import Path
 from assessment.blocks import InputError, plan_sheet
 from assessment.checks import check_answers, check_sheet, check_student
 from assessment.compose import compose, output_paths
-from assessment.kit import load_kit
+from assessment.kit import load_kit, stamp_kit
 from assessment.md import MdError, parse_sheet
 
 
@@ -29,7 +29,16 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("md", type=Path)
     k.add_argument("--kit", type=Path, required=True)
     k.add_argument("--out", type=Path)
+    t = sub.add_parser("stamp-kit", help="스켈레톤 지문(skeleton.sha256)을 kit.json에 적는다 — 둘이 짝임을 확인한 뒤에만")
+    t.add_argument("kit", type=Path)
     a = ap.parse_args(argv)
+    if a.cmd == "stamp-kit":
+        빠짐 = [이름 for 이름 in ("kit.json", "skeleton.hwpx") if not (a.kit / 이름).exists()]
+        if 빠짐:
+            print(f"오류: 킷 폴더에 {', '.join(빠짐)} 이 없다: {a.kit}", file=sys.stderr)
+            return 2
+        _출력({"kit": str(a.kit), "skeleton.sha256": stamp_kit(a.kit)})
+        return 0
     try:
         sheet = parse_sheet(a.md.read_text(encoding="utf-8"))
         kit = load_kit(a.kit)

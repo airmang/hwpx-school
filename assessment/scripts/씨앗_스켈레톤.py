@@ -18,6 +18,7 @@ from pathlib import Path
 from hwpx import HwpxDocument
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assessment.kit import stamp_kit  # noqa: E402
 from assessment.skeleton import extract_skeleton  # noqa: E402
 
 킷 = Path(__file__).resolve().parents[1] / "kits" / "standard"
@@ -104,6 +105,7 @@ def main() -> None:
     for 종류, 표 in 번호.items():
         데이터["styles"][종류] = {역할: 표[역할] for 역할 in 데이터["styles"][종류]}
     킷_json.write_text(json.dumps(데이터, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    stamp_kit(킷)  # 스켈레톤과 kit.json을 함께 새로 썼다 — 지문을 적는다
     print(json.dumps(데이터["styles"], ensure_ascii=False))
 
 
