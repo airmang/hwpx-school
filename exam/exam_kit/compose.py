@@ -369,6 +369,15 @@ class _틀:
     height: int
 
 
+@dataclass(frozen=True)
+class _그림:
+    """글자처럼 취급하는 그림의 계획 — 그림 항목(bid)은 계획 때 문서에 넣고, 개체는 materialize가 짓는다(_put_picture)."""
+
+    bid: str
+    width: int
+    height: int
+
+
 @dataclass
 class _Para:
     """삽입 전 문단 계획. segs의 charPr가 None이면 그 역할 스타일의 charPr."""
@@ -751,7 +760,7 @@ class _Composer:
             heights.append(h + self.kit.metrics.char_height + 2 * v)
         return self._table(cells, widths, heights, bf=none, in_margin=in_m, out_margin=dict.fromkeys(self.kit.grid["out_margin"], 0))
 
-    def picture(self, block: Block, avail: int) -> ET._Element:
+    def picture(self, block: Block, avail: int) -> "_그림":
         """`![](경로){width=Ncm}` → 회색조 사본을 문서에 넣고 글자처럼 취급하는 그림(높이는 원본 비율)."""
         at = _picture_attrs(block)
         src, cm = at["src"], at["width_cm"]
@@ -781,7 +790,17 @@ class _Composer:
             # 킷 typeset.grayscale_pictures(예: 원안지 칼라 인쇄 금지) — 회색조 사본을 넣는다
             im.convert("L" if self.kit.typeset["grayscale_pictures"] else "RGB").save(buf, "PNG")
         bid = str(self.doc.media.add_image(buf.getvalue(), "png"))
-        return self._pic_element(bid, w, h)
+        return _그림(bid, w, h)
+
+    def _put_picture(self, host, pic: "_그림"):
+        """그림을 host 문단의 첫 자리에 — 임시 문단에 공개 API(add_picture)로 그리고 move_to로 옮긴 뒤 임시 문단을 지운다
+        (_put_frame과 같은 길)."""
+        sec = self.doc.sections[0]
+        tmp = sec.add_paragraph("", para_pr_id_ref="0", char_pr_id_ref="0", inherit_style=False)
+        obj = tmp.add_picture(pic.bid, width=pic.width, height=pic.height, treat_as_char=True)
+        obj.move_to(host, offset=0, keep_order=True)
+        sec.remove_paragraph(tmp)
+        return obj
 
     def _pic_element(self, bid: str, w: int, h: int) -> ET._Element:
         """글자처럼 취급하는 hp:pic — 임시 문단에 공개 API(add_picture)로 그리고 떼어 낸다(_수식_run과 같은 방식)."""
@@ -909,7 +928,11 @@ class _Composer:
                       + estimate_extra(plain, first, more, self.kit.metrics))
                 sub.append(self._cell_p(self._segs(part, role), role, pid=self.item_pr() if block.kind in _항목_박스 else pid))
                 continue
-            obj = self.grid(part, first, f"L{block.line_no} :::자료 안의") if kind == "표" else self.picture(part, first)
+            if kind == "표":
+                obj = self.grid(part, first, f"L{block.line_no} :::자료 안의")
+            else:
+                g = self.picture(part, first)
+                obj = self._pic_element(g.bid, g.width, g.height)
             osz, om = obj.find(q("hp", "sz")), obj.find(q("hp", "outMargin"))
             h += int(osz.get("height")) + int(om.get("top")) + int(om.get("bottom")) + pitch - self.kit.metrics.char_height
             p = self._cell_p([("", None)], role, pid=self.cell_pr(role))
@@ -1128,6 +1151,8 @@ class _Composer:
         obj = spec.obj
         if isinstance(obj, _틀):
             obj = self._put_frame(p, obj)
+        elif isinstance(obj, _그림):
+            obj = self._put_picture(p, obj)
         elif obj is not None:
             p.element.find(q("hp", "run")).insert(0, obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
         if spec.drawing is not None:
