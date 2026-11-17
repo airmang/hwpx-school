@@ -16,7 +16,6 @@ from pathlib import Path
 from hwpx.document import HwpxDocument
 from hwpx.tools.document_merge import insert_document
 
-from . import q
 from .kit import open_seeded
 from .read import flat
 
@@ -68,10 +67,7 @@ def write_region(src: Path, start: int, end: int, out: Path) -> None:
     doc = open_seeded(src)
     sec = doc.sections[0]
     ps = list(sec.paragraphs)
-    for run in ps[0].element.findall(q("hp", "run")):
-        for ch in list(run):
-            if ch.tag != q("hp", "secPr"):
-                run.remove(ch)
+    ps[0].clear_content(keep_headers=False)  # 문단 0: 구역 설정만(본체 #782 — 단 정의·쪽 번호는 본체가 남긴다)
     for i in range(len(ps) - 1, 0, -1):
         if not start <= i < end:
             sec.remove_paragraph(ps[i])
@@ -83,19 +79,6 @@ def write_region(src: Path, start: int, end: int, out: Path) -> None:
 def _empty(paragraph) -> bool:
     """글도 개체(표·그림·수식·도형)도 없는 문단 — 구역 설정만 남긴 문단 0이 넣은 뒤 이렇게 남는다."""
     return not paragraph_text(paragraph) and next(iter(paragraph.iter_objects(kinds=_OBJECT_KINDS)), None) is None
-
-
-def _bookmark(p_el, name: str, *, first: bool) -> None:
-    runs = p_el.findall(q("hp", "run"))
-    if not runs:
-        runs = [p_el.makeelement(q("hp", "run"), {"charPrIDRef": "0"})]
-        p_el.insert(0, runs[0])
-    ctrl = p_el.makeelement(q("hp", "ctrl"), {})
-    ctrl.append(ctrl.makeelement(q("hp", "bookmark"), {"name": name}))
-    if first:
-        runs[0].insert(0, ctrl)
-    else:
-        runs[-1].append(ctrl)
 
 
 def insert_region(doc: HwpxDocument, path: Path, after: int, name: str) -> int:
@@ -113,7 +96,7 @@ def insert_region(doc: HwpxDocument, path: Path, after: int, name: str) -> int:
         head.remove()
         n -= 1
     ps = list(sec.paragraphs)
-    _bookmark(ps[after + 1].element, f"{name}_시작", first=True)
-    _bookmark(ps[after + n].element, f"{name}_끝", first=False)
+    ps[after + 1].add_bookmark(f"{name}_시작", offset=0)  # 구간 첫 문단 맨 앞(본체 #782 책갈피 offset=)
+    ps[after + n].add_bookmark(f"{name}_끝")  # 구간 끝 문단 맨 끝
     sec.mark_dirty()
     return after + n
