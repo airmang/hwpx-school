@@ -89,7 +89,8 @@ def _2단_전환_문단(doc: HwpxDocument) -> None:
 
 
 def main() -> None:
-    doc = HwpxDocument.new(empty_first_line=True, seed=0)
+    # 시각도 고정 — 원형 파일 지문이 추출의 id 씨앗이라, 만든 시각이 바뀌면 스켈레톤 바이트도 바뀐다
+    doc = HwpxDocument.new(empty_first_line=True, seed=0, now=__import__("datetime").datetime(2026, 1, 1, tzinfo=__import__("datetime").timezone.utc))
     번호 = _모양들(doc)
     doc.page.set_margins(**여백)
     _2단_전환_문단(doc)
