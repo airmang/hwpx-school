@@ -24,7 +24,7 @@ def _원안지(tmp_path: Path) -> Path:
     kit = load_kit(킷)
     md = 픽스처 / "합성서식_6문항.md"
     base = rebuild(md.read_text(encoding="utf-8"), kit, 서식, 픽스처, tmp_path / "base.hwpx")
-    doc = HwpxDocument.open(str(base))
+    doc = HwpxDocument.open(str(base), seed=7)  # 시험이 더하는 문단도 같은 입력이면 같은 id
     sec = doc.sections[0]
     tail = _tail_index(doc, kit.tailbox["match_text"])
     # 글자 모양은 본문 스타일(킷 normal)의 것으로 — 앞 문단(꼬리 박스)의 run을 물려받으면 양식의 run 꼴에 따라 글꼴이 달라진다

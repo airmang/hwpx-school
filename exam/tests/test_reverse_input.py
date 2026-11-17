@@ -14,6 +14,8 @@ from exam_kit import source as source_mod
 from exam_kit.reverse import ReverseStop, as_png, page_guess, para_tops, resolve_front, reverse_body
 from exam_kit.source import SourceError, open_source
 from hwpx.document import HwpxDocument
+
+_고정_시각 = __import__("datetime").datetime(2026, 1, 1, tzinfo=__import__("datetime").timezone.utc)
 from hwpx.hwp5.errors import Hwp5ConversionReport
 from PIL import Image
 
@@ -42,7 +44,7 @@ def _가짜_hwp(monkeypatch, report: Hwp5ConversionReport):
 
     def fake(path, *a, **k):
         if str(path).endswith(".hwp"):
-            doc = HwpxDocument.new(empty_first_line=True)
+            doc = HwpxDocument.new(empty_first_line=True, seed=7, now=_고정_시각)  # 같은 입력이면 같은 바이트
             doc._hwp5_report = report
             return doc
         return real(path, *a, **k)

@@ -8,6 +8,9 @@ from pathlib import Path
 import lxml.etree as ET
 import pytest
 from hwpx.document import HwpxDocument
+
+# 시험이 짓는 문서도 같은 입력이면 같은 바이트로(id 씨앗·시각 고정)
+_고정 = {"seed": 7, "now": __import__("datetime").datetime(2026, 1, 1, tzinfo=__import__("datetime").timezone.utc)}
 from test_layout import _가짜_렌더, _마무리, _머리들, 픽스처
 
 from _kits import kit_dir
@@ -206,7 +209,7 @@ def test_가짜_측정_글자가_다르면_멈춘다(견본, tmp_path):
 def test_줄_캐시_읽기(tmp_path):
     """최상위 문단 (i, −1), 그 안 문단 (i, j) — 줄 수 = lineseg 수, 끝줄 = 마지막 textpos부터. 문서는 공개 API로 짓고,
     줄 캐시(한/글이 저장할 때 쓰는 hp:linesegarray)만 시험이 XML로 심는다."""
-    doc = HwpxDocument.new()
+    doc = HwpxDocument.new(**_고정)
     sec = doc.sections[0]
     first = sec.paragraphs[0]
     first.text = "첫 문단 글자"
@@ -486,7 +489,7 @@ def test_측정은_한_번_더_해_본다(tmp_path):
     from exam_kit.render import RenderUnavailable
 
     src = tmp_path / "a.hwpx"  # read_lines는 문서를 연다 — 공개 API로 지은 빈 문서
-    HwpxDocument.new().save(str(src))
+    HwpxDocument.new(**_고정).save(str(src))
 
     class 오라클:
         def __init__(self, 실패):

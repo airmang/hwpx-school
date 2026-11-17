@@ -223,7 +223,9 @@ def test_렌더와_줄_캐시_저장은_잠금_안에서(tmp_path, monkeypatch):
     from hwpx import HwpxDocument
 
     src = tmp_path / "x.hwpx"  # 줄 캐시 읽기(read_lines)가 공개 열기로 여는 온전한 꾸러미 — 최소 꾸러미는 container.xml이 없다
-    HwpxDocument.new().save(str(src))
+    from datetime import datetime, timezone
+
+    HwpxDocument.new(seed=7, now=datetime(2026, 1, 1, tzinfo=timezone.utc)).save(str(src))  # 같은 입력이면 같은 바이트
 
     class 가짜:
         def render_pdf(self, s, out):
