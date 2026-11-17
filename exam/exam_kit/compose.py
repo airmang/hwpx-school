@@ -430,7 +430,7 @@ class _Para:
     gap: bool = False
     brk: str | None = None  # 나눔 지시("column"·"page") — 문항 묶음 첫 문단에만(원고 {단나눔}·{쪽나눔})
     mark: str | None = None  # 형광펜을 칠할 원문자
-    obj: ET._Element | None = None  # 글자처럼 취급하는 표·그림 — 이 문단의 유일한 내용
+    obj: object | None = None  # 이 문단의 유일한 내용인 개체 계획(_틀·_그림·_표·_박스계획)
     align: str | None = None  # 문단 정렬을 바꿀 때만(그림은 가운데)
     tabs: list[int] = field(default_factory=list)  # segs 속 \t마다 hp:tab width(추정 — 한글이 다시 잰다)
     left: int | None = None  # 왼여백을 바꿀 때만(〈보기〉 뒤 참고 줄 — 발문 이음 줄 자리)
@@ -1174,8 +1174,8 @@ class _Composer:
             obj = self._put_table(p, obj)
         elif isinstance(obj, _박스계획):
             obj = self._put_box(p, obj)
-        elif obj is not None:
-            p.element.find(q("hp", "run")).insert(0, obj)  # 견본처럼 <hp:run><hp:tbl/><hp:t/></hp:run>
+        elif obj is not None:  # 계획 밖 요소를 끼우던 길은 3단계(B14)에서 걷혔다
+            raise TypeError(f"모르는 개체 계획: {type(obj).__name__}")
         if spec.drawing is not None:
             self._draw(p, pid, obj, spec.drawing)
         if spec.overlays:
