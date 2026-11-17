@@ -643,11 +643,11 @@ class _Composer:
             raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
         return p
 
-    def _수식(self, p, script: str, cp: str) -> ET._Element:
+    def _수식(self, p, script: str, cp: str):
         """문단 끝에 한/글 수식 run을 붙인다(공개 API add_equation) — 그 자리 글자 크기, 글꼴은 킷 typeset.equation_font
-        (없으면 수식_글꼴). 수식 요소를 돌려준다."""
+        (없으면 수식_글꼴). 수식 개체를 돌려준다."""
         return p.add_equation(script, font_size=self.글자_크기(cp) / 100, char_pr_id_ref=cp,
-                              font=self.kit.typeset.get("equation_font", 수식_글꼴)).element
+                              font=self.kit.typeset.get("equation_font", 수식_글꼴))
 
     def 글자_크기(self, cp: str) -> int:
         """charPr의 글자 크기(height, HWPUNIT) — 수식 기준 크기(baseUnit)로 쓴다(한/글도 넣는 자리의 글자 크기로 만든다)."""
@@ -1107,9 +1107,9 @@ class _Composer:
         for run in p.runs:
             run.remove()
         texts = [t for t, _ in spec.segs if not isinstance(t, equation.Math)]
-        if spec.tabs or any("\r" in t for t in texts):
-            # 탭 든 답지 줄 — 탭 폭(hp:tab width)을 적는 길이 core에 없어 run을 직접 쓴다(CORE-ASKS). 글에 CR이 있어도
-            # 옛 꼴(hp:t 안 글자 그대로)을 지키려 여기로 — add_run은 CR을 줄바꿈(hp:lineBreak)으로 쓴다.
+        if any("\r" in t for t in texts) or (spec.mark and _mark_first_ok(spec.segs, spec.mark) is False):
+            # 옛 꼴을 지키려 run을 직접 쓴다 — 글에 CR이 있을 때(add_run은 CR을 줄바꿈 hp:lineBreak로 쓴다), 정답 원문자가 칠할
+            # 자리보다 앞에도 있을 때(add_highlight는 처음 나오는 곳을 칠한다) — CORE-ASKS
             mark, tabs = spec.mark, iter(spec.tabs)
             for text, c in spec.segs:
                 if isinstance(text, equation.Math):  # 공개 API — 문단 끝에 수식 run을 붙인다(조각 차례 그대로)
@@ -1119,12 +1119,15 @@ class _Composer:
                 mark = _fill_t(ET.SubElement(run, q("hp", "t")), text, mark, tabs)
             if mark:
                 raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(spec.segs)!r}")
-        else:  # 공개 API — 조각마다 run(줄바꿈은 hp:t 안 hp:lineBreak), 수식은 문단 끝에 수식 run(조각 차례 그대로)
+        else:  # 공개 API — 조각마다 run(탭은 잰 폭으로 hp:tab, 줄바꿈은 hp:lineBreak — 둘 다 hp:t 안), 수식은 문단 끝에 수식 run
             for t in texts:
                 _xml_글(t)
+            tabs = iter(spec.tabs)
             for text, c in spec.segs:
                 if isinstance(text, equation.Math):
                     self._수식(p, text.script, c or cp)
+                elif "\t" in text:
+                    p.add_run(text, char_pr_id_ref=c or cp, tab_widths=[next(tabs) for _ in range(text.count("\t"))])
                 else:
                     p.add_run(text, char_pr_id_ref=c or cp)
             if spec.mark:
@@ -1196,13 +1199,23 @@ class _Composer:
         return start + ((line_w - w) // 2 if center else 0), m.get("prev", 0)
 
     @staticmethod
-    def _float(el: ET._Element, x: int, y: int) -> ET._Element:
-        el.set("textWrap", "IN_FRONT_OF_TEXT")
-        el.find(q("hp", "pos")).attrib.update({
-            "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
-            "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
-            "vertOffset": str(y), "horzOffset": str(x)})
-        return el
+    def _float(obj, x: int, y: int):
+        """떠 있는 개체로 — 글 앞, 문단 기준 세로·단 기준 가로 (x, y), 쪽 영역 안으로 제한, 겹침 허용(obj.set_position).
+        음수 오프셋은 옛 꼴(부호 있는 글 "-N")을 지키려 직접 쓴다 — set_position은 한/글처럼 부호 없는 32비트 꼴로 쓴다
+        (compose-x float-negative-offset)."""
+        if x < 0 or y < 0:
+            el = obj.element
+            el.set("textWrap", "IN_FRONT_OF_TEXT")
+            el.find(q("hp", "pos")).attrib.update({
+                "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
+                "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
+                "vertOffset": str(y), "horzOffset": str(x)})
+            obj.paragraph.section.mark_dirty()
+            return obj
+        obj.set_position(treat_as_char=False, text_wrap="IN_FRONT_OF_TEXT", flow_with_text=True, allow_overlap=True,
+                         vertical_relative_to="PARA", horizontal_relative_to="COLUMN", vertical_alignment="TOP",
+                         horizontal_alignment="LEFT", vertical_offset=y, horizontal_offset=x)
+        return obj
 
     def _draw(self, p, pid: str, frame: ET._Element, d) -> None:
         """도형을 개체마다 따로 — 면(채운 다각형, 테두리 없음) → 선·점선 → 곡선 → 길이 점선 호 → 직각 표시. 글자·점은 _overlay가
@@ -1214,36 +1227,36 @@ class _Composer:
             mx, my = min(xs), min(ys)
             return (x0 + mx, y0 + my), [(x - mx, y - my) for x, y in zip(xs, ys)]
 
-        def style(el, kind: str, dash: bool) -> None:
-            ls = el.find(q("hp", "lineShape"))
-            ls.set("width", str(선_굵기[kind]))
+        def style(shape, kind: str, dash: bool) -> None:
+            # 선 굵기는 HWPUNIT 그대로 — line_width_mm은 mm × 283을 자른 값을 쓰므로 반 단위를 더해 넘긴다
+            shape.line_width_mm = (선_굵기[kind] + 0.5) / 283
             if dash:
-                ls.set("style", "DASH")
+                shape.line_style = "DASH"
 
         for ns, color in d.faces:
             (x, y), pts = hw([d.points[n] for n in ns])
-            el = p.add_polygon(pts, line_width_mm=0, fill_color=color, treat_as_char=False).element
-            el.find(q("hp", "lineShape")).set("style", "NONE")
+            el = p.add_polygon(pts, line_width_mm=0, fill_color=color, treat_as_char=False)
+            el.line_style = "NONE"
             self._float(el, x, y)
         for a, b, dash in d.lines:
             (x, y), [(ax, ay), (bx, by)] = hw([d.points[a], d.points[b]])
-            el = p.add_line(ax, ay, bx, by, treat_as_char=False).element
+            el = p.add_line(ax, ay, bx, by, treat_as_char=False)
             style(el, "점선" if dash else "선", dash)
             self._float(el, x, y)
         for pts_cm, dash in d.curves:
             (x, y), pts = hw(pts_cm)
-            el = p.add_curve(pts, treat_as_char=False).element
+            el = p.add_curve(pts, treat_as_char=False)
             style(el, "점선" if dash else "선", dash)
             self._float(el, x, y)
         for a, b, _, side in d.lengths:
             (x, y), pts = hw(drawing.length_arc(d.points[a], d.points[b], side)[0])
-            el = p.add_curve(pts, treat_as_char=False).element
+            el = p.add_curve(pts, treat_as_char=False)
             style(el, "호", True)
             self._float(el, x, y)
         for h, a, b in d.rights:
             for seg in drawing.right_mark(d.points[h], d.points[a], d.points[b]):
                 (x, y), [(ax, ay), (bx, by)] = hw(list(seg))
-                el = p.add_line(ax, ay, bx, by, treat_as_char=False).element
+                el = p.add_line(ax, ay, bx, by, treat_as_char=False)
                 style(el, "직각", False)
                 self._float(el, x, y)
 
@@ -1300,11 +1313,11 @@ class _Composer:
             cx, cy = x0 + round(o.x_cm * CM), y0 + round(o.y_cm * CM)
             bw, bh = self._overlay_box(o)
             if o.kind == "점":
-                el = p.add_ellipse(점_지름, 점_지름, line_color="#000000", fill_color="#000000", treat_as_char=False).element
+                el = p.add_ellipse(점_지름, 점_지름, line_color="#000000", fill_color="#000000", treat_as_char=False)
             else:
                 el = self._수식(p, equation.to_script(o.latex), cp)
-            om = el.find(q("hp", "outMargin"))
-            ol, ot = (int(om.get("left") or 0), int(om.get("top") or 0)) if om is not None else (0, 0)
+            om = el.out_margins
+            ol, ot = (int(om.left or 0), int(om.top or 0)) if om is not None else (0, 0)
             left, top = cx - bw // 2, cy - bh // 2
             if left < 0 or left + bw > self.kit.columns["width"]:
                 what = "점" if o.kind == "점" else f"${o.latex}$"
@@ -1352,17 +1365,23 @@ def _xml_글(text: str) -> None:
         piece.encode("utf-8")  # 짝 없는 대리 글자 — UnicodeEncodeError
 
 
-def _mark_first(p, mark: str, segs) -> None:
-    """문단의 조각 첫머리(조각 시작·줄바꿈 뒤) 정답 원문자에 형광펜(paragraph.add_highlight) — 그런 자리가 없거나,
-    원문자가 처음 나오는 곳이 그 자리가 아니면 멈춘다(add_highlight는 처음 나오는 곳을 칠한다)."""
+def _mark_first_ok(segs, mark: str) -> bool | None:
+    """조각 첫머리(조각 시작·탭 뒤·줄바꿈 뒤) 정답 원문자 자리가 있으면, 원문자가 처음 나오는 곳이 그 자리인가(add_highlight가
+    칠할 곳이 옛 길이 칠할 곳과 같은가). 자리가 없으면 None."""
     texts = [t for t, _ in segs if not isinstance(t, equation.Math)]
-    spot = next((k for k, t in enumerate(texts) if any(x.startswith(mark) for x in t.split("\n"))), None)
+    spot = next((k for k, t in enumerate(texts) if any(x.startswith(mark) for x in re.split(r"[\t\n]", t))), None)
     if spot is None:
-        raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
+        return None
     first = next(k for k, t in enumerate(texts) if mark in t)
     at = texts[first].index(mark)
-    if first != spot or not (at == 0 or texts[first][at - 1] == "\n"):
-        raise ValueError(f"형광펜 {mark}가 칠할 자리보다 앞에도 있다: {_글(segs)!r}")
+    return first == spot and (at == 0 or texts[first][at - 1] in "\t\n")
+
+
+def _mark_first(p, mark: str, segs) -> None:
+    """문단의 조각 첫머리 정답 원문자에 형광펜(paragraph.add_highlight) — 자리가 없으면 멈춘다. 원문자가 그 자리보다 앞에도
+    있는 문단은 materialize가 옛 길로 쓴다(_mark_first_ok)."""
+    if _mark_first_ok(segs, mark) is None:
+        raise ValueError(f"형광펜 {mark}를 칠할 자리가 없다: {_글(segs)!r}")
     p.add_highlight(color=형광, match=mark)
 
 
@@ -1565,10 +1584,34 @@ def _mark_spot(paragraphs, mark: str):
                 continue
             first = next(x for x in p.runs if mark in x.text)
             at = first.text.index(mark)
-            if first != r or not (at == 0 or first.text[at - 1] == "\t"):
-                raise ValueError(f"정답 {mark}가 칠할 자리보다 앞에도 있다 — 형광펜을 엉뚱한 곳에 칠하지 않게 멈춘다")
-            return p
-    return None
+            return p, first == r and (at == 0 or first.text[at - 1] == "\t")
+    return None, False
+
+
+def _mark_at_xml(paragraphs, mark: str) -> None:
+    """옛 길 — 칠할 자리(hp:t 첫 글·탭 뒤 글이 원문자로 시작)를 XML에서 찾아 감싼다. 원문자가 그 자리보다 앞에도 있어
+    add_highlight(처음 나오는 곳을 칠한다)로는 그 자리를 칠할 수 없을 때만 쓴다(CORE-ASKS: 칠할 자리를 고르는 형광펜)."""
+    for p in paragraphs:
+        for t in p.element.iter(q("hp", "t")):
+            if (t.text or "").startswith(mark):
+                spot = (t, None)
+            else:
+                spot = next(((t, ch) for ch in t if ch.tag == q("hp", "tab") and (ch.tail or "").startswith(mark)), None)
+            if spot:
+                t, anchor = spot
+                rest = (t.text if anchor is None else anchor.tail)[len(mark):]
+                if anchor is None:
+                    t.text = None
+                else:
+                    anchor.tail = None
+                at = 0 if anchor is None else list(t).index(anchor) + 1
+                begin = ET.SubElement(t, q("hp", "markpenBegin"), {"color": 형광})
+                end = ET.SubElement(t, q("hp", "markpenEnd"))
+                t.insert(at, begin)
+                t.insert(at + 1, end)
+                begin.tail, end.tail = mark, rest or None
+                p.section.mark_dirty()
+                return
 
 
 def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, draft: bool = False) -> None:
@@ -1590,10 +1633,14 @@ def add_answer_marks(doc: HwpxDocument, kit: Kit, answers: dict[str, str], *, dr
         if k in missing:
             continue
         mark = answers[str(k)]
-        spot = _mark_spot((x for i in choice_paragraphs(doc, kit, k) for x in (ps[i], *inner[i])), mark)
+        rows = choice_paragraphs(doc, kit, k)
+        spot, first = _mark_spot((x for i in rows for x in (ps[i], *inner[i])), mark)
         if spot is None:
             raise ValueError(f"{k}번 정답 {mark}를 칠할 자리가 답지 줄에 없다")
-        spot.add_highlight(color=형광, match=mark)
+        if first:
+            spot.add_highlight(color=형광, match=mark)
+        else:  # 원문자가 칠할 자리보다 앞에도 있다 — add_highlight는 처음 나오는 곳을 칠하므로 옛 길로
+            _mark_at_xml([ps[i] for i in rows], mark)
 
 
 def _set_box_row(tbl, content, cc: int, cr: int, rails, h: int) -> None:
