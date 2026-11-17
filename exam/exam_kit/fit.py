@@ -265,7 +265,7 @@ class Spacer:
     def __init__(self, doc: HwpxDocument):
         self.doc = doc
         self.orig: dict[Key, list[str]] = {}   # 문단 → run charPr id(처음 값)
-        self.made: list[ET._Element] = []      # 이번 set이 만든 charPr(목록 끝에 붙는다)
+        self.made = 0                          # 이번 set이 만든 charPr 수(목록 끝에 붙는다)
 
     def charpr(self, base: str, s: int) -> str:
         """base charPr에서 자간(7개 언어)만 s로 바꾼 charPr id — 같은 모양이 있으면 재사용
