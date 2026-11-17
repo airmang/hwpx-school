@@ -8,6 +8,7 @@ finalize_form: (조판 뒤) 잔여 문단 제거 → 양식 원본 이미지·�
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,13 +16,59 @@ import lxml.etree as ET
 from hwpx.document import HwpxDocument
 
 from . import q
-from ._png import png
 from .kit import Kit, sha256, style_ids
 
-_OPF = {"opf": "http://www.idpf.org/2007/opf/"}
 
 
-# ---- Task 5·6에서 옮겨 옴(변종 인자 없이 정리) ------------------------------
+# ---- 문단·표 읽기(공개 API) ---------------------------------------------------
+
+#: nested_text가 글자로 내는 글리프(탭·줄 바꿈·특수 빈칸)와 토막 사이 줄 바꿈 — 옛 itertext처럼 글로 세지 않는다.
+_GLYPHS = re.compile("[\t\n 　­]")
+
+
+def _ptext(paragraphs) -> str:
+    """문단들의 글 — 문단 안 표 칸·글상자·캡션·각주·메모 글까지 문서 차례로(``nested_text``), 글리프는 뺀다.
+
+    옛 ``_text(el)``(요소 아래 itertext)와 다른 점: 수식 스크립트·누름틀 매개변수 글은 들지 않고, 메모 글은 든다.
+    양식 판정은 사람에게 보이는 글(안내 문구·식별어)로 하므로 이쪽이 뜻에 맞다."""
+    return "".join(_GLYPHS.sub("", p.nested_text()) for p in paragraphs)
+
+
+def _table_paragraphs(table) -> list:
+    """표의 문단 — 캡션, 그리고 행·칸 차례(칸 안 표·글상자는 칸 문단의 nested_text가 읽는다)."""
+    out = list(table.caption.paragraphs) if table.caption is not None else []
+    return out + [p for row in table.rows for cell in row.cells for p in cell.paragraphs]
+
+
+def _table_text(table) -> str:
+    return _ptext(_table_paragraphs(table))
+
+
+def _style_ids(table) -> set[str]:
+    """표 안(칸 안 표·글상자까지) 모든 문단의 스타일 id — 옛 ``_inner_style_ids``."""
+    out: set[str] = set()
+    for p in _table_paragraphs(table):
+        out.add(str(p.style_id_ref) if p.style_id_ref is not None else "0")
+        for place in p.iter_objects(kinds="table"):
+            out |= {str(q_.style_id_ref) if q_.style_id_ref is not None else "0" for q_ in _table_paragraphs(place.object)}
+        for place in p.iter_objects(kinds="shape"):
+            out |= {str(x.paragraph.style_id_ref) if x.paragraph.style_id_ref is not None else "0"
+                    for x in place.object.iter_paragraphs()}
+    return out
+
+
+def _blank(paragraph) -> bool:
+    """글도 개체도 누름틀도 없는 문단 — 옛 ``_is_blank``(itertext가 비고 표·그림이 없다)의 뜻을 지킨다.
+
+    옛 판정은 수식 스크립트·누름틀 매개변수 글이 있으면 비지 않았다고 봤다: 그래서 수식·누름틀이 든 문단은 비지 않았다."""
+    if _ptext([paragraph]).strip():
+        return False
+    if next(iter(paragraph.iter_objects()), None) is not None:
+        return False
+    return not any(item.kind == "field_begin" for run in paragraph.runs for item in run.content)
+
+
+# ---- Task 5·6에서 옮겨 옴(변종 인자 없이 정리) — 요소를 받는 옛 판: 다른 lane(compose·slots·verify·reverse)이 옮기면 지운다 --
 
 def _text(el) -> str:
     return "".join(el.itertext())
@@ -47,21 +94,9 @@ def _set_para_text(p_el, text: str) -> None:
     t.text = text
 
 
-def _replace_in_runs(p_el, old: str, new: str) -> int:
-    n = 0
-    for t in p_el.iter(q("hp", "t")):
-        if t.text and old in t.text:
-            t.text = t.text.replace(old, new)
-            n += 1
-        if t.tail and old in t.tail:
-            t.tail = t.tail.replace(old, new)
-            n += 1
-    return n
-
-
-def _remove_paragraphs(sec, wrappers) -> None:
-    for w in reversed(list(wrappers)):
-        sec.remove_paragraph(w)
+def _remove_paragraphs(sec, paragraphs) -> None:
+    for p in reversed(list(paragraphs)):
+        p.remove()
     sec.mark_dirty()
 
 
@@ -86,48 +121,65 @@ def is_sample_box(tbl, spec: dict, style_id: str) -> bool:
             and style_id in _inner_style_ids(tbl))
 
 
+def is_sample_table(table, spec: dict, style_id: str) -> bool:
+    """``is_sample_box``의 표 객체 판."""
+    text = _table_text(table)
+    return ([table.row_count, table.column_count] == spec["shape"]
+            and (spec["title"] is None or spec["title"] in text)
+            and ("sample_with" not in spec or spec["sample_with"] in text)
+            and ("sample_without" not in spec or spec["sample_without"] not in text)
+            and style_id in _style_ids(table))
+
+
+def _holds_header_footer(paragraph) -> bool:
+    """문단(그 안 표 칸까지)에 머리말·꼬리말 컨트롤이 있는가."""
+    if any(item.kind in ("header", "footer") for run in paragraph.runs for item in run.content):
+        return True
+    return any(_holds_header_footer(p) for place in paragraph.iter_objects(kinds="table")
+               for p in _table_paragraphs(place.object))
+
+
+def _replace_text(paragraph, old: str, new: str) -> int:
+    """문단과 그 안 표 칸 문단의 글에서 old를 new로(run.replace_text). 머리말·꼬리말 story는 건드리지 않는다."""
+    n = sum(run.replace_text(old, new) for run in paragraph.runs)
+    for place in paragraph.iter_objects(kinds="table"):
+        n += sum(run.replace_text(old, new) for p in _table_paragraphs(place.object) for run in p.runs)
+    return n
+
+
 def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
     a = kit.admin
-    p0 = doc.sections[0].paragraphs[a["paragraph"]].element
-    tables = _top_tables(p0)
-    규격표 = [t for t in tables if any(w in _text(t) for w in a["delete_tables_with"])]
+    p0 = doc.sections[0].paragraphs[a["paragraph"]]
+    규격표 = [t for t in p0.tables if any(w in _table_text(t) for w in a["delete_tables_with"])]
     for t in 규격표:
-        # 결재란·유의·규격표 세 표가 run 하나를 공유한다(실측) — run째 지우면
-        # 유의까지 함께 사라지므로 표 노드 하나만 그 run에서 뗀다.
-        t.getparent().remove(t)
+        # 결재란·유의·규격표 세 표가 run 하나를 공유한다(실측) — run째 지우면 유의까지 함께 사라지므로 표 노드 하나만
+        # 그 run에서 뗀다. (공개 table.remove()는 비게 된 run도 지운다 — 바이트가 달라져 next7/form-x에 둔다.)
+        t.element.getparent().remove(t.element)
     # 문단 0의 줄 배치 캐시(linesegarray)는 규격표(글자처럼 취급, 높이 3130)를 품은 줄 높이 3410을
     # 기억한다. 한글은 이 캐시를 믿어 표를 지운 뒤에도 그만큼 비워 둔다(Task 22 렌더 실측: 1번 문항이
     # 제출본보다 약 1.5줄 아래). 캐시를 지우면 한글이 다시 잰다.
-    for ls in p0.findall(q("hp", "linesegarray")):
-        p0.remove(ls)
-    유의 = next(t for t in _top_tables(p0) if a["notice_table_with"] in _text(t))
-    # 유의의 셀 하나(subList)에 머리말·꼬리말 ctrl이 통째로 박혀 있다(정정 1 실측):
-    # header/footer < ctrl < run < p < subList < tc < tr < tbl[유의]. 그 ctrl 안에는
-    # 머리말/꼬리말 자기 레이아웃용 중첩 표가 따로 있어 .iter()로 훑으면 그 표의
-    # cellSz까지 같이 잡혀 버린다. 그래서 유의 안의 편집은 전부 유의 자신의 직속
-    # tr→tc, 그리고 각 tc의 subList 직속 p/cellSz로만 한정한다(.iter 금지) — 문단
-    # 하나가 누름틀(fieldBegin/fieldEnd)도 품고 있어 hp:ctrl 유무로는 못 거르므로,
-    # 머리말·꼬리말 자체(hp:header/hp:footer)가 있는 문단만 건드리지 않는다.
+    p0.clear_layout_cache()
+    유의 = next(t for t in p0.tables if a["notice_table_with"] in _table_text(t))
+    # 유의의 셀 하나에 머리말·꼬리말 ctrl이 통째로 박혀 있다(정정 1 실측): 그 ctrl 안에는 머리말/꼬리말 자기
+    # 레이아웃용 중첩 표가 따로 있으므로, 유의 안의 편집은 유의 자신의 행·칸과 각 칸의 문단으로만 한정한다 —
+    # 문단 하나가 누름틀도 품고 있어 컨트롤 유무로는 못 거르므로, 머리말·꼬리말이 있는 문단만 건드리지 않는다.
     for w in a["remove_text"]:  # 관리박스 문단 자신에 붙은 안내 글(학교 B: 빨강 "한칸 띄기")
-        _replace_in_runs(p0, w, "")
+        _replace_text(p0, w, "")
     지울 = tuple(a["notice_delete_paras_with"])
-    h = None if kit.notice_box_height is None else str(kit.notice_box_height)
-    for tr in 유의.findall(q("hp", "tr")):
-        for tc in tr.findall(q("hp", "tc")):
-            sub = tc.find(q("hp", "subList"))
-            for p in list(sub.findall(q("hp", "p"))):
-                if p.find(f".//{q('hp', 'header')}") is not None or p.find(f".//{q('hp', 'footer')}") is not None:
+    for row in 유의.rows:
+        for cell in row.cells:
+            for p in list(cell.paragraphs):
+                if _holds_header_footer(p):
                     continue
-                if any(w in _text(p) for w in 지울):
-                    sub.remove(p)
+                if any(w in _ptext([p]) for w in 지울):
+                    p.remove()
                 else:
                     for old, new in a["notice_replace"]:
-                        _replace_in_runs(p, old, new)
-            cellsz = tc.find(q("hp", "cellSz"))
-            if cellsz is not None and h is not None:
-                cellsz.set("height", h)
-    if h is not None:
-        유의.find(q("hp", "sz")).set("height", h)
+                        _replace_text(p, old, new)
+    if kit.notice_box_height is not None:  # 유의는 한 줄 표 — 칸 높이와 표 높이를 함께
+        if 유의.row_count != 1:
+            raise ValueError(f"양식이 바뀌었다: 유의 표가 {유의.row_count}줄이다 — notice_box_height는 한 줄 표에만 준다")
+        유의.set_row_heights([kit.notice_box_height])
     doc.sections[0].mark_dirty()
 
 
@@ -193,12 +245,8 @@ def _header_footer_xml(doc: HwpxDocument) -> tuple[str, ...]:
     return tuple(ET.tostring(el, encoding="unicode") for t in ("header", "footer") for el in sec.iter(q("hp", t)))
 
 
-def _form_bindata(pkg) -> tuple[tuple[str, str], ...]:
-    manifest = pkg.manifest_tree().find("opf:manifest", _OPF)
-    if manifest is None:
-        return ()
-    return tuple((it.get("id"), it.get("href")) for it in manifest.findall("opf:item", _OPF)
-                 if (it.get("href") or "").startswith("BinData/"))
+def _form_bindata(doc: HwpxDocument) -> tuple[tuple[str, str], ...]:
+    return tuple((it.item_id, it.href) for it in doc.media.images if it.href.startswith("BinData/"))
 
 
 def _check_form(doc: HwpxDocument, kit: Kit) -> None:
@@ -214,21 +262,20 @@ def _check_form(doc: HwpxDocument, kit: Kit) -> None:
         if fid not in ids:
             실패.append(f"누름틀 없음: {slot}")
     paras = list(doc.sections[0].paragraphs)
-    tables = [t for p in paras[1:] for t in _top_tables(p.element)]
+    tables = [t for p in paras[1:] for t in p.tables]
     for kind, spec in kit.boxes.items():
-        if kind in ("보기", "자료") and not any(is_sample_box(t, spec, sids[kit.styles[spec["style"]]][0]) for t in tables):
+        if kind in ("보기", "자료") and not any(is_sample_table(t, spec, sids[kit.styles[spec["style"]]][0]) for t in tables):
             실패.append(f"〈{kind}〉 견본 표 없음" if kind == "보기" else f"{kind} 견본 표 없음")
     box_styles = {sids[kit.styles[kit.boxes[k]["style"]]][0] for k in ("보기", "자료")}
     if kit.box_min_height is not None:  # 견본 박스 내용 셀 높이 = kit.box_min_height(박스 최소 높이의 출처)
         for t in tables:
-            shape = [int(t.get("rowCnt")), int(t.get("colCnt"))]
-            addr = next((tuple(map(str, sp["content_cell"])) for k, sp in kit.boxes.items()
+            shape = [t.row_count, t.column_count]
+            addr = next((tuple(sp["content_cell"]) for k, sp in kit.boxes.items()  # 킷은 [열, 행]
                          if k in ("보기", "자료") and sp["shape"] == shape), None)
             cell = None if addr is None else next(
-                (tc for tc in t.iter(q("hp", "tc")) for a in [tc.find(q("hp", "cellAddr"))]
-                 if (a.get("colAddr"), a.get("rowAddr")) == addr), None)
-            if cell is not None and _inner_style_ids(t) & box_styles:
-                h = int(cell.find(q("hp", "cellSz")).get("height"))
+                (c for row in t.rows for c in row.cells if c.address == (addr[1], addr[0])), None)
+            if cell is not None and _style_ids(t) & box_styles:
+                h = cell.height
                 if h != kit.box_min_height:
                     실패.append(f"견본 박스 내용 셀 높이 {h} ≠ kit box_min_height {kit.box_min_height}")
     if tail_index(doc, kit) is None:
@@ -243,8 +290,8 @@ def tail_index(doc: HwpxDocument, kit: Kit) -> int | None:
     """꼬리 박스 문단 = 킷 식별어를 품은 표가 있는 마지막 문단. 그 뒤에는 빈 문단만 있어야 한다(아니면 None)."""
     paras = list(doc.sections[0].paragraphs)
     for i in range(len(paras) - 1, 0, -1):
-        if any(kit.tailbox["match_text"] in _text(t) for t in _top_tables(paras[i].element)):
-            return i if all(_is_blank(p.element) for p in paras[i + 1:]) else None
+        if any(kit.tailbox["match_text"] in _table_text(t) for t in paras[i].tables):
+            return i if all(_blank(p) for p in paras[i + 1:]) else None
     return None
 
 
@@ -256,7 +303,7 @@ def _trim_start(paras, kit: Kit) -> int | None:
             continue
         if rule == "first_page_break" and p.page_break:
             return i
-        if rule == "text_prefix" and _text(p.element).strip().startswith(kit.trim["prefix"]):
+        if rule == "text_prefix" and _ptext([p]).strip().startswith(kit.trim["prefix"]):
             return i
     return None
 
@@ -306,7 +353,7 @@ def prepare_form(doc: HwpxDocument, kit: Kit) -> Prepared:
         raise ValueError("관리박스 정리가 머리말/꼬리말을 건드렸다")
     n = _trim_body(doc, kit)
     pin_tailbox(doc.sections[0].paragraphs[-1], kit)
-    return Prepared(removed=n, form_bindata=_form_bindata(doc.package), header_footer=hf)
+    return Prepared(removed=n, form_bindata=_form_bindata(doc), header_footer=hf)
 
 
 def prepare_document(form: Path, kit: Kit) -> tuple[HwpxDocument, Prepared]:
@@ -334,9 +381,8 @@ def _drop_leftovers(doc: HwpxDocument, kit: Kit) -> int:
     i = len(paras) - 2
     victims = []
     while i > 0:
-        el = paras[i].element
-        text = "".join(el.itertext()).strip()
-        if _is_blank(el) or text.startswith(kit.leftover_prefix):
+        text = _ptext([paras[i]]).strip()
+        if _blank(paras[i]) or text.startswith(kit.leftover_prefix):
             victims.append(paras[i]); i -= 1
         else:
             break
@@ -345,6 +391,7 @@ def _drop_leftovers(doc: HwpxDocument, kit: Kit) -> int:
 
 
 def _scrub_form_bindata(doc: HwpxDocument, prepared: Prepared) -> None:
+    # (공개 doc.media.remove_image는 header binDataList의 binItem도 지운다 — 바이트가 달라져 next7/form-x에 둔다.)
     sec = doc.sections[0].element
     refs = {e.get("binaryItemIDRef") for e in sec.iter() if e.get("binaryItemIDRef")}
     for item_id, href in prepared.form_bindata:
@@ -355,15 +402,14 @@ def _scrub_form_bindata(doc: HwpxDocument, prepared: Prepared) -> None:
         pkg.remove_manifest_item(item_id)
         if pkg.has_part(href):
             pkg.delete(href)
-    if pkg.has_part("Preview/PrvText.txt"):
-        pkg.set_part("Preview/PrvText.txt", b"")
-    if pkg.has_part("Preview/PrvImage.png"):
-        pkg.set_part("Preview/PrvImage.png", png(1, 1))
+    doc.parts.clear_preview()  # PrvText.txt는 빈 글, PrvImage.png는 1×1 흰 그림(옛 set_part와 같은 바이트)
 
 
 def _postcheck(doc: HwpxDocument, kit: Kit, prepared: Prepared) -> None:
     실패 = []
-    text = "".join(doc.sections[0].element.itertext())
+    sec = doc.sections[0]
+    stories = [*doc.page.headers(section=sec), *doc.page.footers(section=sec)]
+    text = _ptext(sec.paragraphs) + "".join(_ptext(s.paragraphs) for s in stories)
     for w in kit.forbidden_text:
         if w in text:
             실패.append(f"금지 문구 잔존: {w!r}")
@@ -377,12 +423,12 @@ def _postcheck(doc: HwpxDocument, kit: Kit, prepared: Prepared) -> None:
         if name not in names:
             실패.append(f"스타일 없음: {name}")
     ps = list(doc.sections[0].paragraphs)
-    if not any(kit.tailbox["match_text"] in _text(t) for t in _top_tables(ps[-1].element)):
+    if not any(kit.tailbox["match_text"] in _table_text(t) for t in ps[-1].tables):
         실패.append("꼬리 박스가 마지막 문단이 아님")
     if kit.remove["memos"] and doc.sections[0].memos:
         실패.append("메모 잔존")
-    pos = _top_tables(ps[-1].element)[0].find(q("hp", "pos"))
-    if pos.get("vertRelTo") != kit.tailbox["vertRelTo"] or pos.get("vertOffset") != str(kit.tailbox["vertOffset"]):
+    pos = ps[-1].tables[0].position
+    if pos.vertical_relative_to != kit.tailbox["vertRelTo"] or pos.vertical_offset != kit.tailbox["vertOffset"]:
         실패.append("꼬리 박스 고정이 풀렸다")
     for item_id, href in prepared.form_bindata:
         if doc.package.has_part(href):

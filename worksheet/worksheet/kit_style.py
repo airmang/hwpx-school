@@ -11,7 +11,7 @@ from collections.abc import Callable
 from hwpx import HwpxDocument
 from hwpx.errors import HwpxValueError
 from hwpx.objects.results import BorderFillInfo, BorderLine
-from hwpx.oxml import ParagraphProperty, RunStyle
+from hwpx.objects import ParagraphProperty, RunStyle
 
 from worksheet.kit import Kit
 from worksheet.style import BoxStyle, CharStyle, PageStyle, ParaStyle, ResolvedKit, Side

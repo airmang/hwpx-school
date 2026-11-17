@@ -7,6 +7,7 @@ import pytest
 from hwpx.document import HwpxDocument
 from lxml import etree
 
+from assessment.backends.hwpx import _ID_SEED, _만든_시각
 from assessment.kit import load_kit
 from assessment.memo import add_answer_memo
 from assessment.ns import HH, HP
@@ -40,7 +41,8 @@ def 합성_원본(킷_루트, tmp_path_factory) -> Path:
     더하고 킷의 몇 역할이 그것을 가리키게 해 font_map 검사의 재료로 쓴다.
     """
     dest = tmp_path_factory.mktemp("원본") / "합성원본.hwpx"
-    doc = HwpxDocument.open(킷_루트 / "skeleton.hwpx")
+    # 조판과 같은 씨앗·시각(conftest의 SOURCE_DATE_EPOCH) — 정답 메모 시각이 시험마다 흔들리지 않게
+    doc = HwpxDocument.open(킷_루트 / "skeleton.hwpx", seed=_ID_SEED, now=_만든_시각())
     section = doc.sections[0]
     element = section.element
 

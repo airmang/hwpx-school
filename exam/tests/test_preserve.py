@@ -48,7 +48,7 @@ def test_역변환은_서술형_구간을_보존_블록으로_뗀다(tmp_path):
     assert b.attrs["src"] == "보존_01.hwpx" and b.lines[0] == 서술형 and b.lines[-1] == "가나"
     part = HwpxDocument.open(str(tmp_path / "원고" / "보존_01.hwpx"))
     # 문단 0은 구역 설정만(꼬리말 글은 secPr 안 — 넣을 때 insert_document가 secPr째 뗀다), 구간 문단은 그대로
-    assert preserve.preview([p.element for p in part.sections[0].paragraphs[1:]]) == list(b.lines)
+    assert preserve.preview_of(list(part.sections[0].paragraphs[1:])) == list(b.lines)
     assert all(v.code != "E026" for v in lint(md, md_dir=tmp_path / "원고"))
 
 
@@ -57,11 +57,11 @@ def test_왕복하면_같은_자리에_원본_모양으로_다시_심긴다(tmp_
     assert r.same, r.diffs
     doc = HwpxDocument.open(str(tmp_path / "rt" / "다시_조판.hwpx"))
     (a, b), = preserve.ranges(doc)
-    ps = [p.element for p in doc.sections[0].paragraphs]
-    assert preserve.preview(ps[a:b + 1]) == [서술형, "(1) 합성 첫째 물음", "가나"]
+    ps = list(doc.sections[0].paragraphs)
+    assert preserve.preview_of(ps[a:b + 1]) == [서술형, "(1) 합성 첫째 물음", "가나"]
     assert b == _tail_index(doc, load_kit(킷).tailbox["match_text"]) - 1  # 문항 뒤·꼬리 박스 바로 앞
     assert all(h < a for h in question_heads(doc))  # 보존 구간의 머리는 문항이 아니다
-    assert ps[a].find(".//{*}tbl") is None and ps[b].find(".//{*}tbl") is not None  # 표도 그대로
+    assert not ps[a].tables and ps[b].tables  # 표도 그대로
 
 
 def test_보존_블록_문법():
