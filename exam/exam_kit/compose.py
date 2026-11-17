@@ -1239,17 +1239,7 @@ class _Composer:
     @staticmethod
     def _float(obj, x: int, y: int):
         """떠 있는 개체로 — 글 앞, 문단 기준 세로·단 기준 가로 (x, y), 쪽 영역 안으로 제한, 겹침 허용(obj.set_position).
-        음수 오프셋은 옛 꼴(부호 있는 글 "-N")을 지키려 직접 쓴다 — set_position은 한/글처럼 부호 없는 32비트 꼴로 쓴다
-        (compose-x float-negative-offset)."""
-        if x < 0 or y < 0:
-            el = obj.element
-            el.set("textWrap", "IN_FRONT_OF_TEXT")
-            el.find(q("hp", "pos")).attrib.update({
-                "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "1", "holdAnchorAndSO": "0",
-                "vertRelTo": "PARA", "horzRelTo": "COLUMN", "vertAlign": "TOP", "horzAlign": "LEFT",
-                "vertOffset": str(y), "horzOffset": str(x)})
-            obj.paragraph.section.mark_dirty()
-            return obj
+        음수 오프셋은 한/글처럼 부호 없는 32비트 꼴로 적힌다(compose-x float-negative-offset)."""
         obj.set_position(treat_as_char=False, text_wrap="IN_FRONT_OF_TEXT", flow_with_text=True, allow_overlap=True,
                          vertical_relative_to="PARA", horizontal_relative_to="COLUMN", vertical_alignment="TOP",
                          horizontal_alignment="LEFT", vertical_offset=y, horizontal_offset=x)
