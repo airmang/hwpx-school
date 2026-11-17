@@ -21,15 +21,12 @@ import dataclasses
 import hashlib
 import re
 import shutil
-from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import lxml.etree as ET
 from hwpx.document import HwpxDocument
 from hwpx.model import Paragraph
 
-from . import q
 from .build import final_layouts, same_layout, same_package
 from .compose import add_answer_marks, compose
 from .fit import Spacer, _has_object, inner_paragraphs, para_text
@@ -134,36 +131,6 @@ def _bin_hashes(doc: HwpxDocument) -> dict[str, str]:
     return out
 
 
-def _c14n_key(el) -> str:
-    c = deepcopy(el)
-    c.attrib.pop("id", None)
-    return hashlib.sha1(ET.tostring(c, method="c14n")).hexdigest()
-
-
-class _CharMap:
-    """고친 문서의 charPr id → 기존 문서의 같은 내용 charPr id(없으면 기존 머리에 새 id로 더한다)."""
-
-    def __init__(self, old: HwpxDocument, new: HwpxDocument):
-        self.old_head = old.oxml.headers[0]
-        self.box = next(self.old_head.element.iter(q("hh", "charProperties")))
-        self.by_key = {_c14n_key(c): c.get("id") for c in self.box.findall(q("hh", "charPr"))}
-        self.new = {c.get("id"): c for c in new.oxml.headers[0].element.iter(q("hh", "charPr"))}
-        self.added = 0
-
-    def __call__(self, cid: str) -> str:
-        src = self.new[cid]
-        key = _c14n_key(src)
-        if key not in self.by_key:
-            copy = deepcopy(src)
-            copy.set("id", str(max(int(c.get("id")) for c in self.box.findall(q("hh", "charPr"))) + 1))
-            self.box.append(copy)
-            self.box.set("itemCnt", str(len(self.box.findall(q("hh", "charPr")))))
-            self.by_key[key] = copy.get("id")
-            self.added += 1
-            self.old_head.mark_dirty()
-        return self.by_key[key]
-
-
 def apply_patch(old: HwpxDocument, new: HwpxDocument, kit: Kit) -> list[str]:
     """new(고친 원고를 기존 배치형으로 조판한 문서)의 글을 old(기존 문항지)에 옮긴다 — 글이 달라진 문단만. 바꾼 자리 목록.
     문단이 짝지어지지 않거나, 표·그림이 든 문단의 글이 바뀌었거나, 그림이 바뀌었으면 NeedsRebuild."""
@@ -172,7 +139,6 @@ def apply_patch(old: HwpxDocument, new: HwpxDocument, kit: Kit) -> list[str]:
         raise NeedsRebuild(f"문항 수 {len(ro)} ≠ {len(rn)}")
     io, inn = inner_paragraphs(old), inner_paragraphs(new)
     ho, hn = _bin_hashes(old), _bin_hashes(new)
-    cmap = _CharMap(old, new)
     spacer = Spacer(old)  # 기존 문단의 자간 맞춤(렌더 루프가 줄을 당긴 값)을 새 글에도 그대로 — 줄 수를 지키려고
 
     def 자간(p: Paragraph) -> int:
@@ -193,23 +159,14 @@ def apply_patch(old: HwpxDocument, new: HwpxDocument, kit: Kit) -> list[str]:
             if _has_object(px):
                 raise NeedsRebuild(f"{k}번 표·그림이 든 문단의 글이 바뀌었다")
             s = 자간(px)
-            x, y = px.element, py.element
-            for r in x.findall(q("hp", "run")):
-                x.remove(r)
-            for seg in x.findall(q("hp", "linesegarray")):  # 줄 캐시 — 한/글이 다시 잰다
-                x.remove(seg)
-            anchor = next((c for c in x if c.tag != q("hp", "run")), None)
-            for r in y.findall(q("hp", "run")):
-                r2 = deepcopy(r)
-                for el in r2.iter():
-                    if el.get("charPrIDRef") is not None:
-                        el.set("charPrIDRef", cmap(el.get("charPrIDRef")))
-                if s:
-                    r2.set("charPrIDRef", spacer.charpr(r2.get("charPrIDRef"), s))
-                if anchor is None:
-                    x.append(r2)
-                else:
-                    anchor.addprevious(r2)
+            # 기존 글을 지우고 고친 문서의 글을 그 자리로 복사한다(본체 #780 delete_range·copy_range — 다른 문서의
+            # 글자 모양은 받는 문서에 같은 것이 있으면 다시 쓰고 없으면 더한다). 줄 캐시는 한/글이 다시 잰다.
+            px.delete_range(0, len(px.text), objects="remove")  # 수식도 함께 — 고친 글의 수식으로 갈아 끼운다
+            px.clear_layout_cache()
+            py.copy_range(0, len(py.text), to=px, offset=0)
+            if s:
+                for run in px.runs:
+                    run.char_pr_id_ref = spacer.charpr(run.char_pr_id_ref, s)
             changed.append(f"{k}번 문단 {j + 1}" + (f"(자간 {s}% 유지)" if s else ""))
     old.sections[0].mark_dirty()
     return changed
