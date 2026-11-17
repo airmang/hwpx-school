@@ -13,6 +13,7 @@ from pathlib import Path
 
 import lxml.etree as ET
 from hwpx.document import HwpxDocument
+from hwpx.errors import HwpxValueError
 
 from . import q
 from .kit import Kit, sha256, style_ids
@@ -79,9 +80,9 @@ def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
     p0 = doc.sections[0].paragraphs[a["paragraph"]]
     규격표 = [t for t in p0.tables if any(w in _table_text(t) for w in a["delete_tables_with"])]
     for t in 규격표:
-        # 결재란·유의·규격표 세 표가 run 하나를 공유한다(실측) — run째 지우면 유의까지 함께 사라지므로 표 노드 하나만
-        # 그 run에서 뗀다. (공개 table.remove()는 비게 된 run도 지운다 — 바이트가 달라져 next7/form-x에 둔다.)
-        t.element.getparent().remove(t.element)
+        # 결재란·유의·규격표 세 표가 run 하나를 공유한다(실측) — 표 하나만 문단에서 뗀다(한/글처럼 비게 된 run은 함께 간다,
+        # B4 승인 2026-11-17).
+        t.remove()
     # 문단 0의 줄 배치 캐시(linesegarray)는 규격표(글자처럼 취급, 높이 3130)를 품은 줄 높이 3410을
     # 기억한다. 한글은 이 캐시를 믿어 표를 지운 뒤에도 그만큼 비워 둔다(Task 22 렌더 실측: 1번 문항이
     # 제출본보다 약 1.5줄 아래). 캐시를 지우면 한글이 다시 잰다.
@@ -315,18 +316,16 @@ def _drop_leftovers(doc: HwpxDocument, kit: Kit) -> int:
 
 
 def _scrub_form_bindata(doc: HwpxDocument, prepared: Prepared) -> None:
-    # (공개 doc.media.remove_image는 header binDataList의 binItem도 지운다 — 바이트가 달라져 next7/form-x에 둔다.)
-    sec = doc.sections[0].element
-    refs = {e.get("binaryItemIDRef") for e in sec.iter() if e.get("binaryItemIDRef")}
+    """양식 원본 이미지(prepare 때 기록)를 지우고 미리보기를 비운다. 아직 그 그림을 가리키는 곳이 있으면 멈춘다
+    (doc.media.remove_image — header binItem도 지운다, B5 승인 2026-11-17)."""
     for item_id, href in prepared.form_bindata:
-        if item_id in refs:
-            raise ValueError(f"양식 원본 이미지가 아직 참조된다: {item_id}")
-    pkg = doc.package
-    for item_id, href in prepared.form_bindata:
-        pkg.remove_manifest_item(item_id)
-        if pkg.has_part(href):
-            pkg.delete(href)
-    doc.parts.clear_preview()  # PrvText.txt는 빈 글, PrvImage.png는 1×1 흰 그림(옛 set_part와 같은 바이트)
+        try:
+            doc.media.remove_image(item_id)  # 매니페스트 항목·파트, 그리고 header binItem(있으면)까지
+        except HwpxValueError as exc:
+            if exc.code != "media-item-in-use":
+                raise
+            raise ValueError(f"양식 원본 이미지가 아직 참조된다: {item_id}") from exc
+    doc.parts.clear_preview()  # PrvText.txt는 빈 글, PrvImage.png는 1×1 흰 그림
 
 
 def _postcheck(doc: HwpxDocument, kit: Kit, prepared: Prepared) -> None:
