@@ -1183,7 +1183,7 @@ class _Composer:
     def _put_frame(self, p, frame: "_틀"):
         """틀을 p의 첫 자리에 — 임시 문단에 공개 API(add_rectangle)로 그리고 move_to로 옮긴 뒤 임시 문단을 지운다."""
         sec = self.doc.sections[0]
-        tmp = sec.add_paragraph("")
+        tmp = sec.add_paragraph("", para_pr_id_ref="0", char_pr_id_ref="0", inherit_style=False)  # 앞 문단을 물려받으면 나눔 뺀 paraPr를 새로 만든다
         rect = tmp.add_rectangle(frame.width, frame.height, line_width_mm=0, treat_as_char=True)
         rect.line_style = "NONE"
         rect.move_to(p, offset=0, keep_order=True)
