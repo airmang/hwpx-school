@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hwpx.document import HwpxDocument
-from .kit import open_seeded
+from .kit import open_seeded, save_stamped
 
 HWP_SUFFIXES = (".hwp", ".hwpx")
 
@@ -56,5 +56,5 @@ def open_source(path: Path, work: Path) -> Source:
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
     copy = work / f"{path.stem}_변환.hwpx"
-    doc.save(str(copy))
+    save_stamped(doc, copy)
     return Source(open_seeded(copy), path, copy, notes)

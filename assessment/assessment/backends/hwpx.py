@@ -25,6 +25,13 @@ def _만든_시각() -> datetime | None:
     return datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else None
 
 
+
+def _적는_시각() -> str:
+    """산출물에 적는 시각 — `SOURCE_DATE_EPOCH`(재현 빌드·시험)가 있으면 그 시각, 없으면 지금. 한/글 꼴(UTC, 끝에 Z)."""
+    값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    때 = datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else datetime.now(timezone.utc)
+    return 때.strftime("%Y-%m-%dT%H:%M:%SZ")
+
 class HwpxWriter:
     def __init__(self, kit: Kit) -> None:
         self.kit = kit
@@ -158,4 +165,7 @@ class HwpxWriter:
     def save(self, path: Path) -> None:
         if self._단나눔_대기:
             raise InputError(":::단나눔 뒤에 아무 내용이 없다 — 마지막 단나눔을 지운다")
+        # 만든 날짜 = 고친 날짜 = 지금(SOURCE_DATE_EPOCH가 있으면 그 시각) — 스켈레톤의 고정 날짜를 잇지 않는다
+        t = _적는_시각()
+        self.doc.package.set_document_metadata(created_date=t, modified_date=t)
         self.doc.save(path)

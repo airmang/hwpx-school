@@ -16,7 +16,7 @@ from pathlib import Path
 from hwpx.document import HwpxDocument
 from hwpx.tools.document_merge import insert_document
 
-from .kit import open_seeded
+from .kit import open_seeded, save_stamped
 from .read import flat
 
 # 보존 구간의 시작 — 문단 글이 이렇게 시작하면 서술형·논술형 구간이다(【서술형 1】·[논술형]·서답형 1. 등).
@@ -73,7 +73,7 @@ def write_region(src: Path, start: int, end: int, out: Path) -> None:
             sec.remove_paragraph(ps[i])
     sec.mark_dirty()
     out.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(out))
+    save_stamped(doc, out)
 
 
 def _empty(paragraph) -> bool:

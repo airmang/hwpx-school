@@ -22,7 +22,7 @@ from hwpx.document import HwpxDocument
 
 from . import preserve
 from .compose import compose, 물결
-from .kit import Kit, load_kit, open_seeded
+from .kit import Kit, load_kit, open_seeded, save_stamped
 from .prepare import finalize_form, prepare_document
 from .reverse import FormProfile, ReverseStop, kit_profile, reverse
 from .scan import Scan, scan_markdown
@@ -112,7 +112,7 @@ def rebuild(md: str, kit: Kit, form: Path, image_root: Path, out: Path) -> Path:
     compose(doc, s, kit, answer_key=True, image_root=image_root)
     finalize_form(doc, kit, prepared)
     out.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(out))
+    save_stamped(doc, out)
     return out
 
 

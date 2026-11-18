@@ -29,7 +29,7 @@ from hwpx.document import HwpxDocument
 from hwpx.model import Paragraph
 
 from . import equation, q
-from .kit import Kit, Metrics, open_seeded, style_ids
+from .kit import Kit, Metrics, open_seeded, save_stamped, style_ids
 from .verify import question_heads
 
 역할 = {"number": "발문", "choice1": "답지", "choice2": "답지", "choice3": "답지", "choice5": "답지",
@@ -564,7 +564,7 @@ def fresh_layout(hwpx: Path, work: Path, *, oracle=None) -> dict[Key, Lines]:
     for place in doc.text.iter_paragraphs():  # 본문·칸·머리말·꼬리말 … 모든 문단(바탕쪽은 구역 XML 밖)
         if place.where != "master_page":
             place.paragraph.clear_layout_cache()
-    doc.save(str(bare))
+    save_stamped(doc, bare)
     return hancom_lines(bare, work, oracle=oracle)
 
 

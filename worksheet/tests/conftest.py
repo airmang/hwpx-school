@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import shutil
 import struct
@@ -12,6 +13,8 @@ from hwpx.document import HwpxDocument
 from _helpers import _png
 
 루트 = Path(__file__).resolve().parents[1]
+# 재현 빌드 시각 — 산출물의 만든·고친 날짜가 시험 때마다 흔들리지 않게(소유자 결정 2026-11-18: 날짜는 실제 시각, 시험만 고정).
+os.environ.setdefault("SOURCE_DATE_EPOCH", "1767225600")  # 2026-01-01 00:00 UTC
 표준킷 = 루트 / "kits" / "standard"
 시험_슬롯 = {"school": "시험고등학교", "teacher": "김교사T", "subject": "정보", "grade": "2학년"}
 

@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 루트 = Path(__file__).resolve().parents[1]
+# 재현 빌드 시각 — 산출물의 만든·고친 날짜가 시험 때마다 흔들리지 않게(소유자 결정 2026-11-18: 날짜는 실제 시각, 시험만 고정).
+os.environ.setdefault("SOURCE_DATE_EPOCH", "1767225600")  # 2026-01-01 00:00 UTC
 # 서식·제출본·학교 킷은 저장소 밖 사용자 로컬이다 — 환경변수로만 받는다(기본 경로 없음).
 양식_기본 = 제출본_기본 = 학교B_양식_기본 = None
 

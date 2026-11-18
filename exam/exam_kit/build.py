@@ -29,7 +29,7 @@ from hwpx.document import HwpxDocument
 from .compose import add_answer_marks, choice_paragraphs, compose
 from .fit import summary as spacing_summary
 from .geometry import PageLayout, hancom_windows_pdf, measure
-from .kit import Kit, load_kit, open_seeded, style_ids
+from .kit import Kit, load_kit, open_seeded, save_stamped, style_ids
 from .layout import GAPS, PACKS, head_places, settle
 from .lint import Violation, lint
 from .lint import errors as lint_errors
@@ -221,7 +221,7 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
     # 답 표시본: 굳힌 문항지 파일 + 형광펜만
     key = open_seeded(plain_path)
     add_answer_marks(key, kit, res.answers, draft=r.draft)
-    key.save(str(key_path))
+    save_stamped(key, key_path)
     key_rr = render_fn(key_path, work / "답표시본")
     r.renders["답표시본"] = 1
 

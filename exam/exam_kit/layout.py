@@ -52,7 +52,7 @@ from .geometry import (
     splits,
     tail_box_top,
 )
-from .kit import Kit, style_ids
+from .kit import Kit, save_stamped, style_ids
 from .render import RenderResult, render
 from .scan import Scan
 from .slots import fill_total_pages, read_total_pages
@@ -329,7 +329,7 @@ class _Loop:
     # ⓪' 자간 맞춤
     def fit(self, rr, lay):
         def save() -> Path:
-            self.doc.save(str(self.hwpx))
+            save_stamped(self.doc, self.hwpx)
             return self.hwpx
 
         work = self.out_dir / "자간"
@@ -369,7 +369,7 @@ class _Loop:
 
     def render(self) -> tuple[RenderResult, list[PageLayout]]:
         self.n += 1
-        self.doc.save(str(self.hwpx))
+        save_stamped(self.doc, self.hwpx)
         rr = self.render_fn(self.hwpx, self.out_dir / f"r{self.n}")
         lay = measure(rr.pdf, self.kit)
         heads = head_places(lay)

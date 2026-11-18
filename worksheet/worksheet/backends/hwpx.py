@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hwpx import HwpxDocument
@@ -328,6 +330,13 @@ def add_heading(
     )
 
 
+
+def _적는_시각() -> str:
+    """산출물에 적는 시각 — `SOURCE_DATE_EPOCH`(재현 빌드·시험)가 있으면 그 시각, 없으면 지금. 한/글 꼴(UTC, 끝에 Z)."""
+    값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    때 = datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else datetime.now(timezone.utc)
+    return 때.strftime("%Y-%m-%dT%H:%M:%SZ")
+
 class HwpxWriter:
     """계획 목록을 hwpx 로 — 킷 스켈레톤을 열고, 그리고, 저장한다."""
 
@@ -351,4 +360,7 @@ class HwpxWriter:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        # 만든 날짜 = 고친 날짜 = 지금(SOURCE_DATE_EPOCH가 있으면 그 시각) — 스켈레톤의 고정 날짜를 잇지 않는다
+        t = _적는_시각()
+        self.doc.package.set_document_metadata(created_date=t, modified_date=t)
         self.doc.save(path)
