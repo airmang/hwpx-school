@@ -9,7 +9,6 @@ import re
 
 from hwpx.document import HwpxDocument
 
-from . import q
 from .frontmatter import FrontMatter
 from .kit import Kit
 from .read import t_text, table_paragraphs
@@ -123,47 +122,49 @@ def _fill_teacher(doc: HwpxDocument, kit: Kit, name: str) -> None:
 # ---- 글자 자리 슬롯 -------------------------------------------------------------
 
 def _slot_paragraphs(doc: HwpxDocument, kit: Kit, where: dict) -> list:
-    """슬롯 위치 → 문단 요소들. admin_table_with+cell(+para) · notice · footer_with."""
-    sec = doc.sections[0].element
+    """슬롯 위치 → 문단(공개 Paragraph). admin_table_with+cell(+para) · notice · footer_with."""
     p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]]
     if "admin_table_with" in where:
         tbl = next(t for t in p0.tables if where["admin_table_with"] in t_text(table_paragraphs(t)))
         row, col = where["cell"]
         tc = next(c for r in tbl.rows for c in r.cells if c.address == (row, col))
-        ps = [p.element for p in tc.paragraphs]
+        ps = list(tc.paragraphs)
         return [ps[where["para"]]] if "para" in where else ps
     if where.get("notice"):
         tbl = next(t for t in p0.tables if kit.admin["notice_table_with"] in t_text(table_paragraphs(t)))
-        return [p.element for tr in tbl.rows for tc in tr.cells for p in tc.paragraphs]
+        return [p for tr in tbl.rows for tc in tr.cells for p in tc.paragraphs]
     if "footer_with" in where:
-        # 꼬리말 요소를 직접 훑는다: 6.x가 꼬리말을 두 벌(구역 설정 안·컨트롤) 쓴 양식은 둘 다 채워야 한다. 공개 읽기
-        # (doc.page.footers)는 한 벌만 내놓는다.
-        return [p for f in sec.iter(q("hp", "footer")) if where["footer_with"] in "".join(f.itertext()) for p in f.iter(q("hp", "p"))]
+        # 한/글이 읽는 꼬리말(컨트롤 안 이야기)만 — 6.x가 구역 설정 안에 남긴 사본은 한/글이 읽지 않는다(본체 문서).
+        return [p for f in doc.page.footers() if where["footer_with"] in "".join(x.text for x in f.paragraphs)
+                for p in f.paragraphs]
     raise ValueError(f"글자 자리 슬롯 위치를 모른다: {where}")
 
 
-def _ts(p_el) -> list:
-    """문단 자신의 글 조각(hp:t) — 표·머리말 안 문단의 글은 빼고, 조각 안에 탭 등 자식이 있으면 글자 자리로 쓰지 않는다."""
-    return [t for r in p_el.findall(q("hp", "run")) for t in r.findall(q("hp", "t")) if len(t) == 0]
+def _run_at(p, at: int):
+    """문단 글자 자리 at의 글자를 품은 런(at이 끝이면 마지막 글 런)."""
+    pos, last = 0, None
+    for r in p.runs:
+        n = len(r.text)
+        if n and pos <= at < pos + n:
+            return r
+        if n:
+            last = r
+        pos += n
+    return last
 
 
-def replace_across(p_el, rx: re.Pattern, new: str) -> bool:
-    """문단의 글 조각을 이어 붙인 글에서 rx를 한 번 찾아 new로 바꾼다 — 바뀐 글은 찾은 자리가 시작하는 조각에,
-    걸쳐 있던 뒤 조각에서는 찾은 부분만 지운다(조각별 글자 모양은 그대로). 못 찾으면 False."""
-    ts = _ts(p_el)
-    texts = [t.text or "" for t in ts]
-    m = rx.search("".join(texts))
+def replace_across(p, rx: re.Pattern, new: str) -> bool:
+    """문단의 실제 글(`paragraph.text` — 탭·줄 바꿈 포함)에서 rx를 한 번 찾아 new로 바꾼다. 바뀐 글은 찾은 자리가
+    시작하는 런의 글자 모양으로 그 자리에 들어가고, 찾은 글은 지운다(본체 insert_text·delete_range). 못 찾으면 False."""
+    m = rx.search(p.text)
     if m is None:
         return False
-    a, b, pos = m.start(), m.end(), 0
-    for t, s in zip(ts, texts):
-        lo, hi = pos, pos + len(s)
-        pos = hi
-        if hi <= a or lo >= b and not (lo == a == b):
-            continue
-        keep_head = s[:max(0, a - lo)] if lo <= a else ""
-        keep_tail = s[b - lo:] if b < hi else ""
-        t.text = keep_head + (new if lo <= a < hi or (a == hi and s == "") else "") + keep_tail
+    a, b = m.span()
+    if new:
+        run = _run_at(p, a)
+        p.insert_text(a, new, **({"char_pr_id_ref": run.char_pr_id_ref} if run is not None else {}))
+    if b > a:
+        p.delete_range(a + len(new), b + len(new))
     return True
 
 
@@ -220,7 +221,7 @@ def read_text_slots(doc: HwpxDocument, kit: Kit) -> dict[str, str]:
         except (StopIteration, ValueError, IndexError):
             continue
         for p in paras:
-            m = rx.search("".join(t.text or "" for t in _ts(p)))
+            m = rx.search(p.text)
             if not m:
                 continue
             got = _fill_regex(slot["fill"]).match(m.group(0))
@@ -247,7 +248,7 @@ def read_total_pages(doc: HwpxDocument, kit: Kit) -> str:
     slot = next(s for s in kit.text_slots if s["name"] == "총쪽수")
     rx = re.compile(slot["read"])
     for p in _slot_paragraphs(doc, kit, slot["where"]):
-        m = rx.search("".join(t.text or "" for t in _ts(p)))
+        m = rx.search(p.text)
         if m:
             return m.group(1)
     return ""

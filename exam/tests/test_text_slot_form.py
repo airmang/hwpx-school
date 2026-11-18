@@ -55,9 +55,12 @@ _머리 = ("---\n양식: 글자자리-예시\n학년도: 2026\n학년: 2\n학기
         "시행: {시행}\n출제교사: 김편집, 이출제\n---\n")
 
 
-def _셀글(doc, kit):
-    from exam_kit.slots import _ts
+def _ts(p_el) -> list:
+    """문단 자신의 글 조각(hp:t, 자식 없는 것) — 시험이 산출물 XML을 직접 볼 때."""
+    return [t for r in p_el.findall(q("hp", "run")) for t in r.findall(q("hp", "t")) if len(t) == 0]
 
+
+def _셀글(doc, kit):
     p0 = doc.sections[0].paragraphs[0].element
     tbl = next(t for t in _top_tables(p0) if "교장" in _text(t))
     return {(int(a.get("rowAddr")), int(a.get("colAddr"))): ["".join(x.text or "" for x in _ts(p))
