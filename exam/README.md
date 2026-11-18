@@ -72,7 +72,8 @@ tests/             pytest — 픽스처는 합성 문항만(fixtures/*.md, 그�
 
 ## 버전 올리기
 
-`python-hwpx-automation`은 범위 지정(`>=7.2,<8`)이고 재현성은 `uv.lock`이 진다. `==` 고정은 쓰지 않는다.
+`python-hwpx`(`>=7.0,<8`)·`python-hwpx-automation`(`[oracle]>=8.0,<9`)은 범위 지정이고 재현성은 `uv.lock`이 진다. `==` 고정은 쓰지 않는다.
+두 판 출시 전에는 `uv.lock`이 옛 판을 잠그고 있다 — 잠금 파일로 설치하지 말고 저장소 README의 안내를 따른다.
 
 1. `uv lock --upgrade-package python-hwpx-automation` → `uv sync`
 2. `uv run pytest -q -m "not render"` 전부 통과 + 렌더 테스트 2~3개(한 번에 하나)
