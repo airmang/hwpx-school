@@ -259,3 +259,16 @@ def test_CLI_는_확장자_없는_출력을_종료코드_2로_거부(md파일, �
     코드 = cli_main(["compose", str(md파일), "--kit", str(킷_루트), "-o", str(tmp_path / "학습지")])
     assert 코드 == 2
     assert "오류: 출력 형식을 알 수 없다: (없음)" in capsys.readouterr().err
+
+
+def test_docx_zip_날짜는_SOURCE_DATE_EPOCH를_따른다(md파일, 킷_루트, tmp_path, monkeypatch):
+    """재현 빌드: 고정 시각이면 docx의 zip 항목 날짜도 그 시각(conftest 2026-01-01 00:00 UTC)이라 같은 입력이면 같은 바이트."""
+    import zipfile
+
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1767225600")
+    a, b = tmp_path / "a.docx", tmp_path / "b.docx"
+    compose(md파일, 킷_루트, a)
+    compose(md파일, 킷_루트, b)
+    with zipfile.ZipFile(a) as z:
+        assert {i.date_time for i in z.infolist()} == {(2026, 1, 1, 0, 0, 0)}
+    assert a.read_bytes() == b.read_bytes()

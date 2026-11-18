@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import os
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from docx import Document
@@ -425,3 +428,20 @@ class DocxWriter:
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.doc.save(str(path))
+        _zip_날짜_고정(path)
+
+
+def _zip_날짜_고정(path: Path) -> None:
+    """재현 빌드(`SOURCE_DATE_EPOCH`)면 docx zip 항목 날짜를 그 시각(UTC)으로 다시 쓴다 — python-docx는 저장한 시각을
+    적어 같은 입력도 바이트가 달랐다. 항목 차례·압축 방식·내용은 그대로. 고정하지 않으면 손대지 않는다(실제 시각)."""
+    값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    if not 값.isdigit():
+        return
+    때 = datetime.fromtimestamp(max(int(값), 315532800), timezone.utc).timetuple()[:6]  # zip 날짜는 1980년부터
+    with zipfile.ZipFile(path) as z:
+        항목 = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w") as z:
+        for i, data in 항목:
+            새 = zipfile.ZipInfo(i.filename, date_time=때)
+            새.compress_type, 새.external_attr, 새.create_system = i.compress_type, i.external_attr, i.create_system
+            z.writestr(새, data)
