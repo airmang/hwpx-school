@@ -7,12 +7,9 @@
 from __future__ import annotations
 
 import json
-import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from hwpx.document import HwpxDocument
 from hwpx_automation.office.authoring.design import Profile, compose
 from hwpx_automation.office.authoring.design.marked import harvest_marked_profile
 
@@ -47,21 +44,7 @@ def make(plan: dict[str, Any], kit_dir: str | Path, output: str | Path) -> dict[
     profile = Profile.load(kit_dir)
     blocks = [{"type": "paragraph", **block} for block in plan["blocks"]]
     result = compose({"profile": profile.id, "blocks": blocks}, profile=profile, output_path=output)
-    if result.ok:
-        _stamp(Path(output))
     return result.to_dict() | {"visualComplete": None}
-
-
-def _stamp(path: Path) -> None:
-    """만든 날짜 = 고친 날짜 = 자유 꼴 날짜(date) = 지금(`SOURCE_DATE_EPOCH`가 있으면 그 시각), 사람 이름은 비운다.
-    automation 저장은 만든·고친 날짜만 찍는다 — date가 비면 한/글이 재저장 시각으로 채워 만든 날짜와 어긋난다."""
-    값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
-    때 = datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else datetime.now(timezone.utc)
-    t = 때.strftime("%Y-%m-%dT%H:%M:%SZ")
-    doc = HwpxDocument.open(str(path))
-    doc.parts.clear_document_authors()
-    doc.parts.set_document_metadata(created_date=t, modified_date=t, date=때)
-    doc.save(str(path))
 
 
 __all__ = ["register", "roles", "make"]
