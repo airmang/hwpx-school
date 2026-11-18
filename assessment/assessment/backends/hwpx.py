@@ -26,11 +26,11 @@ def _만든_시각() -> datetime | None:
 
 
 
-def _적는_시각() -> str:
-    """산출물에 적는 시각 — `SOURCE_DATE_EPOCH`(재현 빌드·시험)가 있으면 그 시각, 없으면 지금. 한/글 꼴(UTC, 끝에 Z)."""
+def _적는_순간() -> datetime:
+    """산출물에 적는 순간 — `SOURCE_DATE_EPOCH`(재현 빌드·시험)가 있으면 그 시각, 없으면 지금(UTC)."""
     값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
-    때 = datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else datetime.now(timezone.utc)
-    return 때.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else datetime.now(timezone.utc)
+
 
 class HwpxWriter:
     def __init__(self, kit: Kit) -> None:
@@ -166,6 +166,9 @@ class HwpxWriter:
         if self._단나눔_대기:
             raise InputError(":::단나눔 뒤에 아무 내용이 없다 — 마지막 단나눔을 지운다")
         # 만든 날짜 = 고친 날짜 = 지금(SOURCE_DATE_EPOCH가 있으면 그 시각) — 스켈레톤의 고정 날짜를 잇지 않는다
-        t = _적는_시각()
-        self.doc.package.set_document_metadata(created_date=t, modified_date=t)
+        # 양식(스켈레톤)에서 따라온 사람 이름은 걷고, 자유 꼴 날짜(date)도 만든 날짜와 같은 순간으로
+        때 = _적는_순간()
+        t = 때.strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.doc.parts.clear_document_authors()
+        self.doc.parts.set_document_metadata(created_date=t, modified_date=t, date=때)
         self.doc.save(path)

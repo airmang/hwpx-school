@@ -149,18 +149,24 @@ def open_seeded(path: Path) -> HwpxDocument:
     return HwpxDocument.open(str(path), seed=int(sha256(path)[:8], 16))
 
 
-def stamp_time() -> str:
-    """산출물에 적는 시각 — `SOURCE_DATE_EPOCH`(재현 빌드·시험)가 있으면 그 시각, 없으면 지금. 한/글 꼴(UTC, 끝에 Z)."""
+def stamp_moment() -> datetime:
+    """산출물에 적는 순간 — `SOURCE_DATE_EPOCH`(재현 빌드·시험)가 있으면 그 시각, 없으면 지금(UTC)."""
     값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
-    때 = datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else datetime.now(timezone.utc)
-    return 때.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(int(값), timezone.utc) if 값.isdigit() else datetime.now(timezone.utc)
+
+
+def stamp_document(doc: HwpxDocument) -> None:
+    """문서 정보를 새 산출물 꼴로 — 만든 날짜 = 고친 날짜 = 자유 꼴 날짜(`date`) = stamp_moment(), 양식에서 따라온
+    사람 이름(creator·lastsaveby)은 걷는다(소유자 결정 2026-11-18). 날짜 셋이 같은 순간이면 한/글이 재저장 때 그대로 둔다."""
+    때 = stamp_moment()
+    t = 때.strftime("%Y-%m-%dT%H:%M:%SZ")
+    doc.parts.clear_document_authors()
+    doc.parts.set_document_metadata(created_date=t, modified_date=t, date=때)
 
 
 def save_stamped(doc: HwpxDocument, path) -> None:
-    """산출물 저장 — 만든 날짜 = 고친 날짜 = stamp_time()(소유자 결정 2026-11-18: 양식·스켈레톤의 날짜를 잇지 않는 새 문서).
-    시각은 `SOURCE_DATE_EPOCH`로 고정한다(씨앗 `open_seeded`와 같은 자리 — 같은 입력이면 같은 바이트)."""
-    t = stamp_time()
-    doc.package.set_document_metadata(created_date=t, modified_date=t)
+    """산출물 저장 — stamp_document 뒤 저장(씨앗 `open_seeded`와 같은 자리: 같은 입력·같은 SOURCE_DATE_EPOCH면 같은 바이트)."""
+    stamp_document(doc)
     doc.save(str(path))
 
 
