@@ -27,8 +27,8 @@ from pathlib import Path
 from hwpx.document import HwpxDocument
 from hwpx.model import Paragraph
 
-from .build import final_layouts, same_layout, same_package
-from .compose import add_answer_marks, compose
+from .build import final_layouts, same_layout, same_package, write_key
+from .compose import compose
 from .fit import Spacer, _has_object, inner_paragraphs, para_text
 from .geometry import hancom_windows_pdf, measure
 from .kit import Kit, load_kit, open_seeded, save_stamped
@@ -247,9 +247,7 @@ def patch(md_path: Path, prev: Path, kit: Kit | Path, *, form: Path, out_dir: Pa
     out_dir.mkdir(parents=True, exist_ok=True)
     plain_path, key_path = work / old_plain_path.name, work / old_key_path.name
     save_stamped(old, plain_path)
-    key = open_seeded(plain_path)
-    add_answer_marks(key, kit, res.answers, draft=draft)
-    save_stamped(key, key_path)
+    write_key(plain_path, key_path, kit, res.answers, draft=draft)
 
     # 확인 — 배치가 그대로인가, 그다음 기계 검사
     before = render_fn(old_plain_path, work / "기존_렌더")

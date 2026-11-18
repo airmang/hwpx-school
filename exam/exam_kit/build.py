@@ -29,7 +29,7 @@ from hwpx.document import HwpxDocument
 from .compose import add_answer_marks, choice_paragraphs, compose
 from .fit import summary as spacing_summary
 from .geometry import PageLayout, hancom_windows_pdf, measure
-from .kit import Kit, load_kit, open_seeded, save_stamped, style_ids
+from .kit import Kit, load_kit, open_seeded, style_ids
 from .layout import GAPS, PACKS, head_places, settle
 from .lint import Violation, lint
 from .lint import errors as lint_errors
@@ -116,6 +116,15 @@ def same_package(plain: Path, key: Path) -> list[str]:
             if x != y:
                 out.append(f"{name}가 다르다" + ("(형광펜을 빼고도)" if name.startswith("Contents/section") else ""))
     return out
+
+
+def write_key(plain_path: Path, key_path: Path, kit: Kit, answers: dict[str, str], *, draft: bool = False) -> None:
+    """굳힌 문항지 파일에 정답 형광펜만 더해 답 표시본을 쓴다. 한 빌드의 두 판은 같은 순간이다 — 문서 정보(만든·고친
+    날짜, 자유 꼴 날짜, 비운 이름)는 문항지에서 열어 온 그대로 두고 다시 찍지 않는다. 저장이 다른 초에 끝나도
+    두 판은 형광펜만 다르다(M8 same_package)."""
+    key = open_seeded(plain_path)
+    add_answer_marks(key, kit, answers, draft=draft)
+    key.save(str(key_path))
 
 
 def final_layouts(doc: HwpxDocument, kit: Kit) -> dict[str, str]:
@@ -219,9 +228,7 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
     r.pages = (s.first_pages, s.render.page_count)
 
     # 답 표시본: 굳힌 문항지 파일 + 형광펜만
-    key = open_seeded(plain_path)
-    add_answer_marks(key, kit, res.answers, draft=r.draft)
-    save_stamped(key, key_path)
+    write_key(plain_path, key_path, kit, res.answers, draft=r.draft)
     key_rr = render_fn(key_path, work / "답표시본")
     r.renders["답표시본"] = 1
 
