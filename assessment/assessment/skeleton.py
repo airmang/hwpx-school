@@ -368,8 +368,8 @@ def extract_skeleton(
         if exc.code != "section-clear-control-content":
             raise
         태그 = ", ".join(exc.context.get("tags", []))
-        # 본체는 남기는 단 바꿈 문단의 컨트롤 안 내용도 같은 코드로 거부한다(#782) — 어느 문단인지는 글로만 갈린다
-        if str(exc).startswith("a column change kept"):
+        # 본체는 남기는 단 바꿈 문단의 컨트롤 안 내용도 같은 코드로 거부한다(#782) — 어느 문단인지는 context["paragraph"](#784)
+        if exc.context.get("paragraph", 0) != 0:
             raise ValueError(f"{_실패_머리말}: 2단 전환 문단(세 번째 문단)의 컨트롤 안에 내용이 있다 — {태그}") from exc
         raise ValueError(
             f"{_실패_머리말}: 첫 문단의 컨트롤 안에 내용이 있다"
