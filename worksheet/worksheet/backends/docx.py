@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import zipfile
 from datetime import datetime, timezone
@@ -426,22 +427,51 @@ class DocxWriter:
             raise TypeError(f"그릴 수 없는 계획: {type(plan).__name__}")
 
     def save(self, path: Path) -> None:
+        # 고정 시각을 먼저 본다 — zip에 적을 수 없는 시각이면 목적지를 건드리기 전에 거부한다(있던 파일은 그대로).
+        때 = _zip_고정_시각()
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.doc.save(str(path))
-        _zip_날짜_고정(path)
+        if 때 is None:
+            self.doc.save(str(path))
+            return
+        저장 = io.BytesIO()
+        self.doc.save(저장)
+        path.write_bytes(_zip_날짜_고정(저장.getvalue(), 때))
 
 
-def _zip_날짜_고정(path: Path) -> None:
-    """재현 빌드(`SOURCE_DATE_EPOCH`)면 docx zip 항목 날짜를 그 시각(UTC)으로 다시 쓴다 — python-docx는 저장한 시각을
-    적어 같은 입력도 바이트가 달랐다. 항목 차례·압축 방식·내용은 그대로. 고정하지 않으면 손대지 않는다(실제 시각)."""
+class SourceDateEpochOutOfRange(ValueError):
+    """`SOURCE_DATE_EPOCH`가 DOCX(zip)에 적을 수 있는 날짜(2107-12-31까지)를 넘는다 — 저장하지 않았다."""
+
+
+_ZIP_처음 = 315532800  # 1980-01-01 00:00:00 UTC — zip 날짜의 시작
+_ZIP_넘침 = 4354819200  # 2108-01-01 00:00:00 UTC — zip 날짜는 2107-12-31까지
+
+
+def _zip_고정_시각() -> tuple[int, ...] | None:
+    """재현 빌드(`SOURCE_DATE_EPOCH`, 0 이상의 정수 초)면 zip 항목에 적을 시각(UTC), 아니면 None(실제 시각을 둔다).
+
+    zip은 1980-01-01부터 2107-12-31까지만 적는다. 1980년 이전 값(0 = 1970-01-01 포함)은 1980-01-01 00:00:00으로
+    적는다(재현 빌드가 흔히 주는 0을 받는다). 2108-01-01 이후 값은 SourceDateEpochOutOfRange로 거부한다."""
     값 = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
     if not 값.isdigit():
-        return
-    때 = datetime.fromtimestamp(max(int(값), 315532800), timezone.utc).timetuple()[:6]  # zip 날짜는 1980년부터
-    with zipfile.ZipFile(path) as z:
+        return None
+    초 = int(값)
+    if 초 >= _ZIP_넘침:
+        raise SourceDateEpochOutOfRange(
+            f"SOURCE_DATE_EPOCH={값}은 DOCX(zip)에 적을 수 있는 날짜(2107-12-31까지)를 넘는다 — 저장하지 않았다. "
+            f"{_ZIP_넘침} 미만의 값을 주거나 SOURCE_DATE_EPOCH를 지운다"
+        )
+    return datetime.fromtimestamp(max(초, _ZIP_처음), timezone.utc).timetuple()[:6]
+
+
+def _zip_날짜_고정(data: bytes, 때: tuple[int, ...]) -> bytes:
+    """docx zip 항목 날짜를 때(UTC)로 다시 쓴 바이트 — python-docx는 저장한 시각을 적어 같은 입력도 바이트가 달랐다.
+    항목 차례·압축 방식·내용은 그대로. 메모리에서 다시 쓰고 목적지에는 끝난 바이트를 한 번 쓴다."""
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
         항목 = [(i, z.read(i.filename)) for i in z.infolist()]
-    with zipfile.ZipFile(path, "w") as z:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
         for i, data in 항목:
             새 = zipfile.ZipInfo(i.filename, date_time=때)
             새.compress_type, 새.external_attr, 새.create_system = i.compress_type, i.external_attr, i.create_system
             z.writestr(새, data)
+    return out.getvalue()

@@ -272,3 +272,27 @@ def test_docx_zip_날짜는_SOURCE_DATE_EPOCH를_따른다(md파일, 킷_루트,
     with zipfile.ZipFile(a) as z:
         assert {i.date_time for i in z.infolist()} == {(2026, 1, 1, 0, 0, 0)}
     assert a.read_bytes() == b.read_bytes()
+
+
+@pytest.mark.parametrize("값", ["4354819200", "32503680000", "99999999999999999999"])  # 2108-01-01, 3000-01-01, 아주 큰 값
+def test_docx_zip에_적을_수_없는_고정_시각은_저장_전에_거부하고_있던_파일을_둔다(md파일, 킷_루트, tmp_path, monkeypatch, 값):
+    from worksheet.backends.docx import SourceDateEpochOutOfRange
+
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", 값)
+    있던, 없던 = tmp_path / "있던.docx", tmp_path / "없던.docx"
+    있던.write_bytes(b"previous")
+    for 목적지 in (있던, 없던):
+        with pytest.raises(SourceDateEpochOutOfRange, match="2107-12-31"):
+            compose(md파일, 킷_루트, 목적지)
+    assert 있던.read_bytes() == b"previous"
+    assert not 없던.exists()
+
+
+@pytest.mark.parametrize(("값", "날짜"), [("4354819199", (2107, 12, 31, 23, 59, 58)),  # zip 날짜의 끝(초는 2초 단위)
+                                         ("0", (1980, 1, 1, 0, 0, 0)),                  # 1980년 이전은 1980-01-01로
+                                         ("315532799", (1980, 1, 1, 0, 0, 0))])
+def test_docx_zip_날짜의_경계(md파일, 킷_루트, tmp_path, monkeypatch, 값, 날짜):
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", 값)
+    compose(md파일, 킷_루트, tmp_path / "a.docx")
+    with zipfile.ZipFile(tmp_path / "a.docx") as z:
+        assert {i.date_time for i in z.infolist()} == {날짜}
