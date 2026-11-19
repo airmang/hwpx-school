@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from hwpx.document import HwpxDocument
+from hwpx.errors import HwpxValueError
 
 from .frontmatter import FrontMatter
 from .kit import Kit
@@ -153,13 +154,81 @@ def _run_at(p, at: int):
     return last
 
 
+#: 글자로 세는 조각 — 그 밖의 조각(누름틀 시작·끝, 컨트롤, 개체, 표시)은 글자 수 0으로 offset 자리에 선다.
+_글자_조각 = frozenset({"text", "tab", "line_break", "nb_space", "fw_space", "hyphen"})
+_변경_추적 = frozenset({"insert_begin", "insert_end", "delete_begin", "delete_end"})
+
+
+def _거부(code: str, a: int, b: int, 무엇: str, 고칠_법: str, **더) -> HwpxValueError:
+    return HwpxValueError(f"글자 자리 슬롯 {a}..{b}에 {무엇} — 문단을 바꾸지 않았다", code=code,
+                          context={"start": a, "end": b, **더}, suggestion=고칠_법)
+
+
+def _check_replaceable(p, a: int, b: int) -> None:
+    """[a, b)를 지울 수 있는지 쓰기 전에 본다 — 본체 delete_range가 거부하는 자리를 같은 오류 코드로 미리 거부한다.
+
+    replace_across는 넣기(insert_text)와 지우기(delete_range) 두 호출이라, 지우기가 거부되면 넣은 글이 문단에 남았다.
+    넣은 글은 a 자리의 조각들 뒤에 들어가므로 넣은 뒤 [a+n, b+n)의 안쪽은 넣기 전 (a, b)의 안쪽과 같은 조각이다.
+    거부: 안쪽(a < offset < b)의 누름틀 한쪽 끝(paragraph-range-splits-field), 그 밖의 컨트롤·개체
+    (paragraph-range-holds-objects), 변경 추적 표시(paragraph-range-splits-mark), b 뒤에서 끝나 시작을 탭인 b로
+    옮겨야 할 형광펜(paragraph-range-splits-mark), 경계에 걸친 나눌 수 없는 글 조각(paragraph-split-inside-element)."""
+    text = p.text
+    조각 = [it for run in p.runs for it in run.content]
+    시작: list[str] = []
+    끝: list[str] = []
+    for i, it in enumerate(조각):
+        if it.kind in _글자_조각:
+            continue
+        if it.kind == "unknown" and it.container == "t" and it.text:
+            lo, hi = it.offset, it.offset + len(it.text)
+            if lo < a < hi or lo < b < hi:
+                raise _거부("paragraph-split-inside-element", a, b, f"나눌 수 없는 글 조각({it.name})이 걸쳐 있다",
+                            "찾을 글(find)이 그 조각을 통째로 담거나 비켜 가게 킷을 고친다.", element=it.name)
+            continue
+        if not a < it.offset < b or it.kind == "section_properties":
+            continue
+        if it.kind == "field_begin":
+            시작.append(it.attribute("id") or "")
+        elif it.kind == "field_end":
+            끝.append(it.attribute("beginIDRef") or "")
+        elif it.kind in _변경_추적:
+            raise _거부("paragraph-range-splits-mark", a, b, "변경 추적 표시가 있다",
+                        "변경 추적을 먼저 받아들이거나 되돌린다.", mark=it.kind)
+        elif it.kind == "markpen_begin":
+            # b 뒤에서 끝나는 형광펜은 시작이 b로 옮겨진다 — b 글자가 탭이면 본체가 거부한다
+            짝 = next((x for x in 조각[i + 1:] if x.kind == "markpen_end"), None)
+            if 짝 is not None and 짝.offset > b and text[b:b + 1] == "\t":
+                raise _거부("paragraph-range-splits-mark", a, b, "형광펜이 탭에서 시작해야 한다",
+                            "형광펜을 먼저 지우거나 찾을 글이 형광펜을 통째로 담게 한다.", mark=it.kind)
+        # 그 밖의 hp:t 안 표시(형광펜 끝·차례 표시)는 본체가 범위와 함께 옮기거나 지운다(거부 아님).
+        # 컨트롤·개체는 아래에서 모아 본다.
+    for fid in 시작:
+        if fid not in 끝:
+            raise _거부("paragraph-range-splits-field", a, b, f"누름틀(id {fid})의 한쪽 끝만 있다",
+                        "찾을 글(find)이 누름틀을 통째로 담거나 비켜 가게 킷을 고친다.", field=fid)
+    for fid in 끝:
+        if fid not in 시작:
+            raise _거부("paragraph-range-splits-field", a, b, f"누름틀(id {fid})의 한쪽 끝만 있다",
+                        "찾을 글(find)이 누름틀을 통째로 담거나 비켜 가게 킷을 고친다.", field=fid)
+    안쪽 = [it.kind for it in 조각
+            if it.kind not in _글자_조각 and it.container != "t" and it.kind != "section_properties"
+            and a < it.offset < b]
+    if 안쪽:
+        raise _거부("paragraph-range-holds-objects", a, b, f"컨트롤·개체가 있다({', '.join(안쪽)})",
+                    "찾을 글(find)이 컨트롤·개체를 비켜 가게 킷을 고친다.", kinds=안쪽)
+
+
 def replace_across(p, rx: re.Pattern, new: str) -> bool:
     """문단의 실제 글(`paragraph.text` — 탭·줄 바꿈 포함)에서 rx를 한 번 찾아 new로 바꾼다. 바뀐 글은 찾은 자리가
-    시작하는 런의 글자 모양으로 그 자리에 들어가고, 찾은 글은 지운다(본체 insert_text·delete_range). 못 찾으면 False."""
+    시작하는 런의 글자 모양으로 그 자리에 들어가고, 찾은 글은 지운다(본체 insert_text·delete_range). 못 찾으면 False.
+
+    찾은 자리 안쪽에 누름틀의 한쪽 끝·컨트롤·개체·변경 추적 표시가 있으면 쓰기 전에 본체와 같은 코드의
+    HwpxValueError로 거부하고 문단을 조금도 바꾸지 않는다(_check_replaceable)."""
     m = rx.search(p.text)
     if m is None:
         return False
     a, b = m.span()
+    _check_replaceable(p, a, b)
     if new:
         run = _run_at(p, a)
         p.insert_text(a, new, **({"char_pr_id_ref": run.char_pr_id_ref} if run is not None else {}))
@@ -180,7 +249,9 @@ def slot_value(slot: dict, values: dict[str, str | None], fm: FrontMatter) -> st
 
 
 def fill_text_slots(doc: HwpxDocument, kit: Kit, fm: FrontMatter, values: dict[str, str | None]) -> dict[str, str | None]:
-    """kit.text_slots를 차례로 채운다 — 슬롯 이름 → 채운 글(미확정이면 None). 찾을 글이 위치에 없으면 '양식이 바뀌었다'."""
+    """kit.text_slots를 차례로 채운다 — 슬롯 이름 → 채운 글(미확정이면 None). 찾을 글이 위치에 없으면 '양식이 바뀌었다'.
+    찾은 글이 누름틀의 한쪽 끝·컨트롤·개체와 겹치면 replace_across가 그 문단을 바꾸기 전에 HwpxValueError로 거부하고
+    조판 전체가 멈춘다(앞서 채운 슬롯은 이 문서에 남는다 — build·patch는 그 문서를 저장하지 않는다)."""
     out: dict[str, str | None] = {}
     for slot in kit.text_slots:
         new = slot_value(slot, values, fm)
