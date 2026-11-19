@@ -170,9 +170,8 @@ def _check_replaceable(p, a: int, b: int) -> None:
     replace_across는 넣기(insert_text)와 지우기(delete_range) 두 호출이라, 지우기가 거부되면 넣은 글이 문단에 남았다.
     넣은 글은 a 자리의 조각들 뒤에 들어가므로 넣은 뒤 [a+n, b+n)의 안쪽은 넣기 전 (a, b)의 안쪽과 같은 조각이다.
     거부: 안쪽(a < offset < b)의 누름틀 한쪽 끝(paragraph-range-splits-field), 그 밖의 컨트롤·개체
-    (paragraph-range-holds-objects), 변경 추적 표시(paragraph-range-splits-mark), b 뒤에서 끝나 시작을 탭인 b로
-    옮겨야 할 형광펜(paragraph-range-splits-mark), 경계에 걸친 나눌 수 없는 글 조각(paragraph-split-inside-element)."""
-    text = p.text
+    (paragraph-range-holds-objects), 변경 추적 표시(paragraph-range-splits-mark), b 뒤에서 끝나 시작을 b의 탭(런
+    바로 아래 hp:tab)으로 옮겨야 할 형광펜(paragraph-range-splits-mark), 경계에 걸친 나눌 수 없는 글 조각(paragraph-split-inside-element)."""
     조각 = [it for run in p.runs for it in run.content]
     시작: list[str] = []
     끝: list[str] = []
@@ -195,9 +194,10 @@ def _check_replaceable(p, a: int, b: int) -> None:
             raise _거부("paragraph-range-splits-mark", a, b, "변경 추적 표시가 있다",
                         "변경 추적을 먼저 받아들이거나 되돌린다.", mark=it.kind)
         elif it.kind == "markpen_begin":
-            # b 뒤에서 끝나는 형광펜은 시작이 b로 옮겨진다 — b 글자가 탭이면 본체가 거부한다
+            # b 뒤에서 끝나는 형광펜은 시작이 b로 옮겨진다 — b 글자가 hp:t 밖(런 바로 아래)에 쓴 탭이면 본체가 거부한다
             짝 = next((x for x in 조각[i + 1:] if x.kind == "markpen_end"), None)
-            if 짝 is not None and 짝.offset > b and text[b:b + 1] == "\t":
+            런_탭 = any(x.kind == "tab" and x.container == "run" and x.offset == b for x in 조각)
+            if 짝 is not None and 짝.offset > b and 런_탭:
                 raise _거부("paragraph-range-splits-mark", a, b, "형광펜이 탭에서 시작해야 한다",
                             "형광펜을 먼저 지우거나 찾을 글이 형광펜을 통째로 담게 한다.", mark=it.kind)
         # 그 밖의 hp:t 안 표시(형광펜 끝·차례 표시)는 본체가 범위와 함께 옮기거나 지운다(거부 아님).

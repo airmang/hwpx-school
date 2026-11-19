@@ -73,15 +73,13 @@ def test_누름틀과_겹친_자리는_쓰기_전에_거부하고_문단을_그�
     assert [f.value for f in HwpxDocument.open(doc.to_bytes()).fields.all] == ["BC"]
 
 
-def test_형광펜_시작을_탭으로_옮겨야_하면_쓰기_전에_거부한다():
-    # 'AB<탭>CD'의 'B<탭>C'에 형광펜 — 'AB'를 지우면 형광펜 시작이 탭 자리로 가야 해서 본체가 거부한다
-    doc, p = _문단("AB\tCD")
+def test_형광펜이_hp_t_안의_탭으로_옮겨지는_자리는_받는다():
+    # 'AB<탭>CD'의 'B<탭>C'에 형광펜 — 'AB'를 바꾸면 형광펜 시작이 hp:t 안의 탭 자리로 옮겨진다(본체가 받는다).
+    # 미리 보기가 본체보다 넓게 거부하지 않는가.
+    doc, p = _문단("AB", "\tCD")
     doc.text.highlight(p, start=1, end=4)
-    전 = doc.to_bytes()
-    with pytest.raises(HwpxValueError) as e:
-        replace_across(p, re.compile("AB"), "X")
-    assert e.value.code == "paragraph-range-splits-mark"
-    assert doc.to_bytes() == 전
+    assert replace_across(p, re.compile("AB"), "X") is True
+    assert HwpxDocument.open(doc.to_bytes()).paragraphs[0].text == "X\tCD"
 
 
 @pytest.mark.parametrize(("찾을", "글", "값"), [("BC", "AXD", "X"), ("B", "AXCD", "XC")])
