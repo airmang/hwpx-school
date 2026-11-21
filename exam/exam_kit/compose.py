@@ -955,8 +955,10 @@ class _Composer:
                 if x.is_anchor and (x.row, x.column) in plan.widths:
                     x.cell.set_size(width=plan.widths[(x.row, x.column)])
         if plan.inline:  # 떠 있는 견본(학교 B 자료 상자) → 글자처럼 취급(다른 박스와 같게)
-            t.set_position(treat_as_char=True, vertical_relative_to="PARA", horizontal_relative_to="PARA",
+            # 엔진은 글자처럼 놓인 개체에 위치 값을 받지 않는다 — 떠 있는 동안 0으로 돌려놓고 나서 글자처럼 바꾼다
+            t.set_position(vertical_relative_to="PARA", horizontal_relative_to="PARA",
                            vertical_offset=0, horizontal_offset=0, flow_with_text=True)
+            t.set_position(treat_as_char=True)
         content = next(x.cell for x in t.iter_grid() if x.is_anchor and (x.column, x.row) == (cc, cr))
         old = list(content.paragraphs)
         h = plan.h
