@@ -25,14 +25,6 @@ Python 3.13과 [uv](https://docs.astral.sh/uv/)가 필요합니다. 배치 확�
 
 학습지·수행평가는 `worksheet/`·`assessment/`에서 `uv run --python 3.13 pytest -q`로 시작합니다. 폴더마다 독립 프로젝트입니다.
 
-> **python-hwpx 7.0·python-hwpx-automation 8.0 출시 전 (`next/core-7.0` 가지)**: 네 폴더의 `pyproject.toml`은 새 판
-> (`python-hwpx>=7.0,<8`, `python-hwpx-automation>=8.0,<9`)을 요구하지만 커밋된 `uv.lock`은 아직 옛 판(6.x·7.x)을 잠그고 있다.
-> 이 가지를 `uv sync --frozen`이나 `uv run`(잠금 그대로)으로 설치하면 옛 판이 깔려 시험이 실패한다 — **잠금 파일로 설치하지 않는다.**
-> 두 판이 PyPI에 올라가기 전에는 새 lock을 만들 수 없으므로, 그때까지는 python-hwpx·python-hwpx-automation 원본을
-> 편집 설치(`pip install -e <python-hwpx> -e <python-hwpx-automation>`)한 가상 환경에서 `python -m pytest`로 돌린다.
-> 출시 뒤 할 일: 네 폴더에서 `uv lock --upgrade-package python-hwpx --upgrade-package python-hwpx-automation` → `uv sync` →
-> 시험 통과 확인 → `uv.lock`만 커밋.
-
 ## 학교 양식
 
 학교마다 다른 양식은 각자 자기 PC에 만드는 **학교 킷**이 갖습니다. 이 저장소에는 학교 무관 엔진, 범용 스킬, 합성

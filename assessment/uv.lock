@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.13.*"
 
 [[package]]
@@ -8,7 +8,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "lxml" },
-    { name = "python-hwpx", extra = ["preview"] },
+    { name = "python-hwpx" },
 ]
 
 [package.dev-dependencies]
@@ -20,7 +20,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "lxml", specifier = ">=5,<7" },
-    { name = "python-hwpx", extras = ["preview"], specifier = ">=6.6,<7" },
+    { name = "python-hwpx", specifier = ">=7.0,<8" },
 ]
 
 [package.metadata.requires-dev]
@@ -45,15 +45,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc35312d08ba8bf51fdd999c576889fc2c24cb97f4f10/iniconfig-2.3.0.tar.gz", hash = "sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730", size = 20503, upload-time = "2025-10-18T21:55:43.219Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
-]
-
-[[package]]
-name = "latex2mathml"
-version = "3.81.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/88/db/336c38300e44582752b95842b15a4be8fe656914cf5b02ad1bec53cebceb/latex2mathml-3.81.1.tar.gz", hash = "sha256:c95add0c0fcdecad2d70567e0643050d5ea1149fb2e98a5d5792fb1c8eea2ed5", size = 77475, upload-time = "2026-09-07T19:55:11.037Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/30/b8bcfb01a2514cb7554a048ed52883de276e66d757c3cc535a3c29eb9e98/latex2mathml-3.81.1-py3-none-any.whl", hash = "sha256:c337668441b71c819b6733905a8058ba9a9d767bae11a0c5fdacb3aff31361bd", size = 79159, upload-time = "2026-09-07T19:55:09.611Z" },
 ]
 
 [[package]]
@@ -147,17 +138,12 @@ wheels = [
 
 [[package]]
 name = "python-hwpx"
-version = "6.6.0"
+version = "7.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lxml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8f/64/bbbbd6468e13f76ffa148ba68f1efa5382ae2f79c1e8f597800f7c17efa2/python_hwpx-6.6.0.tar.gz", hash = "sha256:3dbeb1e183e163e57272adda3844e4324ed7128f7312525a7a99489c19a0d7ad", size = 1328103, upload-time = "2026-09-27T15:40:25.549Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6c/05/3fd199d341d35385182542d2d2e0c710d043edba870d16c4243a61a8aca9/python_hwpx-7.0.0.tar.gz", hash = "sha256:48a05bbefcdb6fff73b9650c1e835b0b7fe5417f17190129978b748c754f0eee", size = 1481270, upload-time = "2026-11-20T17:31:34.408Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/a1/b7b295f7fe02ed3ac9fc2fe59b3658623eb8e8cdc8e0207d2b26428a4d2f/python_hwpx-6.6.0-py3-none-any.whl", hash = "sha256:382081817486df356fbc85b14639ef757a597585a4fecb51152653085475ff1c", size = 904616, upload-time = "2026-09-27T15:40:23.357Z" },
-]
-
-[package.optional-dependencies]
-preview = [
-    { name = "latex2mathml" },
+    { url = "https://files.pythonhosted.org/packages/70/ca/11e559e568e645ef0e91c77ebc00b8655b047dee92738e5abe8b8499a6ce/python_hwpx-7.0.0-py3-none-any.whl", hash = "sha256:9dcb2fe77298284fd6593e71a8092ee032d50801b31f9f30791ef0ceeefc968d", size = 1576401, upload-time = "2026-11-20T17:31:32.383Z" },
 ]
