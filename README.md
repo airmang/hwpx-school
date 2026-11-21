@@ -1,48 +1,83 @@
-# hwpx-school
+<p align="center">
+  <h1 align="center">hwpx-school</h1>
+  <p align="center">
+    <strong>학교 문서를 마크다운 원고 한 장에서 학교 서식 그대로의 한/글(HWPX) 문서로</strong>
+  </p>
+  <p align="center">
+    <a href="https://github.com/airmang/hwpx-school/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a>
+    <a href="https://github.com/airmang/python-hwpx"><img src="https://img.shields.io/badge/engine-python--hwpx%207.0-blue" alt="python-hwpx 7.0"></a>
+    <a href="https://github.com/airmang/python-hwpx-automation"><img src="https://img.shields.io/badge/automation-8.0-blue" alt="python-hwpx-automation 8.0"></a>
+  </p>
+  <p align="center">
+    <a href="skills/exam/references/문법.md">원고 문법</a>
+    · <a href="skills/exam/references/학교-등록.md">학교 등록</a>
+    · <a href="exam/README.md">시험지 엔진</a>
+  </p>
+</p>
 
-학교 문서를 마크다운 원고 한 장에서 한글(HWPX)로 만듭니다. 학교 서식 파일 그대로 위에 조판하고, 실제 한글로 렌더해
-배치를 확인합니다. [python-hwpx](https://github.com/airmang/python-hwpx) 7.0(엔진)과
+시험지(지필평가 원안지), 학습지, 수행평가 문제지, 보고서·계획서를 만듭니다. 원고는 마크다운으로 쓰고, 조판은 학교가 쓰는
+서식 파일 위에 그대로 합니다. 다 만든 뒤에는 실제 한/글로 렌더해 단과 쪽 배치를 확인합니다.
+[python-hwpx](https://github.com/airmang/python-hwpx) 7.0(엔진)과
 [python-hwpx-automation](https://github.com/airmang/python-hwpx-automation) 8.0(미리보기·렌더·시험지·보고서 조립) 위에서 동작합니다.
+
+<p align="center">
+  <img src="docs/assets/exam-synthetic.png" width="560" alt="합성 서식에 6문항을 조판한 시험지를 한/글이 그린 쪽. 머리 칸, 유의 사항, 보기 상자, 자료 표, 두 단 배치가 있다">
+</p>
+<p align="center"><sub>저장소에 든 합성 서식에 6문항 원고를 조판하고 한컴오피스 12.30.0으로 렌더한 문항지. 아래 「시작하기」의 명령으로 나오는 결과입니다.</sub></p>
+
+## 만드는 문서
 
 | 문서 | 폴더 | 할 수 있는 것 |
 |---|---|---|
-| 지필평가 원안지 | `exam/` | 학교 서식 그대로 문항지·답 표시본(정답 형광펜) 두 판. 〈보기〉·〈조건〉·자료 박스, 표, 그림, 코드, 인라인 수식(`$LaTeX$`), 세트 문항, 짝짓기 답항표. 렌더로 단·쪽 배치를 굳히고 [기계] 검사 보고서를 씁니다 |
-| 학습지 | `worksheet/` | hwpx·docx. 머리띠·확인도장·블록 10종 |
-| 수행평가 문제지 | `assessment/` | 학생용·정답용(정답은 메모) 두 파일 |
-| 보고서·계획서 | `report/` | 장 제목 띠(색 칠한 번호 칸)·제목표·□ㅇ-※ 위계를 견본 서식 그대로. 자기 학교·교육청 문서로 견본을 만들면 그 서식으로 나옵니다 |
+| 지필평가 원안지 | `exam/` | 학교 서식 그대로 문항지와 답 표시본(정답 형광펜) 두 판. 〈보기〉·〈조건〉·자료 상자, 표, 그림, 코드, 인라인 수식(`$LaTeX$`), 세트 문항, 짝짓기 답항표. 렌더로 단·쪽 배치를 굳히고 [기계] 검사 보고서를 씁니다 |
+| 학습지 | `worksheet/` | hwpx와 docx. 머리띠, 확인 도장, 블록 10종 |
+| 수행평가 문제지 | `assessment/` | 학생용과 정답용(정답은 메모) 두 파일 |
+| 보고서·계획서 | `report/` | 장 제목 띠(색 칠한 번호 칸), 제목표, □ㅇ-※ 위계를 견본 서식 그대로. 자기 학교·교육청 문서로 견본을 만들면 그 서식으로 나옵니다 |
 
 ## 시작하기
 
 Python 3.13과 [uv](https://docs.astral.sh/uv/)가 필요합니다. 배치 확인(렌더)에는 한컴오피스 한글(Windows 또는 macOS)이 필요합니다.
 
-    git clone https://github.com/airmang/hwpx-school
-    cd hwpx-school/exam
-    uv run pytest -q -m "not render"     # 한글 없이 — 합성 서식·합성 킷으로 엔진 확인
-    uv run python -W ignore -m exam_kit.build tests/fixtures/합성서식_6문항.md \
-        --kit kits/synthetic --form kits/synthetic/synthetic_form.hwpx --out ~/hwpx-school-예시   # 한글 렌더까지
+```bash
+git clone https://github.com/airmang/hwpx-school
+cd hwpx-school/exam
+uv run pytest -q -m "not render"     # 한글 없이 — 합성 서식·합성 킷으로 엔진 확인
+uv run python -W ignore -m exam_kit.build tests/fixtures/합성서식_6문항.md \
+    --kit kits/synthetic --form kits/synthetic/synthetic_form.hwpx --out ~/hwpx-school-예시   # 한글 렌더까지
+```
 
-한/글에서 이미 만든 원안지(`.hwp`·`.hwpx`)는 원고로 되돌릴 수 있습니다 — `uv run python -m exam_kit.reverse <원안지> --kit <학교 킷> --out <폴더>/원고.md`. 서술형·논술형은 원본 모양 그대로 보존 블록으로 옮겨 심습니다.
+한/글로 이미 만든 원안지(`.hwp`·`.hwpx`)는 원고로 되돌릴 수 있습니다:
+`uv run python -m exam_kit.reverse <원안지> --kit <학교 킷> --out <폴더>/원고.md`. 서술형·논술형은 원본 모양 그대로
+보존 블록으로 옮겨 심습니다.
 
-학습지·수행평가는 `worksheet/`·`assessment/`에서 `uv run --python 3.13 pytest -q`로 시작합니다. 폴더마다 독립 프로젝트입니다.
+학습지와 수행평가는 `worksheet/`·`assessment/`에서 `uv run --python 3.13 pytest -q`로 시작합니다. 폴더마다 독립된
+프로젝트입니다.
 
 ## 학교 양식
 
-학교마다 다른 양식은 각자 자기 PC에 만드는 **학교 킷**이 갖습니다. 이 저장소에는 학교 무관 엔진, 범용 스킬, 합성
-씨앗 킷과 합성 테스트만 있습니다. 새 학교 원안지는 빈 서식 한 장으로 등록합니다 —
-[학교 등록](skills/exam/references/학교-등록.md).
+학교마다 다른 양식은 각자 자기 PC에 만드는 **학교 킷**이 갖습니다. 이 저장소에는 학교와 무관한 엔진, 범용 스킬, 합성 씨앗
+킷과 합성 시험만 들어 있습니다. 새 학교의 원안지는 빈 서식 한 장으로 등록합니다. 방법은
+[학교 등록](skills/exam/references/학교-등록.md)에 있습니다.
 
 ## AI 에이전트와 쓰기
 
-`skills/`의 `SKILL.md`(exam·worksheet·assessment·report)를 Claude 같은 에이전트에 주면, 에이전트가 원고를 쓰고 조판·검사를
-돌립니다. 원고 문법은 [문법](skills/exam/references/문법.md)에 있습니다.
+Claude Code나 Codex에서 이 저장소를 열고 `skills/`의 `SKILL.md`(exam·worksheet·assessment·report)를 읽게 하면, 에이전트가
+원고를 쓰고 조판과 검사를 돌립니다. 원고 문법은 [문법](skills/exam/references/문법.md)에 있습니다.
 
-검사 결과는 "기계 잔존 N"일 뿐입니다. 시험지로 내기 전에 교사가 직접 확인합니다.
+한/글 문서를 다루는 일반 도구(읽기, 편집, 양식 채우기)까지 함께 쓰려면 python-hwpx-automation의 플러그인을 설치합니다.
+
+```bash
+claude plugin marketplace add airmang/python-hwpx-automation && claude plugin install hwpx-plugin@hwpx
+codex plugin marketplace add airmang/python-hwpx-automation && codex plugin add hwpx-plugin@hwpx
+```
+
+검사 결과는 "기계 잔존 N"일 뿐입니다. 시험지로 내기 전에는 교사가 직접 확인합니다.
 
 ## 아직 안 되는 것
 
-- 서술형·논술형 블록을 원고에서 조판하기(지금은 원본 그대로 옮겨 심는다)
-- 가정통신문·공문(기안) 등 다른 학교 문서
-- 보고서의 표 데이터 행 늘리기, 로고 같은 그림이 든 견본 역할
+- 서술형·논술형 블록을 원고에서 조판하기(지금은 원본 그대로 옮겨 심습니다)
+- 가정통신문·공문(기안) 같은 다른 학교 문서
+- 보고서 표의 데이터 행 늘리기, 로고 같은 그림이 든 견본 역할
 
 ## 라이선스
 
