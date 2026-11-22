@@ -911,7 +911,10 @@ class _Composer:
         content = next(x.cell for x in src.iter_grid() if x.is_anchor and (x.column, x.row) == (cc, cr))
         in_m = src.in_margins
         content_w = widths.get((cr, cc), content.width)
-        first, rest = self._widths(role, content_w - int(in_m.left or 0) - int(in_m.right or 0))
+        inner = content_w - int(in_m.left or 0) - int(in_m.right or 0)
+        first, rest = self._widths(role, inner)
+        # 표·그림 줄은 여백·들여쓰기 0인 가운데 정렬 문단(cell_pr)에 앉는다 — 글 문단의 첫 줄 폭이 아니라 칸 안 폭 전부를 쓴다
+        # (박스 글 스타일에 왼여백·들여쓰기가 있는 서식에서 그림이 실제보다 좁은 자리로 재여 멈추던 것)
         pitch = self._line_pitch(role)
         _, pid, _ = self.style[role]
         h = 0  # 글 줄 높이 합 — 개체 줄(개체 높이 + 바깥 여백 + (피치 − 글자 높이))은 짓고 나서 더한다
@@ -936,7 +939,7 @@ class _Composer:
                 items.append(("글", self._plan_cell(self._segs(part, role), role,
                                                     pid=self.item_pr() if block.kind in _항목_박스 else pid)))
                 continue
-            obj = self.grid(part, first, f"L{block.line_no} :::자료 안의") if kind == "표" else self.picture(part, first)
+            obj = self.grid(part, inner, f"L{block.line_no} :::자료 안의") if kind == "표" else self.picture(part, inner)
             items.append(("개체", self._plan_cell([("", None)], role, pid=self.cell_pr(role)), obj))
         if not items:
             raise ValueError(f"L{block.line_no} :::{block.kind} 내용이 비었다")
