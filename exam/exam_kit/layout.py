@@ -55,7 +55,7 @@ from .geometry import (
 from .kit import Kit, save_stamped, style_ids
 from .render import RenderResult, render
 from .scan import Scan
-from .slots import fill_total_pages, read_total_pages
+from .slots import fill_total_pages, pages_filled, read_total_pages
 from .verify import question_heads
 
 GAPS = ("fixed", "distribute")
@@ -422,14 +422,16 @@ class _Loop:
         page_top = {c.page: c.top for p in lay for c in p.columns}
         # 단 맨 위 묶음의 윗끝 = 본문 상단 + 글리프 여백 + 위 간격(이 렌더에서는 아직 있다 — ③이 뒤에 뺀다, 그만큼 여유)
         lead = 2.0 + self.kit.question_gap / 100.0
-        other_top = page_top.get(2, page_top.get(1)) + lead
+        fp = self.kit.front_pages  # 결재란만 있는 앞쪽 — 본문 첫 쪽은 fp + 1
+        other_top = page_top.get(fp + 2, page_top.get(fp + 1)) + lead
         limit, tail_limit = body_bottom(self.kit) - DIST_SAFETY, _limit(self.kit)
 
         def top(j: int) -> float:
             if j == 0:
                 return first_top
-            p = j // 2 + 1
-            return (page_top[p] + lead) if p in page_top and p > 1 else (page_top[1] + lead if p == 1 else other_top)
+            p = j // 2 + 1 + fp
+            return ((page_top[p] + lead) if p in page_top and p > fp + 1
+                    else (page_top[fp + 1] + lead if p == fp + 1 else other_top))
 
         return pack_columns(h, gap, top, limit, tail_limit, brk)
 
@@ -456,7 +458,7 @@ class _Loop:
                 if n == 0:  # 잴 수 없거나 담을 수 없다 — 아직 박은 것이 없다
                     return rr, lay
                 break  # 앞 회차에 박은 나눔이 있다 — 되돌린다
-            want = [(j // 2 + 1, j % 2 + 1) for j in plan]
+            want = [(j // 2 + 1 + self.kit.front_pages, j % 2 + 1) for j in plan]
             if head_places(lay) == want:
                 return rr, lay
             if not self.apply_columns(plan):
@@ -669,11 +671,12 @@ def settle(doc: HwpxDocument, kit: Kit, hwpx: Path, out_dir: Path, *, gap: str =
     rr, lay = loop.zero_tops(rr, lay)   # 꼬리 때문에 새 쪽으로 넘긴 문항도 맨 위 간격 0
     if gap == "distribute":
         rr, lay = loop.distribute(rr, lay, rounds)
-    if read_total_pages(doc, kit) != str(rr.page_count):
-        pages = rr.page_count
+    if not pages_filled(doc, kit, rr.page_count - kit.front_pages):
+        rendered = rr.page_count
+        pages = rendered - kit.front_pages  # 결재란만 있는 앞쪽(kit.front_pages)은 쪽 번호에 들지 않는다
         fill_total_pages(doc, kit, pages)
         rr, lay = loop.render()
-        if rr.page_count != pages:
+        if rr.page_count != rendered:
             loop.notes.append(f"총쪽수를 {pages}로 채웠더니 렌더 쪽수가 {rr.page_count}로 바뀌었다")
     left = splits(rr.pdf, kit)  # 최종 렌더 재검사
     if left:

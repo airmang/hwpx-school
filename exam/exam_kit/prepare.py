@@ -16,8 +16,8 @@ from hwpx.document import HwpxDocument
 from hwpx.errors import HwpxValueError
 
 from . import q
-from .kit import Kit, open_seeded, sha256, style_ids
-from .read import is_blank as _blank, nested_raw as _ptext, table_paragraphs as _table_paragraphs, table_text as _table_text
+from .kit import Kit, admin_paragraphs, admin_tables, open_seeded, sha256, style_ids
+from .read import tree, is_blank as _blank, nested_raw as _ptext, table_paragraphs as _table_paragraphs, table_text as _table_text
 
 
 
@@ -49,6 +49,11 @@ def _find(paras, pred, *, what: str) -> int:
     raise ValueError(f"양식에서 찾지 못함: {what}")
 
 
+def sample_role(spec: dict) -> str:
+    """견본 박스를 알아볼 스타일 역할 — 킷 boxes 항목의 sample_style(견본 안 문단이 채울 스타일과 다른 서식), 없으면 style."""
+    return spec.get("sample_style", spec["style"])
+
+
 def is_sample_table(table, spec: dict, style_id: str) -> bool:
     """양식 샘플 구역의 견본 박스 표인가 — 킷 boxes 한 항목(제목·표 모양·내용 스타일)으로 본다."""
     text = _table_text(table)
@@ -75,10 +80,23 @@ def _replace_text(paragraph, old: str, new: str) -> int:
     return n
 
 
+def _replace_range(paragraph, old: str, new: str) -> int:
+    """문단 글(`paragraph.text`)에서 old를 지우고 new를 넣는다(본체 delete_range·insert_text) — old만 덮던 형광펜은
+    지우기와 함께 비어 사라진다. 킷 admin.unmark(서식이 고칠 자리를 형광펜으로 표시한 학교)."""
+    n = 0
+    while old and (i := paragraph.text.find(old)) >= 0:
+        pr = next((r.char_pr_id_ref for r in paragraph.runs if r.text), None)
+        paragraph.delete_range(i, i + len(old))
+        if new:
+            paragraph.insert_text(i, new, **({"char_pr_id_ref": pr} if pr is not None else {}))
+        n += 1
+    return n
+
+
 def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
     a = kit.admin
     p0 = doc.sections[0].paragraphs[a["paragraph"]]
-    규격표 = [t for t in p0.tables if any(w in _table_text(t) for w in a["delete_tables_with"])]
+    규격표 = [t for t in admin_tables(doc, kit) if any(w in _table_text(t) for w in a["delete_tables_with"])]
     for t in 규격표:
         # 결재란·유의·규격표 세 표가 run 하나를 공유한다(실측) — 표 하나만 문단에서 뗀다(한/글처럼 비게 된 run은 함께 간다,
         # B4 승인 2026-11-17).
@@ -87,7 +105,7 @@ def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
     # 기억한다. 한글은 이 캐시를 믿어 표를 지운 뒤에도 그만큼 비워 둔다(Task 22 렌더 실측: 1번 문항이
     # 제출본보다 약 1.5줄 아래). 캐시를 지우면 한글이 다시 잰다.
     p0.clear_layout_cache()
-    유의 = next(t for t in p0.tables if a["notice_table_with"] in _table_text(t))
+    유의 = next(t for t in admin_tables(doc, kit) if a["notice_table_with"] in _table_text(t))
     # 유의의 셀 하나에 머리말·꼬리말 ctrl이 통째로 박혀 있다(정정 1 실측): 그 ctrl 안에는 머리말/꼬리말 자기
     # 레이아웃용 중첩 표가 따로 있으므로, 유의 안의 편집은 유의 자신의 행·칸과 각 칸의 문단으로만 한정한다 —
     # 문단 하나가 누름틀도 품고 있어 컨트롤 유무로는 못 거르므로, 머리말·꼬리말이 있는 문단만 건드리지 않는다.
@@ -101,6 +119,9 @@ def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
                     continue
                 if any(w in _ptext([p]) for w in 지울):
                     p.remove()
+                elif a.get("unmark"):
+                    for old, new in a["notice_replace"]:
+                        _replace_range(p, old, new)
                 else:
                     for old, new in a["notice_replace"]:
                         _replace_text(p, old, new)
@@ -173,8 +194,12 @@ def _header_footer_xml(doc: HwpxDocument) -> tuple[str, ...]:
     return tuple(ET.tostring(el, encoding="unicode") for t in ("header", "footer") for el in sec.iter(q("hp", t)))
 
 
-def _form_bindata(doc: HwpxDocument) -> tuple[tuple[str, str], ...]:
-    return tuple((it.item_id, it.href) for it in doc.media.images if it.href.startswith("BinData/"))
+def _form_bindata(doc: HwpxDocument, kit: Kit) -> tuple[tuple[str, str], ...]:
+    """조판 뒤 지울 양식 원본 이미지 — 관리 구역(결재표·제목표의 학교 로고 등)에서 쓰는 그림은 양식의 일부라 남긴다."""
+    keep = {pl.object.item_id for p in admin_paragraphs(doc, kit) for q_ in tree(p)
+            for pl in q_.iter_objects(kinds="picture")}
+    return tuple((it.item_id, it.href) for it in doc.media.images
+                 if it.href.startswith("BinData/") and it.item_id not in keep)
 
 
 def _check_form(doc: HwpxDocument, kit: Kit) -> None:
@@ -190,9 +215,9 @@ def _check_form(doc: HwpxDocument, kit: Kit) -> None:
         if fid not in ids:
             실패.append(f"누름틀 없음: {slot}")
     paras = list(doc.sections[0].paragraphs)
-    tables = [t for p in paras[1:] for t in p.tables]
+    tables = [t for p in paras[kit.admin["paragraph"] + 1:] for t in p.tables]  # 관리 구역 뒤의 표
     for kind, spec in kit.boxes.items():
-        if kind in ("보기", "자료") and not any(is_sample_table(t, spec, sids[kit.styles[spec["style"]]][0]) for t in tables):
+        if kind in ("보기", "자료") and not any(is_sample_table(t, spec, sids[kit.styles[sample_role(spec)]][0]) for t in tables):
             실패.append(f"〈{kind}〉 견본 표 없음" if kind == "보기" else f"{kind} 견본 표 없음")
     box_styles = {sids[kit.styles[kit.boxes[k]["style"]]][0] for k in ("보기", "자료")}
     if kit.box_min_height is not None:  # 견본 박스 내용 셀 높이 = kit.box_min_height(박스 최소 높이의 출처)
@@ -227,7 +252,7 @@ def _trim_start(paras, kit: Kit) -> int | None:
     """지울 구역(논술형 샘플 ~ 꼬리 앞)의 첫 문단 — 킷 trim 규칙."""
     rule = kit.trim["rule"]
     for i, p in enumerate(paras):
-        if i == 0:
+        if i <= kit.admin["paragraph"]:  # 관리 구역은 지울 구역이 아니다
             continue
         if rule == "first_page_break" and p.page_break:
             return i
@@ -277,7 +302,7 @@ def prepare_form(doc: HwpxDocument, kit: Kit) -> Prepared:
         raise ValueError("관리박스 정리가 머리말/꼬리말을 건드렸다")
     n = _trim_body(doc, kit)
     pin_tailbox(doc.sections[0].paragraphs[-1], kit)
-    return Prepared(removed=n, form_bindata=_form_bindata(doc), header_footer=hf)
+    return Prepared(removed=n, form_bindata=_form_bindata(doc, kit), header_footer=hf)
 
 
 def prepare_document(form: Path, kit: Kit) -> tuple[HwpxDocument, Prepared]:

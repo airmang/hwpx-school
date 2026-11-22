@@ -128,6 +128,11 @@ def _paragraph_cells(paragraph) -> int:
     return n
 
 
+
+def _body_columns(cols):
+    """본문 단 정의 — 단 수가 가장 많은 것(같으면 먼저 나온 것). 머리만 1단으로 두고 본문을 2단으로 여는 서식이 있다."""
+    return max(cols, key=lambda c: c.count) if cols else None
+
 class Form:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -169,11 +174,13 @@ class Form:
     def _page(self) -> list[str]:
         size, m = self.doc.page.size(section=0), self.doc.page.margins(section=0)
         cols = self.doc.page.columns(section=0)
-        col = cols[0] if cols else None
+        단 = [f"- 단 {c.count}단 {c.type} · 단 사이 {c.gap}" for c in cols] or ["- 단 정보 없음"]
+        if len(cols) > 1:  # 머리(결재란·제목) 1단 뒤에 본문 2단을 여는 서식 — 본문 단은 단 수가 가장 많은 정의
+            단[-1] += f" (단 정의 {len(cols)}개 — 본문 단 후보: {_body_columns(cols).count}단)"
         return ["## 용지·단", f"- sha256 `{sha256(self.path)}`",
                 f"- 용지 {size.width} × {size.height} (landscape 속성 `{size.orientation}`)",
                 "- 여백 " + " · ".join(f"{k} {getattr(m, k)}" for k in ("left", "right", "top", "bottom", "header", "footer")),
-                f"- 단 {col.count}단 {col.type} · 단 사이 {col.gap}" if col is not None else "- 단 정보 없음",
+                *단,
                 f"- 한글 글꼴: {', '.join(self.fonts.values())}", ""]
 
     def _para_parts(self, s):
@@ -299,7 +306,7 @@ def draft_kit(path: Path, name: str) -> dict:
     f = Form(path)
     size, margins = f.doc.page.size(section=0), f.doc.page.margins(section=0)
     m = {k: getattr(margins, k) for k in ("top", "bottom", "left", "right", "header", "footer")}
-    col = f.doc.page.columns(section=0)[0]
+    col = _body_columns(f.doc.page.columns(section=0))
     n, gap = col.count, col.gap or 0
     width = (size.width - m["left"] - m["right"] - gap * (n - 1)) // n
     return {

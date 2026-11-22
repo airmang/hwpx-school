@@ -11,7 +11,7 @@ from hwpx.document import HwpxDocument
 from hwpx.errors import HwpxValueError
 
 from .frontmatter import FrontMatter
-from .kit import Kit
+from .kit import Kit, admin_tables
 from .read import t_text, table_paragraphs
 
 _빨강 = "#FF0000"
@@ -106,8 +106,7 @@ def slot_values(fm: FrontMatter, *, question_count: int, total_points: float, pa
 
 
 def _fill_teacher(doc: HwpxDocument, kit: Kit, name: str) -> None:
-    p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]]
-    결재란 = next(t for t in p0.tables if kit.teacher_cell["label"] in t_text(table_paragraphs(t)))
+    결재란 = next(t for t in admin_tables(doc, kit) if kit.teacher_cell["label"] in t_text(table_paragraphs(t)))
     cell = next(c for row in 결재란.rows for c in row.cells if kit.teacher_cell["label"] in t_text(c.paragraphs))
     ps = list(cell.paragraphs)
     if len(ps) < 2:
@@ -123,16 +122,17 @@ def _fill_teacher(doc: HwpxDocument, kit: Kit, name: str) -> None:
 # ---- 글자 자리 슬롯 -------------------------------------------------------------
 
 def _slot_paragraphs(doc: HwpxDocument, kit: Kit, where: dict) -> list:
-    """슬롯 위치 → 문단(공개 Paragraph). admin_table_with+cell(+para) · notice · footer_with."""
-    p0 = doc.sections[0].paragraphs[kit.admin["paragraph"]]
+    """슬롯 위치 → 문단(공개 Paragraph). admin_table_with+cell(+para) · notice · footer_with.
+    표는 관리 구역(문단 0 ~ admin.paragraph)의 최상위 표에서 찾는다."""
+    tables = admin_tables(doc, kit)
     if "admin_table_with" in where:
-        tbl = next(t for t in p0.tables if where["admin_table_with"] in t_text(table_paragraphs(t)))
+        tbl = next(t for t in tables if where["admin_table_with"] in t_text(table_paragraphs(t)))
         row, col = where["cell"]
         tc = next(c for r in tbl.rows for c in r.cells if c.address == (row, col))
         ps = list(tc.paragraphs)
         return [ps[where["para"]]] if "para" in where else ps
     if where.get("notice"):
-        tbl = next(t for t in p0.tables if kit.admin["notice_table_with"] in t_text(table_paragraphs(t)))
+        tbl = next(t for t in tables if kit.admin["notice_table_with"] in t_text(table_paragraphs(t)))
         return [p for tr in tbl.rows for tc in tr.cells for p in tc.paragraphs]
     if "footer_with" in where:
         # 한/글이 읽는 꼬리말(컨트롤 안 이야기)만 — 6.x가 구역 설정 안에 남긴 사본은 한/글이 읽지 않는다(본체 문서).
@@ -218,7 +218,7 @@ def _check_replaceable(p, a: int, b: int) -> None:
                     "찾을 글(find)이 컨트롤·개체를 비켜 가게 킷을 고친다.", kinds=안쪽)
 
 
-def replace_across(p, rx: re.Pattern, new: str) -> bool:
+def replace_across(p, rx: re.Pattern, new: str, *, unmark: bool = False) -> bool:
     """문단의 실제 글(`paragraph.text` — 탭·줄 바꿈 포함)에서 rx를 한 번 찾아 new로 바꾼다. 바뀐 글은 찾은 자리가
     시작하는 런의 글자 모양으로 그 자리에 들어가고, 찾은 글은 지운다(본체 insert_text·delete_range). 못 찾으면 False.
 
@@ -229,9 +229,16 @@ def replace_across(p, rx: re.Pattern, new: str) -> bool:
         return False
     a, b = m.span()
     _check_replaceable(p, a, b)
+    run = _run_at(p, a)
+    pr = {"char_pr_id_ref": run.char_pr_id_ref} if run is not None else {}
+    if unmark and b > a:
+        # 지우고 넣는다 — 찾은 글만 덮던 형광펜(서식의 '고칠 자리' 표시)은 지우기와 함께 비어 사라진다(본체 delete_range)
+        p.delete_range(a, b)
+        if new:
+            p.insert_text(a, new, **pr)
+        return True
     if new:
-        run = _run_at(p, a)
-        p.insert_text(a, new, **({"char_pr_id_ref": run.char_pr_id_ref} if run is not None else {}))
+        p.insert_text(a, new, **pr)
     if b > a:
         p.delete_range(a + len(new), b + len(new))
     return True
@@ -260,7 +267,8 @@ def fill_text_slots(doc: HwpxDocument, kit: Kit, fm: FrontMatter, values: dict[s
             continue
         rx = re.compile(slot["find"])
         # 위치 안에서 맞는 문단은 모두 바꾼다 — 같은 꼬리말이 두 벌(secPr 안·컨트롤 안) 적힌 서식도 있다
-        hits = [replace_across(p, rx, new) for p in _slot_paragraphs(doc, kit, slot["where"])]
+        hits = [replace_across(p, rx, new, unmark=kit.admin.get("unmark", False))
+                for p in _slot_paragraphs(doc, kit, slot["where"])]
         if not any(hits):
             raise ValueError(f"양식이 바뀌었다: 글자 자리 슬롯 {slot['name']!r}의 {slot['find']!r}가 {slot['where']}에 없다")
     doc.sections[0].mark_dirty()
@@ -304,12 +312,18 @@ def read_text_slots(doc: HwpxDocument, kit: Kit) -> dict[str, str]:
 
 
 def _text_values(fm: FrontMatter, *, question_count: int, total_points: float, page_count: int | None) -> dict:
-    시행 = fm.시행_분해()
+    시행, 대상, 인쇄 = fm.시행_분해(), fm.대상_분해(), fm.인쇄_분해()
     return {"학년도": str(fm.학년도), "학년": str(fm.학년), "학기": str(fm.학기), "차": str(fm.차), "과목": fm.과목,
             # 미정(초안)은 자리표시를 그대로 찍는다 — 양식의 예시 값이 진짜 값처럼 남지 않게
             "월": 시행["월"] or "__", "일": 시행["일"] or "__", "요일": 시행["요일"] or "_", "교시": 시행["교시"] or "_",
             "만점": _fmt_points(fm.만점), "선택형_만점": _fmt_points(total_points), "문항수": str(question_count),
-            "총쪽수": None if page_count is None else str(page_count)}
+            "총쪽수": None if page_count is None else str(page_count),
+            # 양면 인쇄 장 수 = ⌈면 수 ÷ 2⌉ (유의 상자 '시험지 - ○장 ○면')
+            "양면장수": None if page_count is None else str((page_count + 1) // 2),
+            # 결재란·제목 칸의 선택 머리 값(원고에 그 키가 없으면 미확정 — 그 슬롯은 건드리지 않는다)
+            "과목코드": fm.과목코드, "반_시작": 대상["반_시작"] or "_", "반_끝": 대상["반_끝"] or "_",
+            "인쇄매수": 인쇄["인쇄매수"] or "__", "묶음": 인쇄["묶음"] or "_",
+            "인쇄합계": (str(int(인쇄["인쇄매수"]) * int(인쇄["묶음"])) if 인쇄["인쇄매수"] and 인쇄["묶음"] else "__")}
 
 
 def read_total_pages(doc: HwpxDocument, kit: Kit) -> str:
@@ -351,14 +365,41 @@ def fill_slots(doc: HwpxDocument, kit: Kit, fm: FrontMatter, *, question_count: 
     return 채움
 
 
+def _page_slots(kit: Kit) -> list[dict]:
+    """'총쪽수' 말고 쪽 수에만 기대는 글자 자리 — 틀에 {총쪽수}·{양면장수}만 쓴 슬롯."""
+    out = []
+    for slot in kit.text_slots:
+        keys = set(re.findall(r"{(\w+)}", slot["fill"]))
+        if slot["name"] != "총쪽수" and keys and keys <= {"총쪽수", "양면장수"}:
+            out.append(slot)
+    return out
+
+
+def pages_filled(doc: HwpxDocument, kit: Kit, pages: int) -> bool:
+    """쪽 수 자리가 모두 pages로 채워져 있나 — 총쪽수(누름틀·글자 자리)와 쪽 수에 기대는 다른 글자 자리."""
+    if read_total_pages(doc, kit) != str(pages):
+        return False
+    쪽값 = {"총쪽수": str(pages), "양면장수": str((pages + 1) // 2)}
+    for slot in _page_slots(kit):
+        want = slot["fill"].format(**쪽값)
+        rx = re.compile(slot["find"])
+        if not any((m := rx.search(p.text)) and m.group(0) == want for p in _slot_paragraphs(doc, kit, slot["where"])):
+            return False
+    return True
+
+
 def fill_total_pages(doc: HwpxDocument, kit: Kit, pages: int) -> None:
     """총쪽수만 다시 채운다 — 렌더로 쪽수가 확정된 뒤(layout.settle). 누름틀 또는 글자 자리 슬롯."""
     if "총쪽수" not in kit.slots:
-        slot = next(s for s in kit.text_slots if s["name"] == "총쪽수")
-        rx = re.compile(slot["find"])
-        new = slot["fill"].format(총쪽수=str(pages))
-        if not any([replace_across(p, rx, new) for p in _slot_paragraphs(doc, kit, slot["where"])]):
-            raise ValueError(f"총쪽수 글자 자리 {slot['find']!r}가 {slot['where']}에 없다")
+        # 쪽 수에 기대는 글자 자리 전부 — '총쪽수' 슬롯과, 틀에 {총쪽수}·{양면장수}를 쓴 슬롯(유의 상자 '○장 ○면' 등)
+        쪽값 = {"총쪽수": str(pages), "양면장수": str((pages + 1) // 2)}
+        for slot in [s for s in kit.text_slots if s["name"] == "총쪽수"] + _page_slots(kit):
+            keys = set(re.findall(r"{(\w+)}", slot["fill"]))
+            rx = re.compile(slot["find"])
+            new = slot["fill"].format(**{k: 쪽값[k] for k in keys})
+            if not any([replace_across(p, rx, new, unmark=kit.admin.get("unmark", False))
+                        for p in _slot_paragraphs(doc, kit, slot["where"])]):
+                raise ValueError(f"{slot['name']} 글자 자리 {slot['find']!r}가 {slot['where']}에 없다")
         doc.sections[0].mark_dirty()
         return
     fid = kit.slots["총쪽수"]
