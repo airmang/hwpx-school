@@ -174,6 +174,66 @@ def check_package(hwpx: Path) -> None:
         raise ValueError(f"한컴에 넘길 수 없는 hwpx: {hwpx} — {e}") from e
 
 
+_쪽_크기_허용 = 1.0  # pt — PDF 쪽이 hwpx 용지와 이만큼 넘게 다르면 맞춰 줄여 인쇄된 것으로 본다
+
+
+def hwpx_paper(hwpx: Path) -> tuple[float, float] | None:
+    """hwpx 첫 구역의 용지 (폭, 높이) pt — section0.xml 첫 pagePr(HWPUNIT ÷ 100). 없으면 None."""
+    import re
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(hwpx) as z:
+            xml = z.read("Contents/section0.xml").decode("utf-8", "replace")
+    except (KeyError, zipfile.BadZipFile, OSError):
+        return None
+    m = re.search(r"<(?:\w+:)?pagePr\b[^>]*>", xml)
+    if not m:
+        return None
+    w = re.search(r'\swidth="(\d+)"', m.group(0))
+    h = re.search(r'\sheight="(\d+)"', m.group(0))
+    if not (w and h):
+        return None
+    return int(w.group(1)) / 100.0, int(h.group(1)) / 100.0
+
+
+def restore_paper(pdf: Path, paper: tuple[float, float]) -> bool:
+    """한컴이 문서를 다른 용지에 맞춰 줄여(예: B4 문서를 A4 PDF로) 저장한 PDF를 hwpx 용지 크기로 되돌린다(그 자리에서).
+
+    Windows 한컴의 PDF 저장은 인쇄 설정에 따라 문서를 다른 용지에 비율을 지켜 가운데 맞춰 넣는다(축소율 = 두 변 비 중 작은
+    것 — 11-22 Windows 실측: 728.5×1031.8pt 문서가 595×841pt PDF로, 축소 0.8151·좌우 여백 0.59pt). 엔진의 자리 판정(단 왼끝·
+    문항 머리·꼬리 박스)은 모두 킷의 용지 좌표라, 그 역변환(cm)을 쪽 내용 앞에 붙이고 쪽 상자를 용지 크기로 바꾼다.
+    모든 쪽이 이미 용지 크기면 손대지 않고 False. PDF 쪽과 가로·세로 방향이 다르면 용지의 두 변을 바꿔 맞춘다.
+    """
+    W, H = paper
+    pdf = Path(pdf)
+    tmp = pdf.with_name(pdf.stem + ".용지복원.pdf")
+    changed = False
+    with pymupdf.open(str(pdf)) as doc:
+        for page in doc:
+            r = page.mediabox
+            pw, ph = r.width, r.height
+            w, h = (W, H) if (pw >= ph) == (W >= H) else (H, W)
+            if abs(pw - w) <= _쪽_크기_허용 and abs(ph - h) <= _쪽_크기_허용:
+                continue
+            s = min(pw / w, ph / h)
+            ox, oy = (pw - w * s) / 2, (ph - h * s) / 2
+            page.clean_contents()
+            xrefs = page.get_contents()
+            body = b"\n".join(doc.xref_stream(x) for x in xrefs)
+            pre = f"q {1 / s:.6f} 0 0 {1 / s:.6f} {-(r.x0 + ox) / s:.4f} {-(r.y0 + oy) / s:.4f} cm\n".encode()
+            doc.update_stream(xrefs[0], pre + body + b"\nQ\n")
+            for x in xrefs[1:]:
+                doc.update_stream(x, b"")
+            page.set_mediabox(pymupdf.Rect(0, 0, w, h))
+            changed = True
+        if changed:
+            doc.save(str(tmp), garbage=1, deflate=True)
+    if changed:
+        tmp.replace(pdf)
+    return changed
+
+
 def render(hwpx: Path, out_dir: Path, *, oracle=None, dpi: int = 110, launch=launch_hancom) -> RenderResult:
     hwpx, out_dir = Path(hwpx), Path(out_dir)
     check_package(hwpx)
@@ -188,6 +248,9 @@ def render(hwpx: Path, out_dir: Path, *, oracle=None, dpi: int = 110, launch=lau
             got = o.render_pdf(str(hwpx.resolve()), str(pdf.resolve()))
     if not got or not pdf.exists():
         raise RenderUnavailable(f"렌더 실패: {hwpx}")
+    paper = hwpx_paper(hwpx)
+    if paper is not None:
+        restore_paper(pdf, paper)  # Windows 한컴이 다른 용지(A4)에 맞춰 줄여 저장했으면 hwpx 용지로 되돌린다
     pages: list[Path] = []
     with pymupdf.open(str(pdf)) as doc:
         page_count = doc.page_count
