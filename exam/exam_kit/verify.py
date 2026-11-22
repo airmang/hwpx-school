@@ -143,7 +143,7 @@ def verify_document(doc: HwpxDocument, kit: Kit, *, expect_answers: dict[str, st
                 fs.append(_f("M7a", f"빈 최상위 문단 (index {i})"))
     ids = style_ids(doc)
     allowed = {ids[n][0] for n in kit.styles.values() if n in ids}  # 킷 스타일 8종의 id
-    for i in range(1, tail):
+    for i in range(kit.admin["paragraph"] + 1, tail):  # 관리 구역(문단 0 ~ admin.paragraph) 뒤부터
         if inside(i, kept):
             continue
         sid = str(ps[i].style_id_ref or "0")
@@ -210,7 +210,8 @@ def _tail_box_findings(page, kit: Kit) -> list[Finding]:
     if box is None:
         return [_f("M10", f"꼬리 박스를 찾지 못했다 — 폭 {kit.tailbox['width'] / 100:.0f}pt 테두리선이 없다")]
     right_x0, _ = _right_column_x(kit)
-    if abs(box.x0 - right_x0) > 2.0:
+    om = kit.tailbox.get("outMargin", 0) / 100.0  # 바깥 여백이 사방에 있는 꼬리 표는 그만큼 들어가 그려진다(geometry.tail_box_rect)
+    if min(abs(box.x0 - right_x0), abs(box.x0 - right_x0 - om)) > 2.0:
         return [_f("M10", f"꼬리 박스가 왼쪽 단에 있다(오른쪽 단이 아니다) — {[round(v) for v in box]}")]
     fs = []
     top = tail_box_top(kit)
@@ -237,10 +238,11 @@ def verify_render(rr: RenderResult, doc: HwpxDocument, kit: Kit, *, expected_pag
     total = read_total_pages(doc, kit)
     if not total.isdigit():
         fs.append(_f("M10", f"총쪽수 누름틀이 채워지지 않았다: {total!r}"))
-    elif int(total) != rr.page_count:
-        fs.append(_f("M10", f"총쪽수 누름틀 {total} ≠ 렌더 쪽수 {rr.page_count}"))
+    elif int(total) != rr.page_count - kit.front_pages:
+        앞 = f" − 앞쪽 {kit.front_pages}" if kit.front_pages else ""
+        fs.append(_f("M10", f"총쪽수 누름틀 {total} ≠ 렌더 쪽수 {rr.page_count}{앞}"))
     layout = measure(rr.pdf, kit)
-    blank = [p.page for p in layout if p.blank]
+    blank = [p.page for p in layout if p.blank and p.page > kit.front_pages]  # 결재란만 있는 앞쪽은 본문 쪽이 아니다
     if blank:
         fs.append(_f("M10", f"본문이 없는 쪽: {blank}"))
     with pymupdf.open(str(rr.pdf)) as pdf:

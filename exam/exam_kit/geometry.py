@@ -213,13 +213,25 @@ def body_text_chars(page, kit: Kit, *, with_text: bool = False) -> list:
     곡선 글리프와 한 줄로 묶이도록 기준선(origin) 위 0.77em ~ 아래 0.14em(11pt면 8.5·1.5pt)으로 둔다.
     with_text면 (상자, 글자) 쌍.
     """
-    fonts = tuple(kit.render["text_fonts"])
-    out = [(pymupdf.Rect(ch["bbox"][0], ch["origin"][1] - sp["size"] * _위, ch["bbox"][2], ch["origin"][1] + sp["size"] * _아래),
-            ch["c"])
-           for b in page.get_text("rawdict")["blocks"] for ln in b.get("lines", [])
-           for sp in ln["spans"] if sp["font"].startswith(fonts)
-           for ch in sp["chars"] if ch["c"].strip()]
+    out = _font_chars(page, tuple(kit.render["text_fonts"]))
     return out if with_text else [r for r, _ in out]
+
+
+def _font_chars(page, fonts: tuple) -> list:
+    """텍스트 층에서 글꼴 이름이 fonts로 시작하는 글자 — (기준선 맞춘 상자, 글자)."""
+    if not fonts:
+        return []
+    return [(pymupdf.Rect(ch["bbox"][0], ch["origin"][1] - sp["size"] * _위, ch["bbox"][2], ch["origin"][1] + sp["size"] * _아래),
+             ch["c"])
+            for b in page.get_text("rawdict")["blocks"] for ln in b.get("lines", [])
+            for sp in ln["spans"] if sp["font"].startswith(fonts)
+            for ch in sp["chars"] if ch["c"].strip()]
+
+
+def head_chars(page, kit: Kit) -> list:
+    """본문은 곡선인데 문항 자동번호 `N.`만 텍스트 층으로 나가는 서식 — 킷 render.head_fonts 글꼴 글자(상자, 글자).
+    없으면 빈 목록(번호도 곡선 — 머리는 글리프 모양으로 판정)."""
+    return _font_chars(page, tuple(kit.render.get("head_fonts", ())))
 
 
 def column_lines(pdf: Path, kit: Kit, *, text: bool = False) -> list[Line]:
@@ -234,7 +246,10 @@ def column_lines(pdf: Path, kit: Kit, *, text: bool = False) -> list[Line]:
             if kit.render["glyphs"] == "text":  # 본문이 텍스트 층(학교 B) — 글자가 곧 글리프, 줄에 글도 담는다
                 gs = body_text_chars(page, kit, with_text=True)
             else:
-                gs = [(g, "") for g in glyphs(page) + (body_text_chars(page, kit) if text else [])]
+                heads = head_chars(page, kit)  # 번호만 텍스트 층이면 그 글자를 글과 함께 — is_head가 글로 본다
+                skip = {(round(r.x0, 1), round(r.y0, 1)) for r, _ in heads}
+                gs = [(g, "") for g in glyphs(page) + [r for r in (body_text_chars(page, kit) if text else [])
+                                                         if (round(r.x0, 1), round(r.y0, 1)) not in skip]] + heads
             eqs = equation_glyphs(page)
             tail = tail_box_rect(page, kit)  # 꼬리 박스 안 글자는 본문 줄이 아니다(학교 B는 꼬리 글도 본문 글꼴)
             if tail is not None:
@@ -417,13 +432,14 @@ def tail_box_rect(page, kit: Kit):
     """
     w = kit.tailbox["width"] / 100.0
     lefts = column_lefts(kit)
+    om = kit.tailbox.get("outMargin", 0) / 100.0  # 바깥 여백이 사방에 있는 꼬리 표는 테두리가 단 왼끝에서 그만큼 들어간다
     half = page.rect.height / 2
     hs = [d["rect"] for d in page.get_drawings()
           if d.get("fill") is None and d["rect"].height < 1.5 and abs(d["rect"].width - w) < 2.0
-          and d["rect"].y0 > half and any(abs(d["rect"].x0 - cl) < 1.5 for cl in lefts)]
+          and d["rect"].y0 > half and any(abs(d["rect"].x0 - x) < 1.5 for cl in lefts for x in (cl, cl + om))]
     if not hs:
         return None
-    if kit.box_fit == "column":
+    if kit.box_fit == "column" or kit.tailbox.get("marker"):  # 본문 박스와 폭이 같을 수 있다 — 표지 글로 가린다
         return _tail_among_column_boxes(page, kit, hs)
     # 꼬리 박스는 쪽 맨 아래에 있다 — 폭이 비슷한 다른 상자(학교 B의 ◦ 자료 상자 295.1 vs 296.2pt)가 걸려도
     # 가장 아래 가로선에서 박스 높이 안의 무리만 꼬리로 본다.

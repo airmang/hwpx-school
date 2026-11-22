@@ -32,7 +32,7 @@ from PIL import Image, ImageOps
 
 from . import drawing, equation, preserve, q
 from .kit import STEM_WORD_BREAKS, Kit, Metrics, style_ids
-from .prepare import is_sample_table
+from .prepare import sample_role, is_sample_table
 from .scan import IMG_RE, OVERLAY_RE, TABLE_ROW_RE, Block, Overlay, Question, QuestionSet, Scan, figure_parts, img_attrs
 from .verify import question_heads
 
@@ -442,8 +442,8 @@ class _Para:
 
 def _body_region(doc: HwpxDocument, kit: Kit) -> tuple[int, int]:
     """조판기가 바꿀 샘플 구역(최상위 문단 번호, 양 끝 포함) — 킷 sample_region."""
-    if kit.sample_region == "admin_to_tail":  # 관리박스(0) 뒤 ~ 꼬리 박스(마지막 문단) 앞 전부
-        return 1, len(doc.sections[0].paragraphs) - 2
+    if kit.sample_region == "admin_to_tail":  # 관리 구역(문단 0 ~ admin.paragraph) 뒤 ~ 꼬리 박스(마지막 문단) 앞 전부
+        return kit.admin["paragraph"] + 1, len(doc.sections[0].paragraphs) - 2
     prof = profile_form(doc, role_style_names=kit.styles)
     return prof.body_start, prof.body_end
 
@@ -454,7 +454,7 @@ def harvest_samples(doc: HwpxDocument, kit: Kit) -> Samples:
     ids = style_ids(doc)
     paras = list(doc.sections[0].paragraphs)[start:end + 1]
     tables = [t for p in paras for t in p.tables]
-    보기, 자료 = (next((t for t in tables if is_sample_table(t, kit.boxes[k], ids[kit.styles[kit.boxes[k]["style"]]][0])), None)
+    보기, 자료 = (next((t for t in tables if is_sample_table(t, kit.boxes[k], ids[kit.styles[sample_role(kit.boxes[k])]][0])), None)
                 for k in ("보기", "자료"))
     sm = kit.set_marker
     표지_re = re.compile(sm["pattern"])
@@ -477,7 +477,7 @@ def harvest_samples(doc: HwpxDocument, kit: Kit) -> Samples:
     for kind, spec in kit.boxes.items():
         if kind in ("보기", "자료") or not isinstance(spec, dict):
             continue
-        t = next((t for t in tables if is_sample_table(t, spec, ids[kit.styles[spec["style"]]][0])), None)
+        t = next((t for t in tables if is_sample_table(t, spec, ids[kit.styles[sample_role(spec)]][0])), None)
         if t is None:
             raise ValueError(f"양식이 바뀌었다: 샘플 구역에 {kind} 견본 없음")
         extra[kind] = t

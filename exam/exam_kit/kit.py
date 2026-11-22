@@ -29,7 +29,7 @@ NUMBER_MODES = ("autonumber", "literal")  # 문항 번호: 스타일 자동번�
 BOX_KINDS = ("보기", "자료")  # 원고 문법의 박스 펜스(:::보기·:::자료) — 킷 boxes가 둘 다 기술해야 한다
 TRIM_RULES = ("first_page_break", "text_prefix")  # 지울 구역(논술형 샘플~꼬리 앞)의 시작 — 첫 쪽 나눔 문단 | 글이 prefix로 시작하는 첫 문단
 SAMPLE_REGIONS = ("role_styles", "admin_to_tail")  # 조판기가 바꿀 샘플 구역 — 역할 스타일 문단 첫~끝 | 관리박스 뒤 ~ 꼬리 박스 앞 전부
-KIT_OPTIONAL = frozenset({"note", "text_slots_note", "box_fit", "code_style"})
+KIT_OPTIONAL = frozenset({"note", "text_slots_note", "box_fit", "code_style", "front_pages"})
 BOX_FITS = ("sample", "column")      # 박스·본문 격자표 폭 — 양식 견본 폭 | 단 폭(오른끝이 발문 오른끝과 맞음, G5-1 owner 10-26)
 CODE_STYLES = ("plain", "gutter")    # 코드 블록 — 그대로 | 줄 번호·주석 회색 + 번호 뒤 세로줄(G5-2 owner 10-26)
 HABIT_KEYS = frozenset({"question_gap", "question_gap_min", "gap_extra_max", "letter_spacing_min", "letter_spacing_tail",
@@ -124,6 +124,7 @@ class Kit:
     habits_source: str              # 습관값 출처(보고서에 적는다) — "킷" 또는 기본 파일의 source
     rules: dict | None              # 학교 규칙(rules.json 내용) — 없으면 None(엔진 규칙만)
     box_fit: str = "sample"             # 킷 선택 키 box_fit(BOX_FITS)
+    front_pages: int = 0                # 킷 선택 키 front_pages — 쪽 번호에 들지 않는 앞쪽 수(결재란만 따로 있는 쪽). 총쪽수 = 렌더 쪽수 − 이것
     code_style: str = "plain"           # 킷 선택 키 code_style(CODE_STYLES)
     stem_align: str | None = "LEFT"     # 발문 문단 정렬 — None이면 양식 스타일(습관 키 "양식"). 10-27 수학 교사 요청 → 엔진 기본(owner)
     stem_word_break: str | None = "어절"  # 발문 한글 줄 나눔(STEM_WORD_BREAKS 키) — None이면 양식 스타일
@@ -214,11 +215,30 @@ def load_kit(root: Path) -> Kit:
         letter_spacing_role_min=h["letter_spacing_role_min"], letter_spacing_safety=h["letter_spacing_safety"],
         word_pull_min=h["word_pull_min"], word_pull_gap=h["word_pull_gap"], gap_mode=h["gap_mode"], pack=h["pack"],
         bogi_hanging_indent=h["bogi_hanging_indent"], grid=h["grid"], habits_source=source,
-        rules=rules, box_fit=_choice(d, "box_fit", BOX_FITS, "sample"), code_style=_choice(d, "code_style", CODE_STYLES, "plain"),
+        rules=rules, box_fit=_choice(d, "box_fit", BOX_FITS, "sample"), front_pages=_front_pages(d), code_style=_choice(d, "code_style", CODE_STYLES, "plain"),
         stem_align=_choice(h, "stem_align", STEM_ALIGNS, "LEFT"),
         stem_word_break=_choice(h, "stem_word_break", (*STEM_WORD_BREAKS, "양식"), "어절"),
         stem_condense=_condense(h),
     )
+
+
+def _front_pages(d: dict) -> int:
+    """킷 front_pages — 없으면 0, 0 이상 정수."""
+    v = d.get("front_pages", 0)
+    if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+        raise ValueError(f"킷 front_pages {v!r} — 0 이상 정수")
+    return v
+
+
+def admin_paragraphs(doc: HwpxDocument, kit: "Kit") -> list:
+    """관리 구역 = 문단 0 ~ kit.admin.paragraph(양 끝 포함) — 결재표·제목표·유의 상자가 여러 문단에 나뉜 서식도 있다.
+    기존 서식(관리박스가 문단 0 하나)은 [문단 0]."""
+    return list(doc.sections[0].paragraphs)[: kit.admin["paragraph"] + 1]
+
+
+def admin_tables(doc: HwpxDocument, kit: "Kit") -> list:
+    """관리 구역 문단들의 최상위 표, 문단 차례대로."""
+    return [t for p in admin_paragraphs(doc, kit) for t in p.tables]
 
 
 def _choice(h: dict, key: str, allowed: tuple, default: str) -> str | None:
