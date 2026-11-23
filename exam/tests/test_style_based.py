@@ -150,3 +150,28 @@ def test_세트_지문이_단을_넘어_흐른_단은_분할이_아니다(monkey
            PageLayout(2, (col(2, 1, [60.0]), col(2, 2, [])), None),
            PageLayout(3, (col(3, 1, [400.0, 520.0]), col(3, 2, [])), None)]
     assert layout.flow_columns(Path("x.pdf"), None, None, lay) == {(2, 2), (3, 1)}
+
+
+def test_지문_문단은_보호_묶음_밖이고_묶음_첫_문단은_세트_머리다():
+    """긴 지문이 앞 단을 비우고 통째로 다음 단으로 밀리지 않게(11-23 owner) — 지문 문단은 keepWithNext·keepLines를 끄고
+    외톨이줄 보호만 켠다. group_starts는 지문을 건너 세트 머리를 묶음 첫 문단으로 본다(분할 해소는 문항 머리에 나눔)."""
+    from exam_kit.layout import flows_into, group_starts
+    from exam_kit.verify import question_heads
+
+    kit = load_kit(_합성)
+    kit = replace(kit, styles={**kit.styles, **_선택})
+    doc, names = _조판(kit)
+    ps = list(doc.sections[0].paragraphs)
+    hd = doc.parts.headers[0]
+    body = [i for i, p in enumerate(ps) if names.get(str(p.style_id_ref)) == "본문"]
+    assert len(body) == 2
+    for i in body:
+        bs = hd.paragraph_property(ps[i].para_pr_id_ref).break_setting
+        assert (bs.keep_with_next, bs.keep_lines, bs.widow_orphan) == (False, False, True)
+    head = body[0] - 1
+    assert names.get(str(ps[head].style_id_ref)) == "캡션"  # 세트 머리
+    assert hd.paragraph_property(ps[head].para_pr_id_ref).break_setting.keep_with_next
+    starts, heads = group_starts(doc), question_heads(doc)
+    k = next(k for k, h in enumerate(heads) if h > body[-1])  # 세트 첫 문항
+    assert starts[k] == head and flows_into(doc, starts[k], heads[k])
+    assert not flows_into(doc, starts[0], heads[0])

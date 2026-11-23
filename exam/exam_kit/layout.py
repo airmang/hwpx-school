@@ -88,18 +88,39 @@ def _keep_next_ids(doc: HwpxDocument) -> set[str]:
             if pp.break_setting is not None and pp.break_setting.keep_with_next}
 
 
+def _flow_ids(doc: HwpxDocument) -> set[str]:
+    """세트 지문 문단 모양(compose _Para.flow) — keepWithNext·keepLines 끔, 외톨이줄 보호 켬."""
+    return {pid for pid, pp in doc.styles.paragraph_properties.items()
+            if pp.break_setting is not None and not pp.break_setting.keep_with_next
+            and not pp.break_setting.keep_lines and pp.break_setting.widow_orphan}
+
+
 def group_starts(doc: HwpxDocument) -> list[int]:
-    """문항마다 보호 묶음 첫 문단의 인덱스 — 머리에서 거꾸로, 앞 문단이 keepWithNext인 동안(세트 머리·자료까지)."""
+    """문항마다 보호 묶음 첫 문단의 인덱스 — 머리에서 거꾸로, 앞 문단이 keepWithNext인 동안(세트 머리·자료까지).
+    세트 지문 문단(_flow_ids)은 묶음 밖이지만 그 앞에 keepWithNext 문단(세트 머리)이 있으면 건너 세트 머리까지 간다."""
     ps = list(doc.sections[0].paragraphs)
-    keep = _keep_next_ids(doc)
+    keep, flow = _keep_next_ids(doc), _flow_ids(doc)
     out, floor = [], 0
     for h in question_heads(doc):
         i = h
-        while i - 1 > floor and str(ps[i - 1].para_pr_id_ref) in keep:
-            i -= 1
+        while True:
+            j = i - 1
+            while j > floor and str(ps[j].para_pr_id_ref) in flow:
+                j -= 1
+            if j > floor and str(ps[j].para_pr_id_ref) in keep:
+                i = j
+            else:
+                break
         out.append(i)
         floor = h
     return out
+
+
+def flows_into(doc: HwpxDocument, start: int, head: int) -> bool:
+    """묶음(start ~ head) 안에 세트 지문 문단이 있는가 — 있으면 지문은 흐르고 문항(머리)만 단을 옮긴다."""
+    flow = _flow_ids(doc)
+    ps = list(doc.sections[0].paragraphs)
+    return any(str(ps[i].para_pr_id_ref) in flow for i in range(start, head))
 
 
 def set_break(doc: HwpxDocument, index: int, kind: str | None) -> bool:
@@ -523,7 +544,9 @@ class _Loop:
                 if places.index(places[k]) == k and col.first_is_head:  # 이미 단 맨 위에서 시작하는 묶음
                     self.notes.append(f"{k + 1}번 문항이 한 단보다 길어 나뉜다({p}쪽 {c}단) — 나눔으로 풀 수 없다")
                     continue
-                moved |= self._brk(starts[k], "page" if c == 1 else "column")
+                heads = question_heads(self.doc)
+                at = heads[k] if flows_into(self.doc, starts[k], heads[k]) else starts[k]  # 지문은 두고 문항만 옮긴다
+                moved |= self._brk(at, "page" if c == 1 else "column")
             if not moved:
                 return rr, lay
             rr, lay = self.render()
@@ -622,7 +645,14 @@ class _Loop:
         split_cols = {(p, c) for p, c, _ in sp} | flow  # 지문 흐름 단도 나눔을 박지 않는다(박으면 세트 머리가 새 단으로 간다)
         ps = self.ps
         changed = False
+        heads = question_heads(self.doc)
         for (p, c), ks in _by_col(places).items():
+            col = lay[p - 1].columns[c - 1]
+            if (p, c) in flow and col.first_is_head and flows_into(self.doc, starts[ks[0]], heads[ks[0]]):
+                i = heads[ks[0]]  # 지문이 앞 단에서 끝나고 문항이 이 단 맨 위에서 시작한다 — 문항 머리를 고정하고 간격 0
+                changed |= self._brk(i, "page" if c == 1 else "column")
+                changed |= self._set_prev(i, ps[i].para_pr_id_ref, 0)
+                continue
             if (p, c) == (1, 1) or (p, c) in split_cols or ks[0] == 0:
                 continue
             i = starts[ks[0]]

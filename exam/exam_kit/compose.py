@@ -439,6 +439,8 @@ class _Para:
     room: tuple[int, int] = (0, 0)  # 얹은 글자가 그림 위·아래로 나가는 만큼 문단 위·아래 간격을 더한다(HWPUNIT)
     stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break·stem_condense를 받는다
     drawing: object | None = None  # obj(보이지 않는 틀) 위에 그릴 :::도형(drawing.Drawing) — 선·면·곡선을 떠 있는 개체로
+    flow: bool = False  # 세트 지문 문단 — 보호 묶음에서 뺀다(keepWithNext·keepLines 끔, 외톨이줄 보호 켬): 긴 지문은 단·쪽
+    #                     어디서든 나뉘어 공백 없이 이어진다(11-23 owner). layout.group_starts가 외톨이줄 보호로 지문 문단을 알아본다
 
 
 def _body_region(doc: HwpxDocument, kit: Kit) -> tuple[int, int]:
@@ -515,7 +517,7 @@ class _Composer:
         return self.kit.bogi_hanging_indent
 
     def para_pr(self, role: str, *, keep: bool, gap: bool, align: str | None = None, left: int | None = None,
-                room: tuple[int, int] = (0, 0), stem: bool = False) -> str:
+                room: tuple[int, int] = (0, 0), stem: bool = False, flow: bool = False) -> str:
         """역할 스타일 paraPr의 복제 — keepWithNext=keep, keepLines=1, gap이면 prev = question_gap(case)·2배(default).
 
         1행답항은 한 번에 균등 칸 탭(tab_pr)도 단다 — 양식의 1행답항 문단·스타일은 그대로. room = (위, 아래) 더 띄울 간격
@@ -523,7 +525,7 @@ class _Composer:
         """
         if stem and align is None:
             align = self.kit.stem_align  # 습관(예: 수학 교사 왼쪽 정렬) — 없으면 양식 스타일
-        key = (role, keep, gap, align, left, room, stem)
+        key = (role, keep, gap, align, left, room, stem, flow)
         if key in self._pp:
             return self._pp[key]
         base = self.style[role][1]
@@ -535,7 +537,8 @@ class _Composer:
             # 발문이 다음 줄로 넘어가면 번호 자릿수와 무관하게 공백 한 칸만 들여 쓴다(학교 B 결정표 6) — 첫 줄은 그대로.
             # 한글 문단: 왼여백은 모든 줄, 음수 intent(내어쓰기)는 둘째 줄부터 |intent|만큼 더 들어간다(09-29 렌더 실측)
             margins = {"intent": -self.kit.metrics.space}
-        breaks: dict = {"keep_with_next": keep, "keep_lines": True}
+        breaks: dict = ({"keep_with_next": False, "keep_lines": False, "widow_orphan": True} if flow
+                        else {"keep_with_next": keep, "keep_lines": True})
         condense = None
         if stem:  # 발문의 한글 줄 나눔 기준·공백 최소값(G5-8) — 한 모양으로 함께 정한다
             if self.kit.stem_word_break:
@@ -1114,14 +1117,14 @@ class _Composer:
         head, body = self.role("set_head"), self.role("passage")  # 양식에 세트 지시문·지문 스타일이 있으면 그 스타일(11-23)
         if s.passage:
             segs += self._segs(" " + s.passage[0], head)
-        return [_Para(head, segs, gap=True, stem=True)] + [_Para(body, self._segs(line, body), stem=True)
+        return [_Para(head, segs, gap=True, stem=True)] + [_Para(body, self._segs(line, body), stem=True, flow=True)
                                                            for line in s.passage[1:]]
 
     @staticmethod
     def _keep(paras: list[_Para]) -> None:
         """한 보호 묶음: 마지막을 뺀 전부 keepWithNext. keepLines는 para_pr가 늘 켠다."""
         for p in paras[:-1]:
-            p.keep = True
+            p.keep = not p.flow  # 지문 문단은 묶음에 넣지 않는다 — 세트 머리만 첫 지문 문단과 함께
         paras[-1].keep = False
 
     def plan(self, scan: Scan) -> list[_Para]:
@@ -1171,7 +1174,7 @@ class _Composer:
     def materialize(self, spec: _Para):
         sid, _, cp = self.style[spec.role]
         pid = self.para_pr(spec.role, keep=spec.keep, gap=spec.gap, align=spec.align, left=spec.left, room=spec.room,
-                           stem=spec.stem)
+                           stem=spec.stem, flow=spec.flow)
         sec = self.doc.sections[0]
         p = sec.add_paragraph("", para_pr_id_ref=pid, char_pr_id_ref=cp, inherit_style=False)
         p.style_id_ref = sid
