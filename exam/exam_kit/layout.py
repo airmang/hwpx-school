@@ -179,6 +179,27 @@ def head_places(layout: list[PageLayout]) -> list[tuple[int, int]]:
     return [(c.page, c.col) for p in layout for c in p.columns for _ in c.heads]
 
 
+def flow_columns(pdf: Path, kit: Kit, doc: HwpxDocument, layout: list[PageLayout]) -> set[tuple[int, int]]:
+    """세트 지문이 단을 넘어 이어진 단(쪽, 단) — 세트 머리는 앞 단에서 시작했고 그 세트 첫 문항 머리는 이 단이거나 뒤에 있다.
+
+    긴 지문(국어·영어)은 단을 넘어 공백 없이 이어 흐르는 것이 맞다(11-23 owner). 이런 단의 첫 줄은 지문 문단의 여백·
+    테두리만큼 들어가 있어 splits가 '문항 분할'로 본다 — 분할이 아니라 지문 흐름이므로 분할 판정·나눔 고정·간격 나눔에서 뺀다.
+    """
+    starts, heads = group_starts(doc), question_heads(doc)
+    set_first = {k for k in range(len(starts)) if starts[k] != heads[k]}
+    if not set_first:
+        return set()
+    ext = group_extents(pdf, kit, set_first)
+    places = head_places(layout)
+    if len(ext) != len(places):
+        return set()
+    out: set[tuple[int, int]] = set()
+    for k in set_first:
+        begin = ext[k].top[:2]
+        out |= {seg[:2] for seg in ext[k].segments if begin < seg[:2] <= places[k]}
+    return out
+
+
 def _by_col(places: list[tuple[int, int]]) -> dict[tuple[int, int], list[int]]:
     out: dict[tuple[int, int], list[int]] = {}
     for k, pl in enumerate(places):
@@ -426,6 +447,11 @@ class _Loop:
         other_top = page_top.get(fp + 2, page_top.get(fp + 1)) + lead
         limit, tail_limit = body_bottom(self.kit) - DIST_SAFETY, _limit(self.kit)
 
+        too_tall = [k + 1 for k in set_first if h[k] > limit - other_top]
+        if too_tall:  # 세트 지문이 단을 넘어 흐른다 — 묶음을 한 단 단위로 놓는 계획으로는 흐름을 그릴 수 없다
+            self.notes.append(f"균형 배치: {too_tall}번 세트 지문이 한 단보다 길어 단을 넘어 흐른다 — 흐르는 대로 둔다")
+            return None
+
         def top(j: int) -> float:
             if j == 0:
                 return first_top
@@ -475,10 +501,15 @@ class _Loop:
         self.notes.append("균형 배치: 계획한 단 나눔과 렌더 자리가 두 번 다 달라 원래 흐름으로 되돌렸다")
         return self.render()
 
+    def real_splits(self, rr, lay) -> tuple[list[tuple[int, int, float]], set[tuple[int, int]]]:
+        """(문항 분할, 지문 흐름 단) — splits에서 세트 지문이 단을 넘어 이어진 단(flow_columns)을 뺀 것."""
+        flow = flow_columns(rr.pdf, self.kit, self.doc, lay)
+        return [s for s in splits(rr.pdf, self.kit) if s[:2] not in flow], flow
+
     # ① 분할
     def resolve_splits(self, rr, lay, rounds: int):
         for _ in range(rounds):
-            sp = splits(rr.pdf, self.kit)
+            sp, _flow = self.real_splits(rr, lay)
             if not sp:
                 return rr, lay
             starts, places = group_starts(self.doc), head_places(lay)
@@ -496,7 +527,7 @@ class _Loop:
             if not moved:
                 return rr, lay
             rr, lay = self.render()
-        left = splits(rr.pdf, self.kit)
+        left, _flow = self.real_splits(rr, lay)
         if left:
             self.notes.append(f"문항 분할 {len(left)}곳이 {rounds}회 뒤에도 남았다: {left}")
         return rr, lay
@@ -587,7 +618,8 @@ class _Loop:
     # ③ 단 맨 위 간격 0
     def zero_tops(self, rr, lay):
         starts, places = group_starts(self.doc), head_places(lay)
-        split_cols = {(p, c) for p, c, _ in splits(rr.pdf, self.kit)}
+        sp, flow = self.real_splits(rr, lay)
+        split_cols = {(p, c) for p, c, _ in sp} | flow  # 지문 흐름 단도 나눔을 박지 않는다(박으면 세트 머리가 새 단으로 간다)
         ps = self.ps
         changed = False
         for (p, c), ks in _by_col(places).items():
@@ -609,7 +641,8 @@ class _Loop:
         ps = self.ps
         header = self.doc.parts.headers[0]
         starts, places = group_starts(self.doc), head_places(lay)
-        split_cols = {(p, c) for p, c, _ in splits(rr.pdf, self.kit)}
+        sp, flow = self.real_splits(rr, lay)
+        split_cols = {(p, c) for p, c, _ in sp} | flow
         by_col = _by_col(places)
         tail_col = (len(lay), 2)  # 꼬리 박스가 앉는 단 — 마지막 쪽 오른쪽 단
         for (p, c), ks in by_col.items():  # 흐름 고정(zero_tops가 이미 박았으면 그대로)
@@ -619,8 +652,8 @@ class _Loop:
         safety = DIST_SAFETY
         for _ in range(rounds):
             for (p, c), ks in by_col.items():
-                if (p, c) in self.moved_from or len(ks) < 2:  # 한 문항 단·꼬리 때문에 넘겨 보낸 단은 위에 붙인 채로
-                    continue
+                if (p, c) in self.moved_from or len(ks) < 2 or (p, c) in flow:  # 한 문항 단·꼬리 때문에 넘겨 보낸 단은
+                    continue  # 위에 붙인 채로 — 지문이 흘러 들어온 단은 첫 묶음이 앞 단에서 시작해 간격을 나누지 않는다
                 col = lay[p - 1].columns[c - 1]
                 # 단 아래 맞춤(Task 31): 마지막 문항 끝이 단 한계에 닿게 — 꼬리 단은 꼬리 박스 위 여유(_limit)까지
                 floor = _limit(self.kit) if (p, c) == tail_col else body_bottom(self.kit)
@@ -636,7 +669,7 @@ class _Loop:
             self.doc.sections[0].mark_dirty()
             rr2, lay2 = self.render()
             if (head_places(lay2) == places and len(lay2) == len(lay) and tail_problem(lay2, self.kit) is None
-                    and not splits(rr2.pdf, self.kit)):  # 나눈 간격으로 문항이 단을 넘어 나뉘면 되돌린다
+                    and not self.real_splits(rr2, lay2)[0]):  # 나눈 간격으로 문항이 단을 넘어 나뉘면 되돌린다
                 return rr2, lay2
             self._restore(original)  # 넘쳤다 — 되돌리고 한 줄 더 남겨 다시
             safety += LINE_PT
@@ -678,7 +711,7 @@ def settle(doc: HwpxDocument, kit: Kit, hwpx: Path, out_dir: Path, *, gap: str =
         rr, lay = loop.render()
         if rr.page_count != rendered:
             loop.notes.append(f"총쪽수를 {pages}로 채웠더니 렌더 쪽수가 {rr.page_count}로 바뀌었다")
-    left = splits(rr.pdf, kit)  # 최종 렌더 재검사
+    left, _flow = loop.real_splits(rr, lay)  # 최종 렌더 재검사(지문 흐름 단은 분할이 아니다)
     if left:
         loop.notes.append(f"최종 렌더에 문항 분할이 남았다: {left}")
     why = tail_problem(lay, kit)

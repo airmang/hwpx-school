@@ -127,3 +127,26 @@ def test_번호만_텍스트_층인_서식은_글_없는_줄을_머리로_보지
     assert is_head(Line(1, 1, 100, 0, tuple(점)))                      # 옛 길(곡선 번호 서식)
     assert not is_head(Line(1, 1, 100, 0, tuple(점), "", True))        # 번호가 텍스트 층인 서식: 글 없으면 머리 아님
     assert is_head(Line(1, 1, 100, 0, tuple(점), "3.", True))
+
+
+def test_세트_지문이_단을_넘어_흐른_단은_분할이_아니다(monkeypatch):
+    """긴 지문(국어)은 단을 넘어 공백 없이 이어진다(11-23 owner) — 세트 머리가 앞 단에서 시작했고 그 세트 첫 문항 머리가
+    이 단이거나 뒤에 있으면 지문 흐름 단이다. 그 뒤 단(문항이 나뉜 단)은 여전히 분할이다."""
+    from exam_kit import layout
+    from exam_kit.geometry import ColumnLayout, Extent, PageLayout
+
+    # 문항 1(단독) · 문항 2~3 세트(머리 2쪽 1단에서 시작, 지문이 2쪽 2단·3쪽 1단으로 흘러 3쪽 1단에 2번 머리)
+    monkeypatch.setattr(layout, "group_starts", lambda doc: [0, 3, 9])
+    monkeypatch.setattr(layout, "question_heads", lambda doc: [0, 7, 9])
+    ext = [Extent(((2, 1, 60.0, 200.0),)),
+           Extent(((2, 1, 220.0, 900.0), (2, 2, 60.0, 900.0), (3, 1, 60.0, 500.0))),
+           Extent(((3, 1, 520.0, 900.0), (3, 2, 60.0, 120.0)))]
+    monkeypatch.setattr(layout, "group_extents", lambda pdf, kit, set_first: ext)
+
+    def col(p, c, heads):
+        return ColumnLayout(p, c, 60.0, 900.0, tuple(heads), bool(heads))
+
+    lay = [PageLayout(1, (col(1, 1, []), col(1, 2, [])), None),
+           PageLayout(2, (col(2, 1, [60.0]), col(2, 2, [])), None),
+           PageLayout(3, (col(3, 1, [400.0, 520.0]), col(3, 2, [])), None)]
+    assert layout.flow_columns(Path("x.pdf"), None, None, lay) == {(2, 2), (3, 1)}
