@@ -33,7 +33,9 @@ from .kit import Kit, Metrics, open_seeded, save_stamped, style_ids
 from .verify import question_heads
 
 역할 = {"number": "발문", "choice1": "답지", "choice2": "답지", "choice3": "답지", "choice5": "답지",
-       "box_guide": "보기", "box": "자료", "normal": "지문"}
+       "box_guide": "보기", "box": "자료", "normal": "지문",
+       # 선택 역할(kit OPTIONAL_STYLE_ROLES) — 킷에 있을 때만
+       "passage": "지문", "set_head": "지문", "box_prose": "자료"}
 _언어 = ("hangul", "latin", "hanja", "japanese", "other", "symbol", "user")
 Key = tuple[int, int]  # (최상위 문단 인덱스, 그 안 문단 차례 — 최상위 자신은 −1)
 
@@ -176,8 +178,8 @@ def targets(doc: HwpxDocument, kit: Kit) -> list[Target]:
     from .layout import group_starts  # layout이 이 모듈을 쓴다(순환 import 회피)
 
     ids = style_ids(doc)
-    by_style = {ids[kit.styles[r]][0]: 역할[r] for r in 역할}
-    box_roles = {ids[kit.styles[r]][0]: 역할[r] for r in ("box_guide", "box")}
+    by_style = {ids[kit.styles[r]][0]: 역할[r] for r in 역할 if r in kit.styles}
+    box_roles = {ids[kit.styles[r]][0]: 역할[r] for r in ("box_guide", "box", "box_prose") if r in kit.styles}
     heads = question_heads(doc)
     if not heads:
         return []

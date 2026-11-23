@@ -26,6 +26,7 @@ class Line:
     dx: float          # 줄 첫 글리프 x0 − 단 왼끝(pt)
     boxes: tuple       # 글리프 bbox(pymupdf.Rect), x 순
     text: str = ""     # 텍스트 층 글리프(킷 render.glyphs text)면 그 글자들, x 순 — 곡선이면 빈 글
+    text_heads: bool = False  # 번호만 텍스트 층인 서식(킷 render.head_fonts) — 머리는 글로만 판정한다(글 없는 줄은 머리가 아니다)
 
 
 def column_lefts(kit: Kit) -> list[float]:
@@ -239,6 +240,9 @@ def column_lines(pdf: Path, kit: Kit, *, text: bool = False) -> list[Line]:
     lefts = column_lefts(kit)
     w = kit.columns["width"] / 100.0
     bottom = body_bottom(kit)
+    # 번호가 텍스트 층으로 나가는 서식이면 머리는 그 글로만 본다 — 글리프 모양 판정은 Windows 한컴 PDF(본문 Type3)에서
+    # 줄 첫머리 '있다.' 같은 짧은 덩어리를 `N.`으로 잘못 본다(11-23 실측: 문항 8개에 머리 11개)
+    text_heads = kit.render["glyphs"] != "text" and bool(kit.render.get("head_fonts"))
     out: list[Line] = []
     with pymupdf.open(str(pdf)) as doc:
         for pno, page in enumerate(doc, 1):
@@ -262,7 +266,7 @@ def column_lines(pdf: Path, kit: Kit, *, text: bool = False) -> list[Line]:
 
                 groups = _y_묶음(sorted((gt for gt in gs if 단(gt[0])), key=lambda gt: gt[0].y0))
                 for grp in _수식_붙이기(groups, [g for g in eqs if 단(g)]):
-                    out.append(_line(pno, ci, cl, grp))
+                    out.append(_line(pno, ci, cl, grp, text_heads))
     return out
 
 
@@ -302,10 +306,10 @@ def _수식_붙이기(groups: list[list], eqs: list) -> list[list]:
     return sorted(groups, key=lambda grp: min(g.y0 for g, _ in grp))
 
 
-def _line(pno: int, ci: int, cl: float, items: list) -> Line:
+def _line(pno: int, ci: int, cl: float, items: list, text_heads: bool = False) -> Line:
     items = sorted(items, key=lambda gt: gt[0].x0)
     boxes = tuple(g for g, _ in items)
-    return Line(pno, ci, min(g.y0 for g in boxes), boxes[0].x0 - cl, boxes, "".join(t for _, t in items))
+    return Line(pno, ci, min(g.y0 for g in boxes), boxes[0].x0 - cl, boxes, "".join(t for _, t in items), text_heads)
 
 
 def column_first_lines(pdf: Path, kit: Kit) -> list[tuple[int, int, float]]:
@@ -412,7 +416,7 @@ def is_head(line: Line, *, tol: float = 2.0) -> bool:
     """
     if line.dx > tol:
         return False
-    if line.text:
+    if line.text or line.text_heads:
         return bool(_글_머리.match(line.text))
     boxes = line.boxes
     chunk = [boxes[0]]
