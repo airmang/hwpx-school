@@ -29,7 +29,12 @@ NUMBER_MODES = ("autonumber", "literal")  # 문항 번호: 스타일 자동번�
 BOX_KINDS = ("보기", "자료")  # 원고 문법의 박스 펜스(:::보기·:::자료) — 킷 boxes가 둘 다 기술해야 한다
 TRIM_RULES = ("first_page_break", "text_prefix")  # 지울 구역(논술형 샘플~꼬리 앞)의 시작 — 첫 쪽 나눔 문단 | 글이 prefix로 시작하는 첫 문단
 SAMPLE_REGIONS = ("role_styles", "admin_to_tail")  # 조판기가 바꿀 샘플 구역 — 역할 스타일 문단 첫~끝 | 관리박스 뒤 ~ 꼬리 박스 앞 전부
-KIT_OPTIONAL = frozenset({"note", "text_slots_note", "box_fit", "code_style", "front_pages"})
+KIT_OPTIONAL = frozenset({"note", "text_slots_note", "box_fit", "code_style", "front_pages", "style_based"})
+# 선택 역할 스타일(kit.styles) — 양식에 그 자리 스타일이 있으면 적는다. 없으면 그 자리는 바탕글(normal)로 짓는다(옛 길).
+#   passage   세트 지문(국어·영어 지문)      set_head  세트 지시문 `[a∼b] 다음 글을 …`
+#   box_anchor 〈보기〉·자료 박스를 담는 문단  figure    박스 밖 표·그림·도형을 담는 문단
+#   box_prose 〈보기〉 안 글 줄(ㄱ.·∘ 항목이 아닌 제시문)
+OPTIONAL_STYLE_ROLES = ("passage", "set_head", "box_anchor", "figure", "box_prose")
 BOX_FITS = ("sample", "column")      # 박스·본문 격자표 폭 — 양식 견본 폭 | 단 폭(오른끝이 발문 오른끝과 맞음, G5-1 owner 10-26)
 CODE_STYLES = ("plain", "gutter")    # 코드 블록 — 그대로 | 줄 번호·주석 회색 + 번호 뒤 세로줄(G5-2 owner 10-26)
 HABIT_KEYS = frozenset({"question_gap", "question_gap_min", "gap_extra_max", "letter_spacing_min", "letter_spacing_tail",
@@ -129,6 +134,8 @@ class Kit:
     stem_align: str | None = "LEFT"     # 발문 문단 정렬 — None이면 양식 스타일(습관 키 "양식"). 10-27 수학 교사 요청 → 엔진 기본(owner)
     stem_word_break: str | None = "어절"  # 발문 한글 줄 나눔(STEM_WORD_BREAKS 키) — None이면 양식 스타일
     stem_condense: int | None = None      # 발문 공백 최소값(%, 0~STEM_CONDENSE_MAX) — None이면 양식 스타일(G5-8 owner 10-29)
+    style_based: bool = False             # 킷 선택 키 style_based — 양식 스타일(글자·문단 모양)을 그대로 쓴다: 발문 정렬·줄 나눔·
+                                          # 공백 최소값과 〈보기〉 항목 내어쓰기를 습관값으로 덮지 않는다(11-23 owner)
 
     @property
     def forbidden_text(self) -> tuple[str, ...]:
@@ -196,6 +203,9 @@ def load_kit(root: Path) -> Kit:
     missing_boxes = [k for k in BOX_KINDS if k not in d["boxes"]]
     if missing_boxes:
         raise ValueError(f"킷 파일 {root / 'kit.json'}: boxes에 {missing_boxes} 없음")
+    style_based = d.get("style_based", False)
+    if not isinstance(style_based, bool):
+        raise ValueError(f"킷 파일 {root / 'kit.json'}: style_based {style_based!r} — true/false")
     own = root / "habits.json"
     h = _read(own if own.exists() else DEFAULT_HABITS, HABIT_KEYS, HABIT_OPTIONAL)
     source = "킷(habits.json)" if own.exists() else f"엔진 기본 — {h.get('source', DEFAULT_HABITS.name)}"
@@ -216,9 +226,10 @@ def load_kit(root: Path) -> Kit:
         word_pull_min=h["word_pull_min"], word_pull_gap=h["word_pull_gap"], gap_mode=h["gap_mode"], pack=h["pack"],
         bogi_hanging_indent=h["bogi_hanging_indent"], grid=h["grid"], habits_source=source,
         rules=rules, box_fit=_choice(d, "box_fit", BOX_FITS, "sample"), front_pages=_front_pages(d), code_style=_choice(d, "code_style", CODE_STYLES, "plain"),
-        stem_align=_choice(h, "stem_align", STEM_ALIGNS, "LEFT"),
-        stem_word_break=_choice(h, "stem_word_break", (*STEM_WORD_BREAKS, "양식"), "어절"),
-        stem_condense=_condense(h),
+        stem_align=None if style_based else _choice(h, "stem_align", STEM_ALIGNS, "LEFT"),
+        stem_word_break=None if style_based else _choice(h, "stem_word_break", (*STEM_WORD_BREAKS, "양식"), "어절"),
+        stem_condense=None if style_based else _condense(h),
+        style_based=style_based,
     )
 
 

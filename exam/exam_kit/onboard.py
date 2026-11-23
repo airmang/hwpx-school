@@ -297,6 +297,28 @@ def scan(path: Path) -> str:
 TODO = "TODO"
 
 
+# 선택 역할 스타일(kit.OPTIONAL_STYLE_ROLES) 제안 — 양식 스타일 이름에서 찾는다(11-23 owner: 스타일 기반 학교).
+# 이름 규칙은 스타일 기반 양식 실례(세트문항지시문·국어 영어 지문·보기/박스위치·표/그림 가운데 정렬·박스 안 제시문)에서 왔다.
+# 제안일 뿐이다 — 결정표에서 견본 문단이 실제로 그 스타일을 쓰는지 확인하고 확정한다.
+_선택_역할_이름 = (
+    ("set_head", lambda n: "세트" in n and "지시" in n),
+    ("passage", lambda n: "지문" in n and "지시" not in n and "박스" not in n),
+    ("box_anchor", lambda n: "박스위치" in n.replace(" ", "")),
+    ("figure", lambda n: "가운데" in n and ("그림" in n or "표" in n)),
+    ("box_prose", lambda n: "제시문" in n and "보기" not in n and "◦" not in n and "∘" not in n),
+)
+
+
+def suggest_style_roles(names) -> dict[str, str]:
+    """양식 스타일 이름들 → {선택 역할: 스타일 이름}(찾은 것만, 이름 차례로 처음 맞는 것)."""
+    out: dict[str, str] = {}
+    for role, ok in _선택_역할_이름:
+        hit = next((n for n in names if n and ok(n)), None)
+        if hit is not None:
+            out[role] = hit
+    return out
+
+
 def draft_kit(path: Path, name: str) -> dict:
     """킷 초안 — 서식에서 사실로 정해지는 값(sha·용지·여백·단)만 채우고, 판단이 필요한 항목은 TODO로 둔다.
 
@@ -309,12 +331,16 @@ def draft_kit(path: Path, name: str) -> dict:
     col = _body_columns(f.doc.page.columns(section=0))
     n, gap = col.count, col.gap or 0
     width = (size.width - m["left"] - m["right"] - gap * (n - 1)) // n
+    선택 = suggest_style_roles([s.name for s in f.styles.values()])
     return {
         "kit": name, "version": "0.1.0", "schema": 2,
+        # 자리마다 스타일을 정해 둔 양식이면 style_based를 결정표에서 정한다(true = 양식 스타일 모양 그대로)
+        **({"style_based": TODO} if 선택 else {}),
         "form": {"basename": Path(path).name, "sha256": sha256(path), "note": "서식 파일은 저장소에 넣지 않는다"},
         "page": {"width": size.width, "height": size.height, "margin": m},
         "columns": {"count": n, "gap": gap, "width": width, "body_table_width": TODO},
-        "styles": dict.fromkeys(("normal", "number", "choice1", "choice2", "choice3", "choice5", "box_guide", "box"), TODO),
+        "styles": {**dict.fromkeys(("normal", "number", "choice1", "choice2", "choice3", "choice5", "box_guide", "box"), TODO),
+                   **선택},
         "number": {"mode": TODO},
         "slots": {}, "slots_removed": [], "placeholders": {}, "text_slots": [], "teacher_cell": None,
         "front_matter": {"required": ["양식", "학년도", "학년", "학기", "차", "과목", "시행", "출제교사"],
