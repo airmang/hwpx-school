@@ -62,9 +62,14 @@ uv로 프로젝트를 격리한다(시스템 python에는 이것들이 없다). 
 
     uv run pytest -m hancom
 
-이 테스트는 `python-hwpx-automation[oracle]`이 설치된 별도 런타임과 한글 앱의 macOS
-자동화(TCC) 권한을 요구한다 — 자세한 내용은 `worksheet/render.py`와
-[검사-레지스트리](references/검사-레지스트리.md)의 M-7을 본다.
+`render_hancom`은 python-hwpx-automation의 공개 명령 `render-pdf`
+(`python -m hwpx_automation.office.rendering render-pdf ... --json`)를 이 프로젝트의
+인터프리터로 부른다 — `[oracle]` extra가 의존성에 들어 있어 플러그인을 따로 설치하지 않아도
+된다. 한컴은 `--backend auto`로 고른다(Windows 한글 COM, 그다음 macOS 한글 앱 — macOS는
+자동화·손쉬운 사용 권한이 필요하다). 다른 환경의 인터프리터로 렌더하려면 `HWPX_ORACLE_PY`에
+그 경로를 준다(그 환경에도 `python-hwpx-automation[oracle]>=8.0`). 한컴이 없으면
+`RenderUnavailable`, 렌더가 실패하면 `RenderError`(둘 다 `RuntimeError`) — 자세한 내용은
+`worksheet/render.py`와 [검사-레지스트리](references/검사-레지스트리.md)의 M-7을 본다.
 
 docx는 같은 자리를 두 마커로 나눠 본다. `@pytest.mark.libreoffice`는 LibreOffice
 헤드리스로 docx→PDF→PNG를 뽑는다(`soffice`와, PDF를 쪽별 PNG로 자르는 poppler의 `pdftoppm`이
