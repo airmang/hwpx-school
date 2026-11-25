@@ -429,13 +429,19 @@ class DocxWriter:
     def save(self, path: Path) -> None:
         # 고정 시각을 먼저 본다 — zip에 적을 수 없는 시각이면 목적지를 건드리기 전에 거부한다(있던 파일은 그대로).
         때 = _zip_고정_시각()
+        path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if 때 is None:
-            self.doc.save(str(path))
-            return
         저장 = io.BytesIO()
         self.doc.save(저장)
-        path.write_bytes(_zip_날짜_고정(저장.getvalue(), 때))
+        data = 저장.getvalue() if 때 is None else _zip_날짜_고정(저장.getvalue(), 때)
+        # 끝난 바이트를 같은 폴더의 임시 파일에 다 쓴 뒤 바꿔치기한다 — 쓰다 멈춰도(디스크 가득 등) 있던 파일이 잘리지 않는다
+        임시 = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        try:
+            임시.write_bytes(data)
+            os.replace(임시, path)
+        except BaseException:
+            임시.unlink(missing_ok=True)
+            raise
 
 
 class SourceDateEpochOutOfRange(ValueError):

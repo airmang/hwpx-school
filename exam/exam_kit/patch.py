@@ -27,7 +27,7 @@ from pathlib import Path
 from hwpx.document import HwpxDocument
 from hwpx.model import Paragraph
 
-from .build import final_layouts, same_layout, same_package, write_key
+from .build import _staged, final_layouts, publish, same_layout, same_package, write_key
 from .compose import compose
 from .fit import Spacer, _has_object, inner_paragraphs, para_text
 from .geometry import hancom_windows_pdf, measure
@@ -269,9 +269,16 @@ def patch(md_path: Path, prev: Path, kit: Kit | Path, *, form: Path, out_dir: Pa
     drift = MARKPEN_DRIFT if hancom_windows_pdf(key_rr.pdf) else 0.0
     fs += [_f("M8", f"두 판 배치가 다르다: {d}") for d in same_layout(lay_after, measure(key_rr.pdf, kit), drift=drift)]
     r.findings["답표시본"] = fs
-    r.문항지, r.답표시본 = out_dir / plain_path.name, out_dir / key_path.name
-    shutil.copyfile(plain_path, r.문항지)
-    shutil.copyfile(key_path, r.답표시본)
+    # 게시 — 두 판을 한 묶음으로(build.publish): 잘린 파일도, 한 판만 새 것인 폴더도 남기지 않는다
+    plain_out, key_out = out_dir / plain_path.name, out_dir / key_path.name
+    stage, old = work / "_게시", work / "_이전"
+    try:
+        publish({plain_out: _staged(plain_path, stage), key_out: _staged(key_path, stage)},
+                [p for p in (plain_out, key_out) if p.exists()], old)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+        shutil.rmtree(old, ignore_errors=True)
+    r.문항지, r.답표시본 = plain_out, key_out
     return r
 
 

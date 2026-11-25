@@ -5,8 +5,9 @@ build : 규칙 검사(lint) → 스캔 → 양식 준비(prepare_document) → �
         → 답 표시본 = 굳힌 문항지 + 정답 형광펜만(compose.add_answer_marks) → 답 표시본 렌더 1회
         → 기계 검사(verify_document·verify_render) + 두 판 대조(본문 글자 동일, 렌더 쪽수·문항 머리 자리 ±0.5pt)
         → [--compare] 제출본 렌더 + 쪽별 좌우 PNG → 보고.md.
-        시작할 때 이 원고(stem)의 옛 산출물을 지우고 '진행 중' 보고서를 먼저 쓴다. hwpx는 _렌더/에서 만들고 끝까지 간 뒤에만
-        out_dir로 옮긴다 — 중간에 멈춘 실행이 멀쩡해 보이는 옛 파일·반쯤 된 파일을 남기지 않게.
+        시작할 때 '진행 중' 보고서를 먼저 쓴다. 새 산출물은 임시 작업 폴더(_렌더_새/)에서 만들고, 끝까지 간 뒤에만 이
+        원고(stem)의 옛 산출물과 바꾼다(작업 폴더는 _렌더/로 남는다). 규칙 오류로 거부되거나 중간에 멈추면 앞선 두 판·렌더는
+        그대로이고(교사가 한/글에서 손본 판이 사라지지 않게) 반쯤 된 파일·임시 폴더는 남지 않는다 — 보고서만 이번 실행을 적는다.
         두 판을 따로 굳히지 않는다 — 한 번 굳힌 배치에 형광펜만 더해야 두 판의 나눔·간격·배치형이 같다.
         규칙 오류가 있으면 기본은 조판하지 않고 보고서만 쓴다(lint_block=False면 경고로 두고 진행).
 기계 검사 통과는 '기계 잔존 0'일 뿐이다 — 판정은 사용자 검수 몫.
@@ -15,7 +16,9 @@ build : 규칙 검사(lint) → 스캔 → 양식 준비(prepare_document) → �
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
+import os
 import re
 import shutil
 import subprocess
@@ -42,6 +45,8 @@ from .verify import Finding, _f, errors, question_heads, verify_document, verify
 # 보고서 맨 위 단계 표시 — 기본 문구. 검수 단계는 `--stage`로 적는다.
 STAGE = ("엔진 산출물 — 사용자 검수 전에는 제출·인쇄에 쓰지 않는다. "
          "한글에서 고친 나눔·간격은 남는다: 수정은 원고(md)에서 하고 다시 뽑는다.")
+WORK = "_렌더"        # 끝까지 간 실행의 작업 폴더(렌더 pdf·png, 두 판 사본)
+WORK_NEW = "_렌더_새"  # 도는 동안의 작업 폴더 — 끝까지 가면 WORK가 되고, 거부·실패하면 지운다
 HEAD_TOL = 0.5  # 두 판 문항 머리 y 허용 차(pt)
 MARKPEN_DRIFT = 0.4  # Windows 한/글: 형광펜 칠한 줄 하나가 아래 문항 머리를 미는 양의 상한(pt, 실측 약 0.3)
 판 = ("문항지", "답표시본")
@@ -154,19 +159,87 @@ def _copy_pages(pages: list[Path], dest: Path, stem: str) -> list[Path]:
     return out
 
 
-def _clean(out_dir: Path, stem: str) -> None:
-    """이 원고의 옛 산출물 — 두 판 hwpx·보고.md·렌더/{stem}_{문항지,답표시본}_p*·대조/{stem}_vs_제출본_p*·_렌더/.
+def _staged(src: Path, stage: Path) -> Path:
+    """src의 사본을 stage 폴더에 — 게시(publish)에 넘길 '다 만든 새 파일'."""
+    stage.mkdir(parents=True, exist_ok=True)
+    dest = stage / Path(src).name
+    shutil.copyfile(src, dest)
+    return dest
 
-    이름 틀을 정확히 맞춘다 — `시험`이 `시험_2`의 산출물을 지우지 않게, stem의 `[`·`]`가 glob 문법으로 읽히지 않게.
+
+def _old_outputs(out_dir: Path, stem: str) -> list[Path]:
+    """이 원고의 옛 산출물 — 두 판 hwpx·렌더/{stem}_{문항지,답표시본}_p*·대조/{stem}_vs_제출본_p*. 찾기만 한다(지우지 않는다).
+
+    이름 틀을 정확히 맞춘다 — `시험`이 `시험_2`의 산출물을 집지 않게, stem의 `[`·`]`가 glob 문법으로 읽히지 않게.
     """
-    for p in (out_dir / f"{stem}_문항지.hwpx", out_dir / f"{stem}_답표시본.hwpx", out_dir / "보고.md"):
-        p.unlink(missing_ok=True)
+    out = [p for p in (out_dir / f"{stem}_문항지.hwpx", out_dir / f"{stem}_답표시본.hwpx") if p.exists()]
     for sub, kind in (("렌더", "문항지"), ("렌더", "답표시본"), ("대조", "vs_제출본")):
         exact = re.compile(re.escape(f"{stem}_{kind}_p") + r"\d+\.png")
-        for p in (out_dir / sub).glob(f"{glob.escape(stem)}_{kind}_p*.png"):
-            if exact.fullmatch(p.name):
+        out += sorted(p for p in (out_dir / sub).glob(f"{glob.escape(stem)}_{kind}_p*.png") if exact.fullmatch(p.name))
+    return out
+
+
+def publish(new: dict[Path, Path], old: list[Path], backup: Path) -> None:
+    """한 묶음 게시 — old(옛 산출물)를 backup으로 치우고 new(자리 → 다 만든 새 파일)를 os.replace로 넣는다.
+
+    새 파일과 backup은 자리와 같은 볼륨이어야 한다(같은 출력 폴더 아래의 임시 자리). 도중에 실패하면(Windows: 옛 파일이
+    한/글에 열려 있다 등) 넣은 것을 빼고 옛 것을 제자리에 되돌린 뒤 예외를 다시 낸다 — 잘린 파일도, 두 판 가운데 하나만
+    새 것인 폴더도 남기지 않는다. 성공하면 옛 것은 backup에 남는다(부르는 쪽이 지운다).
+    """
+    backup.mkdir(parents=True, exist_ok=True)
+    moved: list[tuple[Path, Path]] = []
+    placed: list[Path] = []
+    made: list[Path] = []
+    try:
+        for i, p in enumerate(old):
+            os.replace(p, backup / f"{i}_{p.name}")
+            moved.append((p, backup / f"{i}_{p.name}"))
+        for dest, src in new.items():
+            if not dest.parent.exists():
+                dest.parent.mkdir(parents=True)
+                made.append(dest.parent)
+            os.replace(src, dest)
+            placed.append(dest)
+    except BaseException:
+        for p in placed:
+            with contextlib.suppress(OSError):
                 p.unlink()
-    shutil.rmtree(out_dir / "_렌더", ignore_errors=True)
+        for d in reversed(made):
+            with contextlib.suppress(OSError):
+                d.rmdir()
+        for p, b in reversed(moved):
+            with contextlib.suppress(OSError):
+                os.replace(b, p)
+        raise
+
+
+def _must_be_free(paths: list[Path]) -> None:
+    """끝에 바꿔 넣을 옛 산출물을 지금 바꿀 수 있는지 — Windows에서 다른 프로그램(한/글 등)에 열려 있으면 여기서 멈춘다(긴
+    렌더를 다 돌린 뒤 게시에서 막히지 않게). 제자리 이름 바꾸기라 파일은 바뀌지 않는다."""
+    for p in paths:
+        try:
+            os.rename(p, p)
+        except OSError as e:
+            raise PermissionError(f"앞선 산출물이 다른 프로그램에 열려 있어 바꿀 수 없다: {p} — 닫고 다시 조판한다") from e
+
+
+def _keep_work(work: Path, final: Path) -> None:
+    """끝까지 간 실행의 작업 폴더를 제 이름(_렌더/)으로 — 앞 실행의 것은 이때 지운다. 산출물은 이미 게시됐으니 여기서
+    막혀도(앞 실행의 pdf가 열려 있다 등) 조판을 실패로 만들지 않는다 — 옮길 수 있는 만큼 겹쳐 넣는다."""
+    shutil.rmtree(final, ignore_errors=True)
+    try:
+        os.rename(work, final)
+    except OSError:
+        with contextlib.suppress(OSError):
+            shutil.copytree(work, final, dirs_exist_ok=True)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def kept_note(out_dir: Path, stem: str) -> str:
+    """거부·중단한 실행이 보고서에 적는 줄 — 이 원고의 앞선 두 판이 폴더에 남아 있으면 그 사실, 없으면 ''."""
+    names = [p.name for p in (Path(out_dir) / f"{stem}_{ed}.hwpx" for ed in 판) if p.exists()]
+    return ("앞선 조판의 산출물은 그대로 두었다 — 이번 원고로 만든 것이 아니다: " + " · ".join(f"`{n}`" for n in names)
+            if names else "")
 
 
 def git_ignored(path: Path) -> bool | None:
@@ -194,11 +267,11 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
     out_dir.mkdir(parents=True, exist_ok=True)
     md = md_path.read_text(encoding="utf-8")
     stem = md_path.stem
-    _clean(out_dir, stem)
     r = BuildResult(보고=out_dir / "보고.md", blocked=False, stage=stage or STAGE, habits=kit.habits_source,
                     school_rules=(kit.rules or {}).get("source", "") if kit.rules else "없음(엔진 규칙만)")
+    kept = kept_note(out_dir, stem)
     r.보고.write_text(f"# 시험지 조판 보고 — {md_path.name}\n\n> **진행 중** — 이 줄이 남아 있으면 조판이 중간에 멈췄다"
-                     "(예외). 이 폴더의 산출물을 쓰지 않는다.\n", encoding="utf-8")
+                     "(예외). 이번 원고로 만든 산출물은 없다.\n" + (f"> {kept}\n" if kept else ""), encoding="utf-8")
     if git_ignored(out_dir) is False:
         r.notes.append(f"출력: 출력 폴더가 git 무시 대상이 아니다 — 실제 문항이 커밋될 수 있다: {out_dir}")
     r.lint = lint(md, md_dir=md_path.parent, rules=kit.rules, draft=draft)
@@ -206,6 +279,7 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
         r.blocked = True
         write_report(r, md_path=md_path)
         return r
+    _must_be_free(_old_outputs(out_dir, stem))
     scan = scan_markdown(md, kit.front_matter)
     r.draft = draft or scan.front.is_draft
 
@@ -217,42 +291,57 @@ def build(md_path: Path, kit: Kit | Path, out_dir: Path, *, form_path: Path, dra
     res = compose(doc, scan, kit, answer_key=False, image_root=md_path.parent)
     finalize_form(doc, kit, prepared)
     r.notes += [f"조판: {n}" for n in res.notes]
-    work = out_dir / "_렌더"  # 끝까지 간 뒤에만 hwpx를 out_dir로 옮긴다
+    work = out_dir / WORK_NEW  # 새 산출물은 여기서 만든다 — 끝까지 간 뒤에만 옛 것과 바꾼다
+    shutil.rmtree(work, ignore_errors=True)  # 죽은 실행이 남긴 것
     plain_path, key_path = work / f"{stem}_문항지.hwpx", work / f"{stem}_답표시본.hwpx"
-    s = settle(doc, kit, plain_path, work / "문항지", gap=gap, render_fn=render_fn, scan=scan,
-               balance=pack == "balanced")
-    r.notes += [f"렌더: {n}" for n in s.notes]
-    r.renders["문항지"], r.page_count, r.places = s.renders, s.render.page_count, head_places(s.layout)
-    r.renders["자간 측정"] = s.measures
-    r.spacing = spacing_summary(s.spacing, s.spacing_words)
-    r.pages = (s.first_pages, s.render.page_count)
+    try:
+        s = settle(doc, kit, plain_path, work / "문항지", gap=gap, render_fn=render_fn, scan=scan,
+                   balance=pack == "balanced")
+        r.notes += [f"렌더: {n}" for n in s.notes]
+        r.renders["문항지"], r.page_count, r.places = s.renders, s.render.page_count, head_places(s.layout)
+        r.renders["자간 측정"] = s.measures
+        r.spacing = spacing_summary(s.spacing, s.spacing_words)
+        r.pages = (s.first_pages, s.render.page_count)
 
-    # 답 표시본: 굳힌 문항지 파일 + 형광펜만
-    write_key(plain_path, key_path, kit, res.answers, draft=r.draft)
-    key_rr = render_fn(key_path, work / "답표시본")
-    r.renders["답표시본"] = 1
+        # 답 표시본: 굳힌 문항지 파일 + 형광펜만
+        write_key(plain_path, key_path, kit, res.answers, draft=r.draft)
+        key_rr = render_fn(key_path, work / "답표시본")
+        r.renders["답표시본"] = 1
 
-    # 기계 검사 — 저장된 파일을 다시 열어 본다
-    plain, key = open_seeded(plain_path), open_seeded(key_path)
-    r.layouts = final_layouts(plain, kit)
-    r.findings["문항지"] = (verify_document(plain, kit, expect_answers=None, answer_key=False, draft=r.draft)
-                          + verify_render(s.render, plain, kit, expected_pages=None))
-    fs = (verify_document(key, kit, expect_answers=res.answers, answer_key=True, draft=r.draft)
-          + verify_render(key_rr, key, kit, expected_pages=s.render.page_count))
-    fs += [_f("M8", f"두 판이 형광펜 말고도 다르다: {d}") for d in same_package(plain_path, key_path)]
-    drift = MARKPEN_DRIFT if hancom_windows_pdf(key_rr.pdf) else 0.0  # Windows 한/글은 형광펜 줄이 머리를 조금 민다
-    fs += [_f("M8", f"두 판 배치가 다르다: {d}") for d in same_layout(s.layout, measure(key_rr.pdf, kit), drift=drift)]
-    r.findings["답표시본"] = fs
+        # 기계 검사 — 저장된 파일을 다시 열어 본다
+        plain, key = open_seeded(plain_path), open_seeded(key_path)
+        r.layouts = final_layouts(plain, kit)
+        r.findings["문항지"] = (verify_document(plain, kit, expect_answers=None, answer_key=False, draft=r.draft)
+                              + verify_render(s.render, plain, kit, expected_pages=None))
+        fs = (verify_document(key, kit, expect_answers=res.answers, answer_key=True, draft=r.draft)
+              + verify_render(key_rr, key, kit, expected_pages=s.render.page_count))
+        fs += [_f("M8", f"두 판이 형광펜 말고도 다르다: {d}") for d in same_package(plain_path, key_path)]
+        drift = MARKPEN_DRIFT if hancom_windows_pdf(key_rr.pdf) else 0.0  # Windows 한/글은 형광펜 줄이 머리를 조금 민다
+        fs += [_f("M8", f"두 판 배치가 다르다: {d}") for d in same_layout(s.layout, measure(key_rr.pdf, kit), drift=drift)]
+        r.findings["답표시본"] = fs
 
-    r.pngs = {"문항지": _copy_pages(s.render.pages, out_dir / "렌더", f"{stem}_문항지"),
-              "답표시본": _copy_pages(key_rr.pages, out_dir / "렌더", f"{stem}_답표시본")}
-    if compare is not None:
-        sub = render_fn(Path(compare).resolve(), work / "제출본")
-        r.renders["제출본"] = 1
-        r.compare = side_by_side(s.render.pdf, sub.pdf, out_dir / "대조", stem=f"{stem}_vs_제출본")
+        # 게시 — 새 것을 모두 작업 폴더 안(_게시/)에 다 만든 뒤, 이 원고의 옛 산출물과 한 묶음으로 바꾼다
+        stage, old = work / "_게시", work / "_이전"
+        pngs = {"문항지": _copy_pages(s.render.pages, stage / "렌더", f"{stem}_문항지"),
+                "답표시본": _copy_pages(key_rr.pages, stage / "렌더", f"{stem}_답표시본")}
+        compared: list[Path] = []
+        if compare is not None:
+            sub = render_fn(Path(compare).resolve(), work / "제출본")
+            r.renders["제출본"] = 1
+            compared = side_by_side(s.render.pdf, sub.pdf, stage / "대조", stem=f"{stem}_vs_제출본")
+        new = {out_dir / p.name: _staged(p, stage) for p in (plain_path, key_path)}
+        new |= {out_dir / "렌더" / p.name: p for ps in pngs.values() for p in ps}
+        new |= {out_dir / "대조" / p.name: p for p in compared}
+        publish(new, _old_outputs(out_dir, stem), old)
+        shutil.rmtree(old, ignore_errors=True)
+        shutil.rmtree(stage, ignore_errors=True)
+    except BaseException:  # 실패·중단: 출력 폴더는 호출 전 그대로(보고서만 '진행 중'), 임시 작업 폴더는 지운다
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    _keep_work(work, out_dir / WORK)
+    r.pngs = {ed: [out_dir / "렌더" / p.name for p in ps] for ed, ps in pngs.items()}
+    r.compare = [out_dir / "대조" / p.name for p in compared]
     r.문항지, r.답표시본 = out_dir / plain_path.name, out_dir / key_path.name
-    shutil.copyfile(plain_path, r.문항지)
-    shutil.copyfile(key_path, r.답표시본)
     write_report(r, md_path=md_path, gap=gap, compare=compare, pack=pack)
     return r
 
@@ -295,7 +384,9 @@ def write_report(r: BuildResult, *, md_path: Path, gap: str = "distribute", comp
          *([f"> 학교 규칙: {r.school_rules}"] if r.school_rules else []), ""]
     L += ["## 파일", f"- 원고: `{_reveal(md_path)}`"]
     if r.blocked:
-        L += ["- 규칙 오류가 있어 **조판하지 않았다**(`--lint-warn`이면 경고로 두고 조판한다).", ""]
+        kept = kept_note(r.보고.parent, Path(md_path).stem)
+        L += ["- 규칙 오류가 있어 **조판하지 않았다**(`--lint-warn`이면 경고로 두고 조판한다).",
+              *([f"- {kept}"] if kept else []), ""]
     else:
         for name, p in (("문항지", r.문항지), ("답 표시본", r.답표시본)):
             L.append(f"- {name}: `{_reveal(p)}`")
@@ -376,6 +467,9 @@ def main(argv: list[str] | None = None) -> int:
         for v in lint_errors(r.lint):
             print(f"  {v.code} L{v.line_no} {v.msg}")
         print(f"조판하지 않았다 — 보고서: {r.보고}")
+        kept = kept_note(r.보고.parent, Path(a.md).stem)
+        if kept:
+            print(kept)
         return 1
     renders = sum(n for k, n in r.renders.items() if k != "자간 측정")
     print(f"쪽수 {r.page_count} · 렌더 {renders}회 · 자간 측정 {r.renders.get('자간 측정', 0)}회 · "
