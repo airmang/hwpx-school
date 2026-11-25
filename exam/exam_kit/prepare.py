@@ -8,6 +8,7 @@ finalize_form: (조판 뒤) 잔여 문단 제거 → 양식 원본 이미지·�
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,6 +92,69 @@ def _replace_range(paragraph, old: str, new: str) -> int:
             paragraph.insert_text(i, new, **({"char_pr_id_ref": pr} if pr is not None else {}))
         n += 1
     return n
+
+
+def drop_form_parts(doc: HwpxDocument, kit: Kit) -> None:
+    """킷 admin.drop — 양식이 '둘 가운데 하나를 고르라'고 준 관리 구역 부품을 통째로 걷어 낸다(머리말·꼬리말 기준을
+    잡기 전에). 예: 논술형 줄이 있는 유의 상자와 선택형 전용 유의 상자를 함께 싣고 '선택형만 낼 때는 아래 표 사용'이라고
+    안내하는 서식 — 쓰지 않을 상자와 안내 줄·빈 줄·규격표 문단을 지운다. 표는 품은 머리말·꼬리말·누름틀째 사라진다.
+
+    규칙(양식의 원래 문단 번호로 적는다 — admin.paragraph는 지운 뒤 번호):
+    - ``{"table_with": 글}`` : 최상위 문단의 표 가운데 그 글을 품은 표(꼭 하나) — 문단은 남긴다
+    - ``{"paragraph": i, "with": 글}`` : 최상위 문단 i 통째 — 그 문단(안 표까지) 글에 '글'이 있어야 하고, ""이면 빈 문단
+    맞지 않으면 '양식이 바뀌었다'로 멈춘다. 표를 먼저 떼고 문단은 뒤에서부터 지운 뒤, 남은 관리 구역 문단의 줄 배치
+    캐시를 지운다(지운 표 높이를 기억한 캐시를 한글이 믿는다 — _surgery_admin_box의 규격표와 같은 까닭)."""
+    rules = kit.admin.get("drop") or []
+    if not rules:
+        return
+    sec = doc.sections[0]
+    paras = list(sec.paragraphs)
+    tables, victims = [], []
+    for r in rules:
+        if "table_with" in r:
+            hits = [t for p in paras for t in p.tables if r["table_with"] in _table_text(t)]
+            if len(hits) != 1:
+                raise ValueError(f"양식이 바뀌었다: admin.drop 표 {r['table_with']!r}를 품은 표가 {len(hits)}개")
+            tables.append(hits[0])
+        elif "paragraph" in r:
+            i, w = r["paragraph"], r.get("with", "")
+            if not (isinstance(i, int) and 0 < i < len(paras)):
+                raise ValueError(f"킷 admin.drop 문단 번호 {i!r} — 1 이상 양식 문단 수 미만")
+            p = paras[i]
+            ok = _blank(p) if w == "" else w in (_ptext([p]) + "".join(_table_text(t) for t in p.tables))
+            if not ok:
+                raise ValueError(f"양식이 바뀌었다: admin.drop 문단 {i}에 {w!r}가 없다" if w else
+                                 f"양식이 바뀌었다: admin.drop 문단 {i}가 빈 문단이 아니다")
+            victims.append(p)
+        else:
+            raise ValueError(f"킷 admin.drop 규칙 {r!r} — table_with 또는 paragraph")
+    for t in tables:
+        t.remove()
+    _remove_paragraphs(sec, victims)
+    for p in admin_paragraphs(doc, kit):
+        p.clear_layout_cache()
+    sec.mark_dirty()
+
+
+def fix_form_text(doc: HwpxDocument, kit: Kit) -> None:
+    """킷 admin.form_fix — 양식 자체에 잘못 들어간 글(예: 머리말 제목 뒤 군더더기 글자)을 고친다. 머리말·꼬리말은
+    조판 내내 손대지 않는 불변식이라, 고치는 것도 기준선(hf)을 잡기 전 여기서만 한다.
+
+    규칙: ``{"where": {"header_with": 글} | {"footer_with": 글}, "find": 정규식, "fill": 바꿀 글}`` — 위치의 문단마다
+    find를 한 번 찾아 fill로 바꾼다(fill ""이면 지운다). 어느 문단에서도 못 찾으면 '양식이 바뀌었다'로 멈춘다 —
+    학교가 양식을 고쳐 내면 킷 규칙을 걷으라는 신호다."""
+    from .slots import _slot_paragraphs, replace_across  # slots는 prepare를 부르지 않는다 — 순환 없음
+    rules = kit.admin.get("form_fix") or []
+    for r in rules:
+        where = r.get("where") or {}
+        if not ({"header_with", "footer_with"} & where.keys()) or "find" not in r:
+            raise ValueError(f"킷 admin.form_fix 규칙 {r!r} — where(header_with·footer_with)와 find가 있어야 한다")
+        rx = re.compile(r["find"])
+        hits = [replace_across(p, rx, r.get("fill", "")) for p in _slot_paragraphs(doc, kit, where)]
+        if not any(hits):
+            raise ValueError(f"양식이 바뀌었다: admin.form_fix {r['find']!r}가 {where}에 없다")
+    if rules:
+        doc.sections[0].mark_dirty()
 
 
 def _surgery_admin_box(doc: HwpxDocument, kit: Kit) -> None:
@@ -295,6 +359,8 @@ def _remove_marks(doc: HwpxDocument, kit: Kit) -> None:
 
 def prepare_form(doc: HwpxDocument, kit: Kit) -> Prepared:
     _remove_marks(doc, kit)  # 머리말·꼬리말 안 안내 개체까지 — 불변식 기준선(hf)을 잡기 전에
+    drop_form_parts(doc, kit)  # 쓰지 않을 관리 구역 부품(품은 머리말·꼬리말째) — 이것도 기준선 전에
+    fix_form_text(doc, kit)  # 양식 머리말·꼬리말의 잘못 든 글 — 기준선 전에만 고칠 수 있다
     _check_form(doc, kit)
     hf = _header_footer_xml(doc)
     _surgery_admin_box(doc, kit)
