@@ -452,3 +452,27 @@ def test_키워드면_칸은_rule_상자의_채움색을_칠한다(킷_루트, t
         shd = tr.find(f"{W}tc/{W}tcPr/{W}shd")
         assert shd is not None, f"키워드면 {i}번째 줄에 음영이 없다"
         assert shd.get(f"{W}fill") == 해석.box[상자].fill.lstrip("#").upper()
+
+
+@pytest.mark.parametrize("고정_시각", ["1767225600", ""])
+def test_저장이_도중에_멈춰도_있던_파일은_그대로다(킷_루트, tmp_path, monkeypatch, 고정_시각):
+    """끝난 바이트를 같은 폴더의 임시 파일에 다 쓴 뒤 바꿔치기한다 — 쓰다 멈추면(디스크 가득 등) 있던 docx가 잘리지 않고
+    임시 파일도 남지 않는다. 고정 시각(SOURCE_DATE_EPOCH)이 있든 없든 같은 길이다."""
+    from pathlib import Path
+
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", 고정_시각)
+    kit = load_kit(킷_루트)
+    out = tmp_path / "out" / "학습지.docx"
+    DocxWriter(kit, resolve_kit(kit)).save(out)
+    앞선 = out.read_bytes()
+    assert zipfile.is_zipfile(out) and [p.name for p in out.parent.iterdir()] == ["학습지.docx"]
+
+    def 반만_쓰고_멈춤(self, data):
+        with open(self, "wb") as f:
+            f.write(bytes(data)[: len(data) // 2])
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_bytes", 반만_쓰고_멈춤)
+    with pytest.raises(OSError):
+        DocxWriter(kit, resolve_kit(kit)).save(out)
+    assert out.read_bytes() == 앞선 and [p.name for p in out.parent.iterdir()] == ["학습지.docx"]
