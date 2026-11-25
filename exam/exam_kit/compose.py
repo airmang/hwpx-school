@@ -79,6 +79,7 @@ def _박스_넓힌_폭(tbl, rails: tuple[int, ...], d: int) -> dict:
 
 
 _항목_박스 = ("보기", "조건")  # 항목(ㄱ.·∙) 박스 — 글만 받고, 항목 문단 모양(item_pr)을 쓴다
+_항목_머리 = re.compile(r"^(?:[ㄱ-ㅎ]\.|[∘◦∙•·])")  # 항목 박스 안 글 줄이 항목(ㄱ.·∘)인가 — 아니면 제시문(킷 box_prose)
 
 
 def box_kind(kit: Kit, block: Block) -> str:
@@ -438,6 +439,8 @@ class _Para:
     room: tuple[int, int] = (0, 0)  # 얹은 글자가 그림 위·아래로 나가는 만큼 문단 위·아래 간격을 더한다(HWPUNIT)
     stem: bool = False  # 발문 문단(머리·발문 이음·블록 뒤 참고 줄·세트 지문) — 습관 stem_align·stem_word_break·stem_condense를 받는다
     drawing: object | None = None  # obj(보이지 않는 틀) 위에 그릴 :::도형(drawing.Drawing) — 선·면·곡선을 떠 있는 개체로
+    flow: bool = False  # 세트 지문 문단 — 보호 묶음에서 뺀다(keepWithNext·keepLines 끔, 외톨이줄 보호 켬): 긴 지문은 단·쪽
+    #                     어디서든 나뉘어 공백 없이 이어진다(11-23 owner). layout.group_starts가 외톨이줄 보호로 지문 문단을 알아본다
 
 
 def _body_region(doc: HwpxDocument, kit: Kit) -> tuple[int, int]:
@@ -502,8 +505,19 @@ class _Composer:
 
     # ---- 서식 파생 -----------------------------------------------------------
 
+    def role(self, name: str) -> str:
+        """선택 역할(kit OPTIONAL_STYLE_ROLES) — 킷 styles에 있으면 그 역할, 없으면 바탕글(normal)."""
+        return name if name in self.style else "normal"
+
+    @property
+    def bogi_hanging(self) -> int:
+        """〈보기〉 항목 내어쓰기(case) — 스타일 기반 킷이면 양식 보기 스타일의 내어쓰기, 아니면 습관값."""
+        if self.kit.style_based:
+            return self._margins("box_guide").get("intent", 0)
+        return self.kit.bogi_hanging_indent
+
     def para_pr(self, role: str, *, keep: bool, gap: bool, align: str | None = None, left: int | None = None,
-                room: tuple[int, int] = (0, 0), stem: bool = False) -> str:
+                room: tuple[int, int] = (0, 0), stem: bool = False, flow: bool = False) -> str:
         """역할 스타일 paraPr의 복제 — keepWithNext=keep, keepLines=1, gap이면 prev = question_gap(case)·2배(default).
 
         1행답항은 한 번에 균등 칸 탭(tab_pr)도 단다 — 양식의 1행답항 문단·스타일은 그대로. room = (위, 아래) 더 띄울 간격
@@ -511,7 +525,7 @@ class _Composer:
         """
         if stem and align is None:
             align = self.kit.stem_align  # 습관(예: 수학 교사 왼쪽 정렬) — 없으면 양식 스타일
-        key = (role, keep, gap, align, left, room, stem)
+        key = (role, keep, gap, align, left, room, stem, flow)
         if key in self._pp:
             return self._pp[key]
         base = self.style[role][1]
@@ -523,7 +537,8 @@ class _Composer:
             # 발문이 다음 줄로 넘어가면 번호 자릿수와 무관하게 공백 한 칸만 들여 쓴다(학교 B 결정표 6) — 첫 줄은 그대로.
             # 한글 문단: 왼여백은 모든 줄, 음수 intent(내어쓰기)는 둘째 줄부터 |intent|만큼 더 들어간다(09-29 렌더 실측)
             margins = {"intent": -self.kit.metrics.space}
-        breaks: dict = {"keep_with_next": keep, "keep_lines": True}
+        breaks: dict = ({"keep_with_next": False, "keep_lines": False, "widow_orphan": True} if flow
+                        else {"keep_with_next": keep, "keep_lines": True})
         condense = None
         if stem:  # 발문의 한글 줄 나눔 기준·공백 최소값(G5-8) — 한 모양으로 함께 정한다
             if self.kit.stem_word_break:
@@ -636,7 +651,7 @@ class _Composer:
     def item_pr(self) -> str:
         """〈보기〉 항목 paraPr — 양식 스타일 복제에서 내어쓰기만 보기_내어쓰기로(case, default 2배). 왼여백은 스타일 그대로(0)."""
         if "보기항목" not in self._pp:
-            self._pp["보기항목"] = derive_para_pr(self.header, self.style["box_guide"][1], margins={"intent": self.kit.bogi_hanging_indent})
+            self._pp["보기항목"] = derive_para_pr(self.header, self.style["box_guide"][1], margins={"intent": self.bogi_hanging})
         return self._pp["보기항목"]
 
     def cell_pr(self, role: str) -> str:
@@ -931,8 +946,17 @@ class _Composer:
                                                         pid=self.code_para_pr(role))))
                 continue
             if kind == "글":
-                # 〈보기〉 항목은 앞 공백 없이 ㄱ을 x = 0에, 내어쓰기는 self.kit.bogi_hanging_indent(제출본 교사 다수 기하, Task 29)
-                more = first + self.kit.bogi_hanging_indent if block.kind in _항목_박스 else rest
+                if block.kind in _항목_박스 and "box_prose" in self.style and not _항목_머리.match(part.strip()):
+                    # 〈보기〉 안 제시문(항목 기호 없는 글) — 양식의 제시문 스타일(킷 box_prose) 그대로(11-23 owner)
+                    pf, pr = self._widths("box_prose", inner)
+                    plain = part.replace("__", "")
+                    h += (estimate_lines(plain, pf, pr, self.kit.metrics) * pitch
+                          + estimate_extra(plain, pf, pr, self.kit.metrics))
+                    items.append(("글", self._plan_cell(self._segs(part, "box_prose"), "box_prose",
+                                                        pid=self.style["box_prose"][1])))
+                    continue
+                # 〈보기〉 항목은 앞 공백 없이 ㄱ을 x = 0에, 내어쓰기는 self.bogi_hanging(습관값 또는 양식 스타일, Task 29)
+                more = first + self.bogi_hanging if block.kind in _항목_박스 else rest
                 plain = part.replace("__", "")
                 h += (estimate_lines(plain, first, more, self.kit.metrics) * pitch
                       + estimate_extra(plain, first, more, self.kit.metrics))
@@ -943,7 +967,7 @@ class _Composer:
             items.append(("개체", self._plan_cell([("", None)], role, pid=self.cell_pr(role)), obj))
         if not items:
             raise ValueError(f"L{block.line_no} :::{block.kind} 내용이 비었다")
-        return _Para("normal", [("", None)], obj=_박스계획(src, (cc, cr), tuple(rails), role, items, h, pitch, widen, widths,
+        return _Para(self.role("box_anchor"), [("", None)], obj=_박스계획(src, (cc, cr), tuple(rails), role, items, h, pitch, widen, widths,
                                                       bool(self.kit.boxes[kind_].get("inline"))))
 
     def _put_box(self, host, plan: "_박스계획"):
@@ -993,7 +1017,7 @@ class _Composer:
             if b.kind in self.kit.boxes:
                 out.append(self._box(b))
             elif b.kind == "표":
-                out.append(_Para("normal", [("", None)],
+                out.append(_Para(self.role("figure"), [("", None)],
                                  obj=self.grid(b.lines, self.table_width(), f"L{b.line_no} {where}")))
             elif b.kind == "도형":  # 좌표로 그리는 그림 — 개체마다 따로(drawing)
                 d = drawing.parse(b)
@@ -1006,7 +1030,8 @@ class _Composer:
                 room = self._overlay_room(frame, labels + bulge)
                 self.notes += [f"[글자·선 겹침] {where} 도형 글자 {t} — 그린 선과 겹친다. 이름 놓을 쪽이나 좌표를 바꾼다"
                                for t in self._drawing_clash(d, labels)]
-                out.append(_Para("normal", [("", None)], obj=frame, align="CENTER", overlays=labels, room=room, drawing=d))
+                out.append(_Para(self.role("figure"), [("", None)], obj=frame, align="CENTER", overlays=labels, room=room,
+                                 drawing=d))
             elif b.kind == "그림":
                 at = _picture_attrs(b)
                 pic = self.picture(b, self.kit.columns["width"])
@@ -1019,10 +1044,10 @@ class _Composer:
                     self.notes.append(f"{where} 그림 위 얹기(글자 {len(over) - n_dot}·점 {n_dot}): 글자·점이 꼭짓점·선분 "
                                       "자리에 앉았는지, 그림 속 길이가 점선 호 + 숫자인지 렌더에서 사람이 본다")
                 if at["align"] == "left":  # 단 왼쪽(+ 띄움) — 글자처럼 취급한 그림을 왼쪽 정렬 문단에, 띄움은 문단 왼여백
-                    out.append(_Para("normal", [("", None)], obj=pic, align="LEFT", left=round(at["indent_cm"] * CM),
+                    out.append(_Para(self.role("figure"), [("", None)], obj=pic, align="LEFT", left=round(at["indent_cm"] * CM),
                                      overlays=over, room=room))
                 else:
-                    out.append(_Para("normal", [("", None)], obj=pic, align="CENTER", overlays=over, room=room))
+                    out.append(_Para(self.role("figure"), [("", None)], obj=pic, align="CENTER", overlays=over, room=room))
             elif b.kind == "코드":  # 문항·세트의 코드 블록 — 줄마다 고정폭·왼쪽 정렬 문단(Task 30)
                 numbered = any(_코드_번호.match(x) for x in b.lines)
                 mg = self._margins("normal")
@@ -1089,16 +1114,17 @@ class _Composer:
     def _set_head(self, s: QuestionSet) -> list[_Para]:
         a, b = s.rng
         segs: list[tuple[str | equation.Math, str | None]] = [(self.kit.typeset["set_head"].format(a=a, b=b), self.samples.세트_charpr)]
+        head, body = self.role("set_head"), self.role("passage")  # 양식에 세트 지시문·지문 스타일이 있으면 그 스타일(11-23)
         if s.passage:
-            segs += self._segs(" " + s.passage[0], "normal")
-        return [_Para("normal", segs, gap=True, stem=True)] + [_Para("normal", self._segs(line, "normal"), stem=True)
-                                                               for line in s.passage[1:]]
+            segs += self._segs(" " + s.passage[0], head)
+        return [_Para(head, segs, gap=True, stem=True)] + [_Para(body, self._segs(line, body), stem=True, flow=True)
+                                                           for line in s.passage[1:]]
 
     @staticmethod
     def _keep(paras: list[_Para]) -> None:
         """한 보호 묶음: 마지막을 뺀 전부 keepWithNext. keepLines는 para_pr가 늘 켠다."""
         for p in paras[:-1]:
-            p.keep = True
+            p.keep = not p.flow  # 지문 문단은 묶음에 넣지 않는다 — 세트 머리만 첫 지문 문단과 함께
         paras[-1].keep = False
 
     def plan(self, scan: Scan) -> list[_Para]:
@@ -1148,7 +1174,7 @@ class _Composer:
     def materialize(self, spec: _Para):
         sid, _, cp = self.style[spec.role]
         pid = self.para_pr(spec.role, keep=spec.keep, gap=spec.gap, align=spec.align, left=spec.left, room=spec.room,
-                           stem=spec.stem)
+                           stem=spec.stem, flow=spec.flow)
         sec = self.doc.sections[0]
         p = sec.add_paragraph("", para_pr_id_ref=pid, char_pr_id_ref=cp, inherit_style=False)
         p.style_id_ref = sid
