@@ -9,7 +9,7 @@ from exam_kit.onboard import TODO, draft_kit, scan, todo_paths
 
 def test_해부_누름틀_양식(양식_hwpx):
     r = scan(양식_hwpx)
-    assert "## 누름틀 20개" in r and "## 메모 0개" in r
+    assert "## 누름틀 27개" in r and "## 메모 2개" in r  # 11-25 새 양식: 유의 상자 두 벌·메모 2
     assert "number.mode 후보 autonumber" in r and "첫 쪽 나눔 문단 #" in r
 
 

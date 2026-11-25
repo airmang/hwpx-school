@@ -1029,8 +1029,11 @@ class FormProfile:
 
 
 def kit_profile(kit: Kit) -> FormProfile:
+    # 본문 첫 문단 = 관리 구역(문단 0 ~ admin.paragraph) 다음 — 관리 구역이 여러 문단인 양식(결재표·유의 상자가 따로)
+    본문_첫 = kit.admin.get("paragraph", 0) + 1
     return FormProfile(kit.name, kit.tailbox["match_text"], kit.leftover_prefix, kit.boxes,
-                       tuple(kit.front_matter["required"]), lambda doc: kit_front(doc, kit))
+                       tuple(kit.front_matter["required"]), lambda doc: kit_front(doc, kit),
+                       start=lambda heads: 본문_첫)
 
 
 def _columns(doc: HwpxDocument) -> int:
