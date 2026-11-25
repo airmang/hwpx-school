@@ -2,7 +2,7 @@
 name = "assessment"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
-dependencies = ["python-hwpx>=7.0,<8", "lxml>=5,<7"]
+dependencies = ["python-hwpx>=7.0,<8", "python-hwpx-automation[oracle]>=8.0,<9", "lxml>=5,<7"]
 
 [dependency-groups]
 dev = [

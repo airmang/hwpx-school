@@ -2,7 +2,7 @@
 name = "worksheet"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
-dependencies = ["python-hwpx>=7.0,<8", "python-hwpx-automation[preview]>=8.0,<9", "python-docx>=1.2,<2"]
+dependencies = ["python-hwpx>=7.0,<8", "python-hwpx-automation[oracle,preview]>=8.0,<9", "python-docx>=1.2,<2"]
 
 [dependency-groups]
 dev = [

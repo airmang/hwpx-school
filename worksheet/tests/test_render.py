@@ -1,16 +1,22 @@
+import inspect
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+import worksheet.render as 렌더_모듈
 from _helpers import _png
 from worksheet.compose import compose
 from worksheet.render import (
+    RenderError,
     RenderResult,
+    RenderUnavailable,
     _gdocs_명령들,
     _잔존_쪽_PNG_지우기,
     _parse_result,
-    _pick,
+    _read_completed,
     _쪽_파일_정리,
     oracle_python,
     render_gdocs,
@@ -256,12 +262,6 @@ def test_이전_실행의_잔존_PNG는_이번_렌더_결과와_안_섞인다(tm
 
 
 @pytest.mark.hancom
-def test_오라클_런타임을_찾는다():
-    """이 머신의 플러그인 캐시에 의존한다 — 다른 머신·CI의 기본 실행에서는 실패한다."""
-    assert oracle_python().exists()
-
-
-@pytest.mark.hancom
 def test_실한컴_렌더가_PNG를_낸다(킷_루트, tmp_path):
     md = tmp_path / "r.md"
     md.write_text(기본, encoding="utf-8")
@@ -270,6 +270,8 @@ def test_실한컴_렌더가_PNG를_낸다(킷_루트, tmp_path):
 
     결과 = render_hancom(hwpx, tmp_path / "r.png")
     assert 결과.pages >= 1
+    assert 결과.pdf == (tmp_path / "r.pdf").resolve() and 결과.pdf.exists()
+    assert [p.name for p in 결과.pngs] == [f"r-{i:03d}.png" for i in range(1, 결과.pages + 1)]
     assert 결과.pngs[0].exists()
     assert 결과.pngs[0].stat().st_size > 5_000
 
@@ -335,36 +337,7 @@ def test_parse_result은_pngs_개수가_pages와_다르면_RuntimeError():
         _parse_result(stdout)
 
 
-# --- _pick — 후보 경로 중 버전이 가장 높은 것(사전순이 아니라 숫자 비교) -------------------
-
-
-def test_pick은_버전을_사전순이_아니라_숫자로_비교한다():
-    """사전순 문자열 비교로는 '2.10.0' < '2.2.0'이 된다 — 진짜로는 2.10.0이 더 높은 버전이다."""
-    낮음 = Path("/x/hwpx-plugin/2.2.0/.hwpx-mcp-runtime/envs/e/gen-1/bin/python")
-    높음 = Path("/x/hwpx-plugin/2.10.0/.hwpx-mcp-runtime/envs/e/gen-1/bin/python")
-    assert _pick([낮음, 높음]) == 높음
-    assert _pick([높음, 낮음]) == 높음  # 순서를 바꿔도 결과가 같다
-
-
-def test_pick은_후보가_하나면_그것을_돌려준다():
-    유일 = Path("/x/hwpx-plugin/1.0.0/.hwpx-mcp-runtime/envs/e/gen-1/bin/python")
-    assert _pick([유일]) == 유일
-
-
-# --- 버전 조각이 숫자가 아니어도(프리릴리스 접미사 등) 안 터진다 --------------------
-
-
-def test_pick은_숫자가_아닌_버전_조각에서_안_터진다():
-    """'2.10.0-beta'처럼 마지막 조각이 숫자로 안 읽히면 `int()`가 ValueError를 던진다 —
-    0으로 치고 원본 문자열을 보조 키로 써서 그래도 결정적으로 고른다(터지지만 않으면 된다;
-    어느 쪽이 "더 높다"인지는 이 테스트가 못박지 않는다)."""
-    프리릴리스 = Path("/x/hwpx-plugin/2.10.0-beta/.hwpx-mcp-runtime/envs/e/gen-1/bin/python")
-    정식 = Path("/x/hwpx-plugin/2.2.0/.hwpx-mcp-runtime/envs/e/gen-1/bin/python")
-    결과 = _pick([프리릴리스, 정식])
-    assert 결과 in (프리릴리스, 정식)
-
-
-# --- oracle_python — HWPX_ORACLE_PY 환경변수가 glob보다 우선 -----------------------------
+# --- oracle_python — HWPX_ORACLE_PY가 있으면 그 인터프리터, 없으면 이 프로젝트의 것 --------
 
 
 def test_oracle_python은_HWPX_ORACLE_PY가_있으면_그_경로를_쓴다(monkeypatch, tmp_path):
@@ -378,3 +351,157 @@ def test_oracle_python은_HWPX_ORACLE_PY가_없는_파일이면_거부한다(mon
     monkeypatch.setenv("HWPX_ORACLE_PY", str(tmp_path / "없는파일"))
     with pytest.raises(FileNotFoundError):
         oracle_python()
+
+
+# --- 공개 render-pdf 호출(#18) — 플러그인 캐시·생성형 스크립트 없이 ------------------------
+
+
+@pytest.fixture
+def 플러그인_없는_집(monkeypatch, tmp_path):
+    """hwpx 플러그인을 설치하지 않은 사용자 — 홈에 플러그인 캐시가 없고 HWPX_ORACLE_PY도 없다."""
+    집 = tmp_path / "home"
+    집.mkdir()
+    monkeypatch.setenv("HOME", str(집))
+    monkeypatch.setenv("USERPROFILE", str(집))
+    monkeypatch.delenv("HWPX_ORACLE_PY", raising=False)
+    return 집
+
+
+def test_렌더_모듈은_플러그인_캐시와_사설_오라클을_쓰지_않는다():
+    소스 = inspect.getsource(렌더_모듈)
+    for 금지 in (".hwpx-mcp-runtime", "plugins/cache", "MacHancomOracle", "python -c", '"-c"'):
+        assert 금지 not in 소스, 금지
+
+
+def test_oracle_python은_플러그인이_없어도_이_프로젝트의_인터프리터를_쓴다(플러그인_없는_집):
+    assert oracle_python() == Path(sys.executable)
+
+
+def _성공_줄(명령: list[str], pages: int) -> str:
+    접두 = 명령[명령.index("--png") + 1]
+    return json.dumps({
+        "ok": True,
+        "pdf": 명령[5],
+        "pages": pages,
+        "pngs": [f"{접두}-{i:03d}.png" for i in range(1, pages + 1)],
+        "backend": "windows",
+    })
+
+
+def test_render_hancom은_공개_render_pdf_명령을_부른다(플러그인_없는_집, monkeypatch, tmp_path):
+    잡힌: dict = {}
+
+    def 가짜_run(명령, **kw):
+        잡힌["명령"], 잡힌["kw"] = 명령, kw
+        return subprocess.CompletedProcess(명령, 0, stdout="잡음 줄\n" + _성공_줄(명령, 2) + "\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", 가짜_run)
+    hwpx = tmp_path / "in.hwpx"
+    결과 = render_hancom(hwpx, tmp_path / "out" / "r.png", dpi=96, timeout=120)
+
+    명령 = 잡힌["명령"]
+    assert 명령[:4] == [sys.executable, "-m", "hwpx_automation.office.rendering", "render-pdf"]
+    assert 명령[4:6] == [str(hwpx.resolve()), str((tmp_path / "out" / "r.pdf").resolve())]
+    assert 명령[명령.index("--png") + 1] == str((tmp_path / "out" / "r").resolve())
+    assert 명령[명령.index("--dpi") + 1] == "96"
+    assert 명령[명령.index("--backend") + 1] == "auto"
+    assert 명령[명령.index("--timeout") + 1] == "120"
+    assert "--json" in 명령
+    assert 잡힌["kw"]["timeout"] > 120  # 바깥 기한은 render-pdf 자기 예산보다 길다
+    assert (tmp_path / "out").is_dir()
+    assert 결과.pages == 2
+    assert [p.name for p in 결과.pngs] == ["r-001.png", "r-002.png"]
+    assert 결과.pdf == (tmp_path / "out" / "r.pdf").resolve()
+
+
+def test_render_hancom은_HWPX_ORACLE_PY_인터프리터로도_같은_공개_진입점을_부른다(monkeypatch, tmp_path):
+    다른_파이썬 = tmp_path / "render-env" / "python.exe"
+    다른_파이썬.parent.mkdir()
+    다른_파이썬.write_text("", encoding="utf-8")
+    monkeypatch.setenv("HWPX_ORACLE_PY", str(다른_파이썬))
+    잡힌: list = []
+
+    def 가짜_run(명령, **kw):
+        잡힌.append(명령)
+        return subprocess.CompletedProcess(명령, 0, stdout=_성공_줄(명령, 1), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", 가짜_run)
+    render_hancom(tmp_path / "in.hwpx", tmp_path / "r.png")
+    assert 잡힌[0][:4] == [str(다른_파이썬), "-m", "hwpx_automation.office.rendering", "render-pdf"]
+
+
+def test_render_hancom은_시간_초과를_RuntimeError로_낸다(플러그인_없는_집, monkeypatch, tmp_path):
+    def 가짜_run(명령, **kw):
+        raise subprocess.TimeoutExpired(명령, kw["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", 가짜_run)
+    with pytest.raises(RuntimeError, match="시간 초과"):
+        render_hancom(tmp_path / "in.hwpx", tmp_path / "r.png", timeout=5)
+
+
+# --- _read_completed — render-pdf의 종료 코드·JSON 결과를 읽는다, 순수 함수 ---------------
+
+
+def _실패_줄(코드: str, 메시지: str = "합성 사유") -> str:
+    return json.dumps({"ok": False, "error": 코드, "message": 메시지, "backend": None})
+
+
+def test_read_completed는_한컴이_없으면_RenderUnavailable():
+    with pytest.raises(RenderUnavailable) as 잡힘:
+        _read_completed(3, _실패_줄("hancom-unavailable", "no Hancom reachable"), "")
+    assert 잡힘.value.code == "hancom-unavailable"
+    assert "no Hancom reachable" in str(잡힘.value)
+    assert isinstance(잡힘.value, RuntimeError)  # 기존 호출자의 `except RuntimeError`가 그대로 잡는다
+
+
+def test_read_completed는_렌더_실패_코드를_RenderError로_낸다():
+    with pytest.raises(RenderError) as 잡힘:
+        _read_completed(1, _실패_줄("hancom-refused"), "")
+    assert 잡힘.value.code == "hancom-refused"
+    assert not isinstance(잡힘.value, RenderUnavailable)
+
+
+def test_read_completed는_결과_줄_없이_끝나면_stderr를_담는다():
+    with pytest.raises(RuntimeError, match="종료 코드 1.*No module named"):
+        _read_completed(1, "", "No module named hwpx_automation")
+
+
+def test_read_completed는_결과_줄_없이_코드_3이면_RenderUnavailable():
+    with pytest.raises(RenderUnavailable):
+        _read_completed(3, "", "합성 사유")
+
+
+def test_read_completed는_0이_아닌_코드의_성공_줄을_믿지_않는다():
+    줄 = json.dumps({"ok": True, "pdf": "/t/r.pdf", "pages": 1, "pngs": ["/t/r-001.png"], "backend": "mac"})
+    with pytest.raises(RuntimeError, match="종료 코드 1"):
+        _read_completed(1, 줄, "")
+
+
+def test_read_completed는_성공_줄을_RenderResult로_읽는다():
+    줄 = json.dumps({"ok": True, "pdf": "/t/r.pdf", "pages": 1, "pngs": ["/t/r-001.png"], "backend": "mac"})
+    assert _read_completed(0, 줄, "") == RenderResult(pages=1, pngs=(Path("/t/r-001.png"),), pdf=Path("/t/r.pdf"))
+
+
+# --- 진짜 공개 명령을 한컴 없이 돌린다 — [oracle] extra가 이 프로젝트에 깔려 있어야 지난다 ---
+
+
+def test_실제_render_pdf는_구조_전용이면_RenderUnavailable(킷_루트, 플러그인_없는_집, monkeypatch, tmp_path):
+    """`HWPX_ORACLE_STRUCTURAL_ONLY=1`이면 render-pdf는 한컴을 찾지도 띄우지도 않고 종료 코드 3과
+    `hancom-unavailable` 결과 줄로 끝난다. 그 앞 단계(입력 hwpx 검사·pymupdf 확인)는 실제로 돈다."""
+    md = tmp_path / "r.md"
+    md.write_text(기본, encoding="utf-8")
+    hwpx = tmp_path / "r.hwpx"
+    compose(md, 킷_루트, hwpx)
+    monkeypatch.setenv("HWPX_ORACLE_STRUCTURAL_ONLY", "1")
+
+    with pytest.raises(RenderUnavailable) as 잡힘:
+        render_hancom(hwpx, tmp_path / "r.png")
+    assert 잡힘.value.code == "hancom-unavailable"
+    assert not (tmp_path / "r.pdf").exists()
+
+
+def test_실제_render_pdf는_없는_입력을_RenderError로_낸다(플러그인_없는_집, monkeypatch, tmp_path):
+    monkeypatch.setenv("HWPX_ORACLE_STRUCTURAL_ONLY", "1")
+    with pytest.raises(RenderError) as 잡힘:
+        render_hancom(tmp_path / "없는.hwpx", tmp_path / "r.png")
+    assert 잡힘.value.code == "input-missing"
