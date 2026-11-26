@@ -79,6 +79,9 @@ def _박스_넓힌_폭(tbl, rails: tuple[int, ...], d: int) -> dict:
 
 
 _항목_박스 = ("보기", "조건")  # 항목(ㄱ.·∙) 박스 — 글만 받고, 항목 문단 모양(item_pr)을 쓴다
+# 자료·〈조건〉 박스 글 줄의 머리 기호 — 킷 typeset.box_hanging이면 둘째 줄부터 이 기호 뒤 글자 자리에서 시작한다(내어쓰기).
+# 연수자료 '문단 내어쓰기(shift + Tab)'를 조판이 한다. 〈보기〉 항목은 따로(bogi_hanging_indent — 제출본 실측).
+_줄_머리 = re.compile(r"^(?:\([가-힣ㄱ-ㅎA-Za-z0-9]\)|[∘◦※]|[ㄱ-ㅎ]\.|[가-힣]{1,4}:)\s+")
 
 
 def box_kind(kit: Kit, block: Block) -> str:
@@ -282,6 +285,14 @@ def parse_md_table(lines, where: str) -> tuple[list[str] | None, list[list[str]]
     return header, body
 
 
+_줄바꿈 = re.compile(r"\s*<br\s*/?>\s*", re.I)
+
+
+def _br(text: str) -> list[str]:
+    """md 표 칸 글 → 원고가 `<br>`로 나눈 토막들(조판은 칸 안 줄바꿈 hp:lineBreak로 잇는다)."""
+    return _줄바꿈.split(text)
+
+
 def column_widths(rows: list[list[str]], total: int, minimum: int, pad: int = 0, *, m: Metrics) -> list[int]:
     """열 폭 = 열에서 가장 긴 칸의 글자 폭 + pad(셀 좌우 여백)에 비례, 최소 minimum, 합은 정확히 total.
 
@@ -418,6 +429,7 @@ class _박스계획:
     widen: int | None
     widths: dict
     inline: bool
+    title: tuple[str, str] | None = None  # 다른 견본을 빌린 박스(킷 boxes.<종류>.from)의 제목 바꾸기 (견본 제목, 이 박스 제목)
 
 
 @dataclass
@@ -476,6 +488,11 @@ def harvest_samples(doc: HwpxDocument, kit: Kit) -> Samples:
     extra = {}
     for kind, spec in kit.boxes.items():
         if kind in ("보기", "자료") or not isinstance(spec, dict):
+            continue
+        if spec.get("from"):  # 양식에 견본이 없는 박스(예: 〈조건〉) — 다른 견본(〈보기〉)을 빌려 제목만 바꾼다(_put_box)
+            extra[kind] = {"보기": 보기, "자료": 자료}.get(spec["from"]) or extra.get(spec["from"])
+            if extra[kind] is None:
+                raise ValueError(f"킷 boxes.{kind}.from {spec['from']!r} — 그 견본이 없다")
             continue
         t = next((t for t in tables if is_sample_table(t, spec, ids[kit.styles[sample_role(spec)]][0])), None)
         if t is None:
@@ -600,7 +617,7 @@ class _Composer:
         cp = self.code_char_pr(role)
         if self.kit.code_style != "gutter" or not numbered:
             return [(line, cp)]
-        grey = self.code_char_pr(role, "#666666")
+        grey = self.code_char_pr(role, self.kit.typeset.get("code_gray", "#666666"))  # 킷이 검정으로 둘 수 있다(인쇄에서 흐림)
         m = _코드_번호.match(line)
         if m:
             head, body = [(m.group(1) + " ", grey), ("│ ", grey)], m.group(2)
@@ -638,6 +655,23 @@ class _Composer:
         if "보기항목" not in self._pp:
             self._pp["보기항목"] = derive_para_pr(self.header, self.style["box_guide"][1], margins={"intent": self.kit.bogi_hanging_indent})
         return self._pp["보기항목"]
+
+    def hang(self, line: str, role: str) -> int | None:
+        """박스 글 줄의 머리 기호(_줄_머리) 폭(HWPUNIT) — 킷 typeset.box_hanging이 아니거나 기호가 없으면 None.
+        폭은 본문 글자 폭 추정(metrics)을 그 역할 글자 크기로 늘이고 줄인 값이다."""
+        if not self.kit.typeset.get("box_hanging"):
+            return None
+        m = _줄_머리.match(line.replace("__", ""))
+        if m is None:
+            return None
+        return round(_글폭(m.group(0), self.kit.metrics) * self.글자_크기(self.style[role][2]) / self.kit.metrics.char_height)
+
+    def hang_pr(self, role: str, w: int) -> str:
+        """역할 스타일 paraPr에서 내어쓰기만 −w로(case, default 2배) — 둘째 줄이 머리 기호 뒤 글자 자리에서 시작한다."""
+        key = ("내어쓰기", role, w)
+        if key not in self._pp:
+            self._pp[key] = derive_para_pr(self.header, self.style[role][1], margins={"intent": -w})
+        return self._pp[key]
 
     def cell_pr(self, role: str) -> str:
         """표 칸 문단 paraPr — 역할 스타일 paraPr를 가운데 정렬로, 왼·오른 여백과 들여쓰기는 0(두 분기 모두).
@@ -690,7 +724,9 @@ class _Composer:
         header, body = parse_md_table(lines, where)
         rows = ([header] if header else []) + body
         pad = self.kit.grid["in_margin"]["left"] + self.kit.grid["in_margin"]["right"]
-        widths = column_widths(rows, width, self.kit.grid["min_col"], pad, m=self.kit.metrics)
+        # 칸 안 `<br>` = 원고가 정한 줄바꿈 — 열 폭은 가장 넓은 토막으로 잰다
+        longest = [[max(_br(t), key=lambda s: _글폭(s.replace("__", ""), self.kit.metrics)) for t in r] for r in rows]
+        widths = column_widths(longest, width, self.kit.grid["min_col"], pad, m=self.kit.metrics)
         base = self.plain_bf()
         pitch = self._line_pitch("normal")
         cells, heights = [], []
@@ -701,7 +737,7 @@ class _Composer:
                 bf = self.bf_variant(base, top=("DOUBLE_SLIM", "0.4 mm"))
             else:
                 bf = base
-            wrapped = [wrap_words(text, w - pad, self.kit.metrics) for text, w in zip(row, widths)]
+            wrapped = ["\n".join(wrap_words(s, w - pad, self.kit.metrics) for s in _br(text)) for text, w in zip(row, widths)]
             cells.append([(self._plan_cell(self._segs(text, "normal"), "normal"), bf) for text in wrapped])
             h = max(_칸_글_높이(text, w - pad, pitch, self.kit.metrics) for text, w in zip(wrapped, widths))
             heights.append(h + self.kit.metrics.char_height + self.kit.grid["in_margin"]["top"] + self.kit.grid["in_margin"]["bottom"])
@@ -932,25 +968,40 @@ class _Composer:
                 continue
             if kind == "글":
                 # 〈보기〉 항목은 앞 공백 없이 ㄱ을 x = 0에, 내어쓰기는 self.kit.bogi_hanging_indent(제출본 교사 다수 기하, Task 29)
-                more = first + self.kit.bogi_hanging_indent if block.kind in _항목_박스 else rest
+                w = None if block.kind == "보기" else self.hang(part, role)
+                if w is not None:  # 자료·〈조건〉의 (가)·※·∘ 줄 — 둘째 줄을 기호 뒤 글자 자리에(킷 typeset.box_hanging)
+                    mg = self._margins(role)
+                    line_w = inner - mg["left"] - mg["right"]
+                    first_, more, line_pid = line_w, line_w - w, self.hang_pr(role, w)
+                elif block.kind in _항목_박스:
+                    first_, more, line_pid = first, first + self.kit.bogi_hanging_indent, self.item_pr()
+                else:
+                    first_, more, line_pid = first, rest, pid
                 plain = part.replace("__", "")
-                h += (estimate_lines(plain, first, more, self.kit.metrics) * pitch
-                      + estimate_extra(plain, first, more, self.kit.metrics))
-                items.append(("글", self._plan_cell(self._segs(part, role), role,
-                                                    pid=self.item_pr() if block.kind in _항목_박스 else pid)))
+                h += (estimate_lines(plain, first_, more, self.kit.metrics) * pitch
+                      + estimate_extra(plain, first_, more, self.kit.metrics))
+                items.append(("글", self._plan_cell(self._segs(part, role), role, pid=line_pid)))
                 continue
             obj = self.grid(part, inner, f"L{block.line_no} :::자료 안의") if kind == "표" else self.picture(part, inner)
             items.append(("개체", self._plan_cell([("", None)], role, pid=self.cell_pr(role)), obj))
         if not items:
             raise ValueError(f"L{block.line_no} :::{block.kind} 내용이 비었다")
+        spec = self.kit.boxes[kind_]
+        title = (self.kit.boxes[spec["from"]]["title"], spec["title"]) if spec.get("from") else None
         return _Para("normal", [("", None)], obj=_박스계획(src, (cc, cr), tuple(rails), role, items, h, pitch, widen, widths,
-                                                      bool(self.kit.boxes[kind_].get("inline"))))
+                                                      bool(spec.get("inline")), title))
 
     def _put_box(self, host, plan: "_박스계획"):
         """박스를 host 문단의 첫 자리에 — 견본 표를 copy_to(offset=0)로 복사(새 id, 줄 캐시 없음 — B14)하고, 넓히기·글자처럼
         취급을 맞춘 뒤 내용 칸의 문단을 계획대로 새로 짓고 옛 문단을 지운다. 내용 행 높이는 줄 높이 합(_set_box_row)."""
         t = plan.src.copy_to(host, offset=0)
         cc, cr = plan.content
+        if plan.title is not None:  # 〈보기〉 견본을 빌린 〈조건〉 등 — 제목 칸 글만 바꾼다(칸 모양·테두리는 견본 그대로)
+            old_t, new_t = plan.title
+            n = sum(run.replace_text(old_t, new_t) for x in t.iter_grid() if x.is_anchor
+                    for p in x.cell.paragraphs for run in p.runs)
+            if not n:
+                raise ValueError(f"양식이 바뀌었다: 빌린 견본에 제목 {old_t!r}이 없다")
         if plan.widen is not None:  # 단 폭 박스 — 표 폭 +widen, 칸 폭은 _박스_넓힌_폭대로
             cols = t.column_widths
             t.set_column_width(0, cols[0] + plan.widen)  # 표 폭을 넓히고(그 열을 지나는 칸도 함께 바뀐다) 칸 폭을 칸마다 맞춘다
@@ -992,6 +1043,9 @@ class _Composer:
         for b in blocks:
             if b.kind in self.kit.boxes:
                 out.append(self._box(b))
+                if b.attrs.get("이름"):  # 박스 이름 — 연수자료 '자료 제목은 < > 안에 써서 자료 하단(중앙)에'
+                    name = self.kit.typeset.get("box_name", "〈{name}〉").format(name=b.attrs["이름"])
+                    out.append(_Para("normal", self._segs(name, "normal"), align="CENTER"))
             elif b.kind == "표":
                 out.append(_Para("normal", [("", None)],
                                  obj=self.grid(b.lines, self.table_width(), f"L{b.line_no} {where}")))
