@@ -13,16 +13,16 @@ def test_kit_json_로드():
     assert kit.name == 킷_디렉터리.name  # 킷 이름 = 킷 폴더 이름
     assert kit.page["width"] == 72852 and kit.page["height"] == 103180
     assert kit.columns == {"count": 2, "gap": 1420, "width": 30898, "body_table_width": 30088}
-    assert len(kit.slots) == 20 and kit.slots["과목"] == "1813016033" and kit.slots["총쪽수"] == "1813016051"
+    assert len(kit.slots) == 18 and kit.slots["과목"] == "1813016033" and kit.slots["총쪽수"] == "1103023503"  # 11-25 새 양식(누름틀은 논술형 상자째 걷힌다)
     assert set(kit.styles) == {"normal", "number", "choice1", "choice2", "choice3", "choice5", "box_guide", "box"}
     assert {k: v for k, v in kit.tailbox.items() if k != "note"} == {
         "vertRelTo": "PAPER", "horzRelTo": "PAPER", "horzOffset": 37136, "vertOffset": 85400,
         "width": 30888, "height": 8974, "outMargin": 284, "room": 980,  # room = 줄 아래끝 여유(렌더 실측, Task 15b)
         "match_text": "저작권", "marker": "확인 사항"}  # marker = 단 폭 박스 사이에서 꼬리 박스를 가리는 표지 글(G5-7)
-    assert kit.slots_removed == ["논술형_문항수", "논술형_만점"]
-    assert kit.notice_box_height == 10668
+    assert kit.slots_removed == []  # 새 양식: 선택형 전용 유의 상자에는 논술형 누름틀이 없다
+    assert kit.notice_box_height is None  # 선택형 상자가 이미 맞는 높이
     assert len(kit.slot_ids()) == 18
-    assert kit.placeholders["요일"] == "요일" and kit.placeholders["머리_학기"] is None and len(kit.placeholders) == 20
+    assert kit.placeholders["요일"] == "요일" and kit.placeholders["머리_학기"] is None and len(kit.placeholders) == 18
 
 
 def test_킷_버전은_README_이력_맨_위와_같다():
@@ -41,8 +41,8 @@ def test_양식_sha가_kit과_같다(양식_hwpx):
 
 def test_style_ids_양식(양식_hwpx):
     ids = style_ids(HwpxDocument.open(str(양식_hwpx)))
-    assert ids["문항자동번호넣기"] == ("1", "24", "25")
-    assert ids["박스안내용"] == ("7", "25", "8")
+    assert ids["문항자동번호넣기"] == ("1", "26", "25")  # 11-25 새 양식(문단 모양 번호가 둘 밀렸다)
+    assert ids["박스안내용"] == ("7", "28", "8")
 
 
 def test_verify_kit_양식(양식_hwpx):
@@ -121,9 +121,9 @@ def test_양식에서_찾고_지우는_문구는_킷에_있다():  # 범용화 R
     import re
 
     kit = load_kit(킷_디렉터리)
-    assert kit.admin["paragraph"] == 0 and kit.admin["notice_table_with"] == "인쇄된 문항지"
-    assert kit.trim == {"rule": "first_page_break"} and kit.sample_region == "role_styles" and kit.leftover_prefix == "(원안지 마지막 장"
-    assert len(kit.guidance_text) == 8 and len(kit.sample_text) == 5
+    assert kit.admin["paragraph"] == 1 and kit.admin["notice_table_with"] == "인쇄된 문항지"  # 결재표·유의 상자 두 문단(admin.drop 뒤)
+    assert kit.trim == {"rule": "first_page_break"} and kit.sample_region == "role_styles" and kit.leftover_prefix == "(아래 문구는 원안지"
+    assert len(kit.guidance_text) == 7 and len(kit.sample_text) == 5
     assert kit.forbidden_text == kit.guidance_text + kit.sample_text
     코드 = "".join(p.read_text(encoding="utf-8") for p in (Path(__file__).resolve().parents[1] / "exam_kit").glob("*.py"))
     코드 = re.sub(r"#.*|\"\"\"[\s\S]*?\"\"\"", "", 코드)  # 주석·docstring 밖에서만 본다

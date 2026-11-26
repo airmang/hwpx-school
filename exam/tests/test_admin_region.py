@@ -18,7 +18,7 @@ from hwpx.document import HwpxDocument
 
 from exam_kit.kit import admin_paragraphs, admin_tables, load_kit
 from exam_kit.onboard import _body_columns
-from exam_kit.prepare import _replace_range, sample_role
+from exam_kit.prepare import _replace_range, drop_form_parts, fix_form_text, sample_role
 from exam_kit.slots import fill_total_pages, pages_filled, read_total_pages, replace_across
 
 _합성 = Path(__file__).resolve().parents[1] / "kits" / "synthetic"
@@ -155,3 +155,97 @@ def test_본문_단은_단_수가_가장_많은_정의():
     assert _body_columns([one, two]) is two
     assert _body_columns([two]) is two
     assert _body_columns([]) is None
+
+# ---- 고르라고 준 관리 구역 부품 걷기(admin.drop) -----------------------------------------
+
+def _두_벌_서식():
+    """결재표 + 논술형 유의 상자(문단 0) · 안내 줄(1) · 선택형 유의 상자(2) · 빈 줄(3) · 규격표(4) · 본문(5)."""
+    doc = HwpxDocument.new(**_고정)
+    ps = [doc.add_paragraph(""), doc.add_paragraph("(선택형 문항만 출제할 경우에는 아래 표 사용)"),
+          doc.add_paragraph(""), doc.add_paragraph(""), doc.add_paragraph(""), doc.add_paragraph("본문")]
+    for p, 글 in ((ps[0], "결재"), (ps[0], "유의 논술형 문제는"), (ps[2], "유의 선택형"), (ps[4], "글자체")):
+        p.add_table(1, 1).cell(0, 0).text = 글
+    return doc
+
+
+_규칙 = [{"table_with": "논술형 문제는"}, {"paragraph": 1, "with": "선택형 문항만"},
+        {"paragraph": 3, "with": ""}, {"paragraph": 4, "with": "글자체"}]
+
+
+def _drop_킷(tmp_path, 규칙):
+    d = json.loads((_합성 / "kit.json").read_text(encoding="utf-8"))
+    d["admin"].update(paragraph=1, drop=규칙)
+    return load_kit(_킷(tmp_path, admin=d["admin"]))
+
+
+def test_admin_drop은_고른_표와_문단만_걷는다(tmp_path):
+    doc = _두_벌_서식()
+    drop_form_parts(doc, _drop_킷(tmp_path, _규칙))
+    ps = list(doc.sections[0].paragraphs)
+    글 = lambda t: t.cell(0, 0).text
+    assert [[글(t) for t in p.tables] for p in ps[:2]] == [["결재"], ["유의 선택형"]]
+    assert ps[2].text == "본문" and len(ps) == 3  # 지운 것은 1·3·4번 문단
+
+
+def test_admin_drop_없으면_그대로(tmp_path):
+    doc = _두_벌_서식()
+    n = len(list(doc.sections[0].paragraphs))
+    drop_form_parts(doc, load_kit(_합성))
+    assert len(list(doc.sections[0].paragraphs)) == n
+
+
+@pytest.mark.parametrize("나쁜, 말", [
+    ([{"table_with": "유의"}], "2개"),                       # 표가 하나로 정해지지 않는다
+    ([{"paragraph": 1, "with": "논술형"}], "없다"),            # 문단 글이 다르다(양식이 바뀌었다)
+    ([{"paragraph": 2, "with": ""}], "빈 문단이 아니다"),        # 표가 있는 문단을 빈 줄로 적었다
+    ([{"cell": 1}], "table_with 또는 paragraph"),
+])
+def test_admin_drop_양식과_안_맞으면_멈춘다(tmp_path, 나쁜, 말):
+    with pytest.raises(ValueError, match=말):
+        drop_form_parts(_두_벌_서식(), _drop_킷(tmp_path, 나쁜))
+
+
+# ---- 양식 머리말·꼬리말의 잘못 든 글 고치기(admin.form_fix) ---------------------------------
+
+def _머리말_서식(머리="2학년 문항지`", 꼬리="- 1 -"):
+    doc = HwpxDocument.new(**_고정)
+    doc.add_paragraph("본문")
+    doc.page.set_header(text=머리)
+    doc.page.set_footer(text=꼬리)
+    return doc
+
+
+def _fix_킷(tmp_path, 규칙):
+    d = json.loads((_합성 / "kit.json").read_text(encoding="utf-8"))
+    d["admin"].update(form_fix=규칙)
+    return load_kit(_킷(tmp_path, admin=d["admin"]))
+
+
+def test_admin_form_fix는_머리말의_군더더기_글자를_지운다(tmp_path):
+    doc = _머리말_서식()
+    fix_form_text(doc, _fix_킷(tmp_path, [{"where": {"header_with": "문항지"}, "find": "`$", "fill": ""}]))
+    assert [p.text for h in doc.page.headers() for p in h.paragraphs] == ["2학년 문항지"]
+    assert [p.text for f in doc.page.footers() for p in f.paragraphs] == ["- 1 -"]  # 꼬리말은 그대로
+
+
+def test_admin_form_fix는_꼬리말도_고친다(tmp_path):
+    doc = _머리말_서식(꼬리="- 1 -  ")
+    fix_form_text(doc, _fix_킷(tmp_path, [{"where": {"footer_with": "- 1"}, "find": r"\s+$", "fill": ""}]))
+    assert [p.text for f in doc.page.footers() for p in f.paragraphs] == ["- 1 -"]
+
+
+def test_admin_form_fix_없으면_그대로(tmp_path):
+    doc = _머리말_서식()
+    fix_form_text(doc, load_kit(_합성))
+    assert [p.text for h in doc.page.headers() for p in h.paragraphs] == ["2학년 문항지`"]
+
+
+@pytest.mark.parametrize("나쁜, 말", [
+    ([{"where": {"header_with": "문항지"}, "find": "~$", "fill": ""}], "양식이 바뀌었다"),  # 학교가 이미 고쳤다
+    ([{"where": {"header_with": "답안지"}, "find": "`$", "fill": ""}], "양식이 바뀌었다"),  # 그런 머리말이 없다
+    ([{"where": {"notice": True}, "find": "`$"}], "header_with·footer_with"),              # 머리말·꼬리말 밖은 받지 않는다
+    ([{"where": {"header_with": "문항지"}}], "header_with·footer_with"),                    # find가 없다
+])
+def test_admin_form_fix_양식과_안_맞으면_멈춘다(tmp_path, 나쁜, 말):
+    with pytest.raises(ValueError, match=말):
+        fix_form_text(_머리말_서식(), _fix_킷(tmp_path, 나쁜))

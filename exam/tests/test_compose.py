@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from _helpers import 텍스트, 최상위_문단
+from _helpers import 본문_첫, 텍스트, 최상위_문단
 from _kits import kit_dir
 from exam_kit import q
 from exam_kit.compose import Samples, compose, harvest_samples
@@ -139,8 +139,8 @@ def test_샘플_구역이_사라진다(조판):
     assert not [w for w in kit.forbidden_text if w in text]  # (b)
     assert kit.boxes["보기"]["title"] not in text
     ps = 최상위_문단(doc)
-    assert not [t for p in ps[1:-1] for t in p.element.iter(q("hp", "tbl"))]  # 견본 표 잔존 0
-    assert len(ps) == 1 + 5 * 6 + 1
+    assert not [t for p in ps[본문_첫(kit):-1] for t in p.element.iter(q("hp", "tbl"))]  # 견본 표 잔존 0
+    assert len(ps) == 본문_첫(kit) + 5 * 6 + 1
 
 
 def test_형광펜_판본(조판):
@@ -884,7 +884,7 @@ def test_그림_생성기_폴백과_EXIF_회전(양식_hwpx, tmp_path, monkeypat
     assert pic.find(q("hp", "pos")).get("treatAsChar") == "1"
     w, h = int(pic.find(q("hp", "sz")).get("width")), int(pic.find(q("hp", "sz")).get("height"))
     assert (w, h) == (round(3 * 72000 / 25.4), round(3 * 72000 / 25.4 * 3))  # 세로로 선 모양
-    assert len(ps) == len(최상위_문단(doc)) and not [p for p in ps[1:-1] if 텍스트(p.element) == "" and
+    assert len(ps) == len(최상위_문단(doc)) and not [p for p in ps[본문_첫(kit):-1] if 텍스트(p.element) == "" and
                                                   p.element.find(f".//{q('hp', 'pic')}") is None
                                                   and p.element.find(f".//{q('hp', 'tbl')}") is None]  # 임시 문단 없음
     out = tmp_path / "사진.hwpx"
@@ -1272,7 +1272,7 @@ def test_코드_블록은_고정폭_왼쪽_정렬(양식_hwpx):
     kit, doc, prepared, res = _조판(양식_hwpx, md, answer_key=False)
     hdr = _헤더(doc)
     mono = mono_char_prs(doc)
-    body_ps = [x for p in 최상위_문단(doc)[1:-1] for x in tree(p)]  # 관리박스·꼬리(굴림체) 뺀 본문과 그 안 문단
+    body_ps = [x for p in 최상위_문단(doc)[본문_첫(kit):-1] for x in tree(p)]  # 관리박스·꼬리(굴림체) 뺀 본문과 그 안 문단
     code_ps = [p.element for p in body_ps if is_code(p, mono)]
     assert ["".join(p.itertext()) for p in code_ps] == ["합성값    3", "길이       12", "열A   0", "열B  17"]
     font = {f.get("id"): f.get("face") for ff in hdr.iter(q("hh", "fontface")) if ff.get("lang") == "HANGUL"
@@ -1287,7 +1287,7 @@ def test_코드_블록은_고정폭_왼쪽_정렬(양식_hwpx):
     assert not [t for t in targets(doc, kit) if "합성값" in t.text or "열A" in t.text]
     ps = list(최상위_문단(doc))
     heads = question_heads(doc)
-    body = reverse_body(ps[1:-1], {h - 1 for h in heads}, underlined_char_prs(doc), mono=mono, boxes=kit.boxes)
+    body = reverse_body(ps[본문_첫(kit):-1], {h - 본문_첫(kit) for h in heads}, underlined_char_prs(doc), mono=mono, boxes=kit.boxes)
     text = "\n".join(body)
     assert "```\n합성값    3\n길이       12\n```" in text and "```\n열A   0\n열B  17\n```" in text
 
@@ -1381,10 +1381,10 @@ def test_코드_블록_빈_줄은_빈_문단으로_남는다(양식_hwpx):
     md = (픽스처 / "기본_5문항.md").read_text(encoding="utf-8").split("## 1.")[0].replace("만점: 20", "만점: 4") + 빈줄_md
     kit, doc, prepared, res = _조판(양식_hwpx, md, answer_key=False)
     mono = mono_char_prs(doc)
-    body_ps = [x for p in 최상위_문단(doc)[1:-1] for x in tree(p)]
+    body_ps = [x for p in 최상위_문단(doc)[본문_첫(kit):-1] for x in tree(p)]
     assert ["".join(p.element.itertext()) for p in body_ps if is_code(p, mono)] == [
         "합성값    3", "", "길이       12", "열A   0", "", "열B  17"]
     finalize_form(doc, kit, prepared)
     ps = list(최상위_문단(doc))
-    text = "\n".join(reverse_body(ps[1:-1], {h - 1 for h in question_heads(doc)}, underlined_char_prs(doc), mono=mono, boxes=kit.boxes))
+    text = "\n".join(reverse_body(ps[본문_첫(kit):-1], {h - 본문_첫(kit) for h in question_heads(doc)}, underlined_char_prs(doc), mono=mono, boxes=kit.boxes))
     assert "```\n합성값    3\n\n길이       12\n```" in text and "```\n열A   0\n\n열B  17\n```" in text

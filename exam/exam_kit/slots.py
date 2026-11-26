@@ -12,7 +12,7 @@ from hwpx.errors import HwpxValueError
 
 from .frontmatter import FrontMatter
 from .kit import Kit, admin_tables
-from .read import t_text, table_paragraphs
+from .read import nested_raw, t_text, table_paragraphs
 
 _빨강 = "#FF0000"
 
@@ -122,7 +122,7 @@ def _fill_teacher(doc: HwpxDocument, kit: Kit, name: str) -> None:
 # ---- 글자 자리 슬롯 -------------------------------------------------------------
 
 def _slot_paragraphs(doc: HwpxDocument, kit: Kit, where: dict) -> list:
-    """슬롯 위치 → 문단(공개 Paragraph). admin_table_with+cell(+para) · notice · footer_with.
+    """슬롯 위치 → 문단(공개 Paragraph). admin_table_with+cell(+para) · notice · footer_with · header_with.
     표는 관리 구역(문단 0 ~ admin.paragraph)의 최상위 표에서 찾는다."""
     tables = admin_tables(doc, kit)
     if "admin_table_with" in where:
@@ -138,6 +138,10 @@ def _slot_paragraphs(doc: HwpxDocument, kit: Kit, where: dict) -> list:
         # 한/글이 읽는 꼬리말(컨트롤 안 이야기)만 — 6.x가 구역 설정 안에 남긴 사본은 한/글이 읽지 않는다(본체 문서).
         return [p for f in doc.page.footers() if where["footer_with"] in "".join(x.text for x in f.paragraphs)
                 for p in f.paragraphs]
+    if "header_with" in where:
+        # 머리말은 제목이 표 칸 안에 있기도 하다 — 표 칸 글까지 보고 고른다(바꾸는 곳은 머리말의 맨 위 문단)
+        return [p for h in doc.page.headers() if where["header_with"] in nested_raw(h.paragraphs)
+                for p in h.paragraphs]
     raise ValueError(f"글자 자리 슬롯 위치를 모른다: {where}")
 
 

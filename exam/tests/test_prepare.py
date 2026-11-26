@@ -34,21 +34,23 @@ def 준비(양식_hwpx):
 
 def test_관리박스_정리(준비, 양식_hwpx):
     kit, doc, prepared = 준비
-    p0 = 최상위_문단(doc)[0].element
-    t = 텍스트(p0)
+    관리 = 최상위_문단(doc)[:kit.admin["paragraph"] + 1]  # 11-25 새 양식: 결재표(문단 0)·선택형 유의 상자(문단 1)
+    t = "".join(텍스트(p.element) for p in 관리)
     assert "출제교사" in t and "교  장" in t and "인쇄된 문항지" in t
     assert not any(w in t for w in kit.guidance_text) and "논술형" not in t
-    유의 = next(x for x in _표(p0) if "인쇄된 문항지" in 텍스트(x))
-    assert 유의.find(q("hp", "sz")).get("height") == str(kit.notice_box_height)
-    assert all(tc.find(q("hp", "cellSz")).get("height") == str(kit.notice_box_height)
-               for tr in 유의.findall(q("hp", "tr")) for tc in tr.findall(q("hp", "tc")))
+    유의 = next(x for p in 관리 for x in _표(p.element) if "인쇄된 문항지" in 텍스트(x))
+    if kit.notice_box_height is not None:
+        assert 유의.find(q("hp", "sz")).get("height") == str(kit.notice_box_height)
+        assert all(tc.find(q("hp", "cellSz")).get("height") == str(kit.notice_box_height)
+                   for tr in 유의.findall(q("hp", "tr")) for tc in tr.findall(q("hp", "tc")))
     assert len(doc.fields.all) == 18
-    assert p0.find(q("hp", "linesegarray")) is None  # 규격표 높이를 기억하던 줄 캐시 제거(Task 22 렌더 실측)
+    assert all(p.element.find(q("hp", "linesegarray")) is None for p in 관리)  # 걷은 표 높이를 기억하던 줄 캐시 제거
     form = HwpxDocument.open(str(양식_hwpx))
-    for tag in ("header", "footer"):
-        a = doc.sections[0].element.find(f".//{q('hp', tag)}")
-        b = form.sections[0].element.find(f".//{q('hp', tag)}")
-        assert ET.tostring(a) == ET.tostring(b)
+    hf = lambda d, tag: [ET.tostring(x) for x in d.sections[0].element.iter(q("hp", tag))]
+    assert hf(doc, "footer") and all(x in hf(form, "footer") for x in hf(doc, "footer"))  # 고른 유의 상자의 꼬리말 그대로
+    # 머리말은 킷 admin.form_fix(양식 머리말 제목 뒤 백틱 한 글자)만 다르다
+    글 = lambda d: [텍스트(x) for x in d.sections[0].element.iter(q("hp", "header"))]
+    assert 글(doc) == [h[:-1] for h in 글(form) if h.endswith("`")]
 
 
 def test_본문은_샘플_구역만_남는다(준비):
